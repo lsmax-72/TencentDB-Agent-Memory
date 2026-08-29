@@ -12,7 +12,11 @@
 
 import type { ExtractMessage } from "./types.js";
 import type { SkillCore } from "./skill-core.js";
-import { createSkillTools, type ExtractedSkillCandidate } from "./skill-tools.js";
+import {
+  createSkillTools,
+  type ExtractedSkillCandidate,
+  type SkillToolsBackend,
+} from "./skill-tools.js";
 import type {
   ISkillExtractor,
   ConversationMessage,
@@ -51,6 +55,8 @@ export interface ExtractorRunner {
 
 export interface ExtractorOptions {
   core: SkillCore;
+  /** Opt-in review-tool backend. Omitted preserves direct SkillCore behavior. */
+  toolBackend?: SkillToolsBackend;
   runner?: ExtractorRunner;
   systemPrompt?: string;
   maxIterations?: number;
@@ -97,6 +103,7 @@ export interface ExtractResult {
 
 export class SkillExtractor {
   private readonly core: SkillCore;
+  private readonly toolBackend: SkillToolsBackend;
   private readonly runner?: ExtractorRunner;
   private readonly systemPrompt: string;
   private readonly maxIterations: number;
@@ -108,6 +115,7 @@ export class SkillExtractor {
 
   constructor(opts: ExtractorOptions) {
     this.core = opts.core;
+    this.toolBackend = opts.toolBackend ?? opts.core;
     this.runner = opts.runner;
     this.systemPrompt = opts.systemPrompt ?? "You are a Skill Review Agent. Use tools to look at existing skills, decide what to add/improve, and call skill_create / skill_update / skill_patch / skill_files_write to persist.";
     this.maxIterations = opts.maxIterations ?? 16;
@@ -221,7 +229,7 @@ export class SkillExtractor {
     }
 
     const tools = createSkillTools({
-      core: this.core,
+      core: this.toolBackend,
       user_id: input.user_id,
       team_id: input.team_id,
       agent_id: input.agent_id,

@@ -120,6 +120,15 @@ export {
 } from "./skill-extractor.js";
 
 export {
+  CandidateSkillWorkspace,
+  CandidateWorkspaceError,
+  type CandidateSkillWorkspaceOptions,
+  type CandidateWorkspaceErrorCode,
+} from "./candidate-skill-workspace.js";
+export type { CandidateArtifact } from "./candidate-types.js";
+export type { SkillToolsBackend } from "./skill-tools.js";
+
+export {
   createSkillTools,
   type ExtractedAction,
   type ExtractedSkillCandidate,

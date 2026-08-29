@@ -17,7 +17,18 @@
  */
 
 import { tool, jsonSchema } from "ai";
-import { SkillCoreError, type SkillCore } from "./skill-core.js";
+import { SkillCoreError } from "./skill-core.js";
+import type {
+  CreateInput,
+  GetInput,
+  ListInput,
+  PatchInput,
+  SearchInput,
+  UpdateInput,
+  WriteFilesInput,
+} from "./skill-core.js";
+import type { Skill } from "./types.js";
+import type { SkillSearchResult } from "./skill-store.interface.js";
 
 export type ExtractedAction =
   | "create"
@@ -33,8 +44,20 @@ export interface ExtractedSkillCandidate {
   description?: string;
 }
 
+/** Narrow persistence boundary used by the review-agent tool contract. */
+export interface SkillToolsBackend {
+  list(input: ListInput): Promise<{ items: Skill[]; total: number }>;
+  search(input: SearchInput): Promise<SkillSearchResult[]>;
+  get(input: GetInput): Promise<Skill>;
+  create(input: CreateInput): Promise<Skill>;
+  update(input: UpdateInput): Promise<Skill>;
+  patch(input: PatchInput): Promise<Skill>;
+  writeFiles(input: WriteFilesInput): Promise<Skill>;
+}
+
 export interface CreateSkillToolsOptions {
-  core: SkillCore;
+  /** Defaults to SkillCore in production; Evolution may opt into an isolated backend. */
+  core: SkillToolsBackend;
   /** 调用方身份（owner 校验依据）。 */
   user_id: string;
   team_id: string;
@@ -47,6 +70,10 @@ export interface CreateSkillToolsOptions {
 function jsonError(e: unknown): string {
   if (e instanceof SkillCoreError) {
     return JSON.stringify({ error: e.code, message: e.message });
+  }
+  const code = (e as { code?: unknown } | null)?.code;
+  if (typeof code === "string") {
+    return JSON.stringify({ error: code, message: (e as Error).message });
   }
   return JSON.stringify({ error: "INTERNAL", message: (e as Error).message });
 }

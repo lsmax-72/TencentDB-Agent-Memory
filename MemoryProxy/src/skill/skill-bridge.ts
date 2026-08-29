@@ -18,6 +18,7 @@
  */
 
 import type { Context } from "hono";
+import { isEvaluationSession } from "../injection/injectors/evaluation-skill-override.js";
 import type { Redis } from "ioredis";
 import { getSessionStore } from "../session/store.js";
 import type { BindingRepo } from "../db/binding-repo.js";
@@ -524,6 +525,15 @@ export function createSkillBridgeHandler(
         executedEndpoint: sub, spaceId,
       });
       return envelope(40101, `${TAG} session not initialized; cannot derive identity`, 401);
+    }
+    if (isEvaluationSession(sessionKey)) {
+      emitBridgeRejectTelemetry({
+        sessionKey, bridgeSource: "skill-bridge",
+        rejectReason: "evaluation_skill_bridge_disabled", httpStatus: 403,
+        executedEndpoint: sub, spaceId: ids.space_id, userId: ids.user_id,
+        teamId: ids.team_id, agentId: ids.agent_id, agentSource: ids.agent_source,
+      });
+      return envelope(40303, `${TAG} skill bridge is disabled during evaluation`, 403);
     }
     // backing.redis 之前给老链路 SkillExtractTrigger 用, 老链路已删,
     // 本函数体内不再直接使用 redis; backing 结构上保留是因为 pinRepo

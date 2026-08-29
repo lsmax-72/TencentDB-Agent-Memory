@@ -25,6 +25,9 @@ import {
 import type { HookCacheRepo } from "../db/hookCacheRepo.js";
 import type { InjectionObserver, HookResult } from "./observer.js";
 import { NoopInjectionObserver } from "./observer.js";
+import { shouldSuppressHookInEvaluation } from "./evaluation-context.js";
+import { evaluationSkillSessions } from "./injectors/evaluation-skill-override.js";
+import { EVALUATION_CONTEXT_POLICY } from "./evaluation-context.js";
 
 /** Optional pipeline behaviors (agent detection, etc.). */
 export interface InjectionPipelineOptions {
@@ -175,6 +178,12 @@ export class InjectionPipeline {
     ];
 
     const sessionId = this.getSessionId(ctx);
+    if (sessionId && evaluationSkillSessions.has(sessionId)) {
+      ctx.metadata.custom = {
+        ...(ctx.metadata.custom ?? {}),
+        evaluationPolicy: EVALUATION_CONTEXT_POLICY,
+      };
+    }
     // Hook cache 隔离键 —— userId 从 metadata 里取（handler 层已透传）；
     // 缺省时 fallback 到 "anonymous"（与 handler 层一致，防止未鉴权请求撞
     // 到已鉴权用户的缓存）。agentSource 由 URL path 派生，缺省 "claude-code"。
@@ -194,7 +203,11 @@ export class InjectionPipeline {
         safeCall(() => this.observer.onHookStart(hook, point));
 
         try {
-          const blocks = await this.resolveHookBlocks(hook, ctx, spaceId, userId, agentSource, sessionId);
+          // Evaluation sessions use one explicit, read-only Skill override and
+          // must not consume normal Skill/Memory hooks or their session caches.
+          const blocks = shouldSuppressHookInEvaluation(ctx, hook.id)
+            ? []
+            : await this.resolveHookBlocks(hook, ctx, spaceId, userId, agentSource, sessionId);
           const durationMs = Date.now() - hookStartMs;
 
           if (blocks.length > 0) {

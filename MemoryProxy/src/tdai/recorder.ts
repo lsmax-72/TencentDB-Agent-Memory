@@ -1,6 +1,7 @@
 import type { TdaiClient } from "./client.js";
 import type { TdaiIdentity, TdaiMessage } from "./types.js";
 import { extractUserQueryText } from "../common/user-query-extractor.js";
+import { isEvaluationSession } from "../injection/injectors/evaluation-skill-override.js";
 
 /**
  * 从最后一条 user 消息中抽取「真正的用户提问」，写入 L0。
@@ -31,6 +32,7 @@ export function extractLatestUserMessage(messages: unknown[]): TdaiMessage | nul
 
 export async function recordTdaiTurn(client: TdaiClient, identity: TdaiIdentity | null, userMessage: TdaiMessage | null, assistantContent: string | null | undefined): Promise<void> {
   if (!identity || !userMessage) return;
+  if (isEvaluationSession(identity.sessionId)) return;
   const messages: TdaiMessage[] = [userMessage];
   if (assistantContent?.trim()) {
     messages.push({ role: "assistant", content: assistantContent });

@@ -34,6 +34,7 @@ import {
   isFinalAnswer,
   normalizeConversation,
 } from "./normalize-conversation.js";
+import { isEvaluationSession } from "../injection/injectors/evaluation-skill-override.js";
 
 /** loose message shape 供本模块内部用 */
 interface IncomingMsg {
@@ -73,6 +74,7 @@ export interface TriggerInput {
 export async function triggerSkillExtractIfReady(input: TriggerInput): Promise<void> {
   try {
     const { config, sessionKey, sessionInfo, inputMessages, assistantMessage } = input;
+    if (isEvaluationSession(sessionKey)) return;
     if (input.assetCapabilities?.skill === false) return;
     if (!sessionKey || !sessionInfo) return;
 

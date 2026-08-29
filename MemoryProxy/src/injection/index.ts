@@ -73,6 +73,21 @@ export { AnthropicAdapter } from "./adapters/anthropic.js";
 // Injectors
 export { SkillInjector } from "./injectors/skill-injector.js";
 export { SkillToolsInjector } from "./injectors/skill-tools-injector.js";
+export {
+  EvaluationSkillOverride,
+  EvaluationSkillSessionRegistry,
+  evaluationSkillSessions,
+  isEvaluationSession,
+  evaluationMetadata,
+  renderEvaluationSkill,
+  type EvaluationOverrideArtifact,
+} from "./injectors/evaluation-skill-override.js";
+export {
+  EVALUATION_CONTEXT_POLICY,
+  isEvaluationContext,
+  shouldSuppressHookInEvaluation,
+  type EvaluationContextPolicy,
+} from "./evaluation-context.js";
 export { TdaiL1RecallInjector } from "./injectors/tdai-l1-recall-injector.js";
 export { TdaiProfileMemoryInjector } from "./injectors/tdai-profile-memory-injector.js";
 export { TdaiToolsInjector } from "./injectors/tdai-tools-injector.js";
@@ -108,6 +123,10 @@ import { OpenAIAdapter } from "./adapters/openai.js";
 import { AnthropicAdapter } from "./adapters/anthropic.js";
 import { SkillInjector } from "./injectors/skill-injector.js";
 import { SkillToolsInjector } from "./injectors/skill-tools-injector.js";
+import {
+  EvaluationSkillOverride,
+  evaluationSkillSessions,
+} from "./injectors/evaluation-skill-override.js";
 import { TdaiProfileMemoryInjector } from "./injectors/tdai-profile-memory-injector.js";
 import { TdaiToolsInjector } from "./injectors/tdai-tools-injector.js";
 import { KnowledgeToolsInjector } from "./injectors/knowledge-tools-injector.js";
@@ -249,6 +268,9 @@ function buildPipelineBundle(config: ProxyConfig): PipelineBundle {
   const adapters = new Map<string, ProtocolAdapter>();
   adapters.set("openai", new OpenAIAdapter());
   adapters.set("anthropic", new AnthropicAdapter());
+
+  // Inert for normal sessions; evaluation adapters opt in by binding a unique session.
+  registry.register(new EvaluationSkillOverride(evaluationSkillSessions));
 
   // Register configured injectors. Each injector reads its own kernel config
   // (`coreSkill`, `tdai`, ...); there is no shared external endpoint anymore.
