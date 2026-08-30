@@ -25,7 +25,7 @@ import {
 import type { HookCacheRepo } from "../db/hookCacheRepo.js";
 import type { InjectionObserver, HookResult } from "./observer.js";
 import { NoopInjectionObserver } from "./observer.js";
-import { shouldSuppressHookInEvaluation } from "./evaluation-context.js";
+import { isEvaluationContext, shouldSuppressHookInEvaluation } from "./evaluation-context.js";
 import { evaluationSkillSessions } from "./injectors/evaluation-skill-override.js";
 import { EVALUATION_CONTEXT_POLICY } from "./evaluation-context.js";
 
@@ -216,7 +216,8 @@ export class InjectionPipeline {
               `[injection] ✓ Hook "${hook.id}" successfully injected ${blocks.length} block(s) ` +
               `at point "${point}" (cacheStrategy=${hook.cacheStrategy ?? "none"})`
             );
-            for (const b of blocks) {
+            // Evaluation content is transient input, never a raw log preview.
+            for (const b of isEvaluationContext(ctx) ? [] : blocks) {
               if (b.type === "text") {
                 const preview = b.content.replace(/\s+/g, " ").slice(0, 120);
                 console.log(`[injection]   → text preview: "${preview}..."`);

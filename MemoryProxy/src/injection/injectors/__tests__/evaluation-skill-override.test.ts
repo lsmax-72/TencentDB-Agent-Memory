@@ -3,6 +3,10 @@ import { shouldSuppressHookInEvaluation } from "../../evaluation-context.js";
 import type { AgentContext, AgentContextMetadata } from "../../types.js";
 import type { ProtocolAdapter } from "../../adapters/interface.js";
 import { recordTdaiTurn } from "../../../tdai/recorder.js";
+import { InjectionPipeline } from "../../pipeline.js";
+import { HookRegistryImpl } from "../../registry.js";
+// This unit test exercises injection/logging, not optional telemetry exporters.
+vi.mock("../../observer.js", () => ({ NoopInjectionObserver: class {} }));
 import {
   EvaluationSkillOverride,
   EvaluationSkillSessionRegistry,
@@ -43,6 +47,25 @@ function adapter(): ProtocolAdapter {
 }
 
 describe("EvaluationSkillOverride", () => {
+  it("injects evaluation content without writing it to console previews", async () => {
+    const sessions = new EvaluationSkillSessionRegistry();
+    sessions.bind("preview-session", {
+      skill_id: "skl-a", base_version: 3, content: "candidate",
+      content_hash: CANDIDATE_CONTENT_HASH, artifact_hash: "sha256:candidate", read_only: true,
+    });
+    const registry = new HookRegistryImpl();
+    registry.register(new EvaluationSkillOverride(sessions));
+    const pipeline = new InjectionPipeline(registry, new Map([["openai", adapter()]]));
+    const logged = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const output = await pipeline.process({}, metadata("preview-session"));
+      expect(output.system).toContain("candidate");
+      expect(logged.mock.calls.flat().join(" ")).not.toContain("candidate");
+      expect(logged.mock.calls.flat().join(" ")).not.toContain("text preview");
+    } finally {
+      logged.mockRestore();
+    }
+  });
   it("uses a neutral uncached template for both arms", () => {
     const sessions = new EvaluationSkillSessionRegistry();
     const hook = new EvaluationSkillOverride(sessions);

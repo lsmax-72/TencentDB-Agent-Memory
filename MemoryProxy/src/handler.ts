@@ -3,6 +3,8 @@
 import type { Context } from "hono";
 import { createHash } from "node:crypto";
 import { writeLog, createPipeline } from "./logger.js";
+import { isEvaluationSession } from "./injection/injectors/evaluation-skill-override.js";
+import { resolveConversationId } from "./session/session-key.js";
 import {
   apiKeyToKeyId,
   extractBearerToken,
@@ -310,7 +312,7 @@ async function forwardWithRetry(
   // ── Optional full-body dump (dev only) ───────────────────────────────
   // 打开: PROXY_DEBUG_DUMP_BODY=/tmp/proxy-outbound
   // 每次 forward 落一个文件,方便排查上游 400。
-  if (process.env.PROXY_DEBUG_DUMP_BODY) {
+  if (process.env.PROXY_DEBUG_DUMP_BODY && !isEvaluationSession(sessionKeyForDebug)) {
     try {
       const fs = await import("node:fs");
       const dir = process.env.PROXY_DEBUG_DUMP_BODY;
@@ -619,7 +621,7 @@ export async function handleChatCompletions(
   const isStream = body.stream === true;
 
   // [debug] Log last 3 message roles and content types to diagnose session-init issues
-  if (config.sessionInit?.enabled && messages.length > 2) {
+  if (config.sessionInit?.enabled && messages.length > 2 && !isEvaluationSession(resolveConversationId(c) ?? undefined)) {
     const tail = messages.slice(-3);
     const summary = tail.map((m: any, idx: number) => {
       const role = m.role;
@@ -659,7 +661,6 @@ export async function handleChatCompletions(
   }
 
   // ── Session key: prefer conversation header, fallback to agent profile ───────────
-  const { resolveConversationId } = await import("./session/session-key.js");
   const conversationId = resolveConversationId(c);
   const sessionKey = conversationId ?? resolveSessionKey(config, lcHeaders, c.req.path, body, keyId);
 
