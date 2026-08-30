@@ -48,6 +48,8 @@ export interface AgentRunOutput {
   tool_calls: ToolCallSummary[];
   output_evidence: EvidenceRef[];
   trace_refs: TraceRef[];
+  /** Adapter-level business stop with usable telemetry/evidence (for example timeout). */
+  task_failure?: { code: TaskFailureCode; evidence_refs: EvidenceRef[] };
 }
 
 export interface AgentAdapter {
@@ -279,20 +281,28 @@ export class MinimalEvaluationRunner {
       const oracleError = oracleResults.some((result) => result.status === "ERROR");
       const oracleFailure = oracleResults.some((result) => result.status === "FAIL");
       const budgetFailure = exceedsBudget(output.usage, runSpec);
+      const adapterTaskFailure = output.task_failure;
       const status: RunStatus = oracleError
         ? "INFRA_ERROR"
-        : oracleFailure || budgetFailure
+        : oracleFailure || budgetFailure || adapterTaskFailure
           ? "TASK_FAIL"
           : "TASK_PASS";
       const evidence = oracleResults.flatMap((result) => result.evidence_refs);
       let failure: RunFailure | undefined;
       if (oracleError) {
         failure = { kind: "INFRA", codes: ["ORACLE_EXECUTION_ERROR"], evidence_refs: evidence };
-      } else if (oracleFailure || budgetFailure) {
+      } else if (oracleFailure || budgetFailure || adapterTaskFailure) {
         const codes: TaskFailureCode[] = [];
         if (oracleFailure) codes.push("ORACLE_ASSERTION_FAILED");
         if (budgetFailure) codes.push("BUDGET_EXHAUSTED");
-        failure = { kind: "TASK", codes, evidence_refs: evidence };
+        if (adapterTaskFailure && !codes.includes(adapterTaskFailure.code)) {
+          codes.push(adapterTaskFailure.code);
+        }
+        failure = {
+          kind: "TASK",
+          codes,
+          evidence_refs: [...evidence, ...(adapterTaskFailure?.evidence_refs ?? [])],
+        };
       }
 
       return {
