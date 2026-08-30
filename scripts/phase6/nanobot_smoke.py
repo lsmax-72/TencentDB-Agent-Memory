@@ -51,7 +51,7 @@ async def main():
         'agents':{'defaults':{'provider':'vllm','model':'qwen3.8-27b','temperature':0,
             'maxTokens':4096,'maxToolIterations':6,'fallbackModels':[],
             'idleCompactAfterMinutes':0,'dream':{'enabled':False}}},
-        'providers':{'vllm':{'apiBase':'http://127.0.0.1:18096/proxy/'+settings['instance']+'/v1',
+        'providers':{'vllm':{'apiBase':'http://127.0.0.1:'+str(settings.get('infrastructure',{}).get('proxyPort',18096))+'/proxy/'+settings['instance']+'/v1',
             'apiKey':settings['user_key'],'extraHeaders':{
                 'x-tdai-user-key':settings['user_key'],'x-session-id':run['session_id'],
                 'x-team-id':run['team_id'],'x-agent-id':run['agent_id'],'x-task-id':run['task_id']}}},

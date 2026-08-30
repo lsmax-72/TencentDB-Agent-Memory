@@ -9,11 +9,13 @@ const repo=resolve(import.meta.dirname,'../..');
 const dir=resolve(root,'typecheck');
 mkdirSync(dir);
 const image=JSON.parse(readFileSync(resolve(root,'preflight.json'))).images.proxy;
-const changed=['handler.ts','injection/pipeline.ts'];
+const baselineRef=JSON.parse(readFileSync(resolve(root,'preflight.json'))).git;
+const changed=['auth.ts','config.ts','types.ts','__tests__/auth.test.ts'];
 const mounts=[];
 for(const [i,path] of changed.entries()) {
   // Mechanical baseline materialization: current working tree is never changed.
-  const baseline=execFileSync('git',['show',`HEAD:MemoryProxy/src/${path}`],{cwd:repo});
+  const exists=spawnSync('git',['cat-file','-e',`${baselineRef}:MemoryProxy/src/${path}`],{cwd:repo}).status===0;
+  const baseline=exists?execFileSync('git',['show',`${baselineRef}:MemoryProxy/src/${path}`],{cwd:repo}):Buffer.from('export {};\n');
   const file=resolve(dir,`baseline-${i}.ts`);writeFileSync(file,baseline,{flag:'wx'});
   mounts.push('-v',`${file}:/app/src/${path}:ro`);
 }

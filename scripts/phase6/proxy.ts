@@ -14,10 +14,13 @@ const settings = JSON.parse(readFileSync('/acceptance/private/settings.json', 'u
 const config = structuredClone(DEFAULT_CONFIG);
 config.upstream.url = settings.upstream + '/chat/completions';
 config.upstream.apiKey = settings.upstream_key;
-config.auth = {enabled:true,url:'http://phase6-core:8420',timeoutMs:10000};
-config.tdai = {...config.tdai,enabled:true,endpoint:config.auth.url,apiKey:'',serviceId:settings.instance,
+const coreName = settings.infrastructure?.core ?? 'phase6-core';
+const gatewayKey = settings.gateway_key ?? '';
+if (settings.security_profile === 'gateway-bearer-v1' && !gatewayKey) throw new Error('Secure acceptance requires a gateway key');
+config.auth = {enabled:true,url:`http://${coreName}:8420`,apiKey:gatewayKey,timeoutMs:10000};
+config.tdai = {...config.tdai,enabled:true,endpoint:config.auth.url,apiKey:gatewayKey,serviceId:settings.instance,
   memory:{...config.tdai.memory,enabled:true,writeL0:true,timeoutMs:10000}};
-config.coreSkill = {...config.coreSkill,endpoint:config.auth.url,serviceToken:'',serviceId:settings.instance};
+config.coreSkill = {...config.coreSkill,endpoint:config.auth.url,serviceToken:gatewayKey,serviceId:settings.instance};
 config.sessionInit.enabled = true;
 config.injection = {...config.injection,enabled:true,injectors:['tdai-memory'],assetReflection:{markerOptIn:false}};
 config.extraction = {enabled:true,extractors:['tdai-memory']};
@@ -27,7 +30,8 @@ config.log = {...config.log,file:'',level:'info',verbose:false};
 const evaluation = settings.runs.find((r: any) => r.mode === 'evaluation');
 const content = settings.evaluation_skill;
 const digest = `sha256:${createHash('sha256').update(content).digest('hex')}` as const;
-evaluationSkillSessions.bind(evaluation.session_id, {
+// Fault injection is confined to this acceptance-only process, never the host SDK.
+if (process.env.PHASE6_SKIP_EVALUATION_BINDING !== '1') evaluationSkillSessions.bind(evaluation.session_id, {
   skill_id:'phase6-isolation-canary',base_version:1,content,
   content_hash:digest,artifact_hash:digest,read_only:true,
 });
@@ -56,7 +60,7 @@ globalThis.fetch = async (input: any, init?: RequestInit) => {
     const result = await response.clone().json() as any;
     appendFileSync('/acceptance/proxy-events.jsonl', JSON.stringify({
       kind:'response',call_id:callId,session_id:event.session_id,status:response.status,
-      usage:result.usage,output_hash:createHash('sha256').update(JSON.stringify(result)).digest('hex'),
+      model:result.model,usage:result.usage,output_hash:createHash('sha256').update(JSON.stringify(result)).digest('hex'),
     })+'\n');
     return response;
   }
@@ -68,7 +72,7 @@ const app = createApp(config);
 serve({hostname:'0.0.0.0',port:8096,fetch:request => {
   const path = new URL(request.url).pathname;
   if (path === '/health' && request.method === 'GET') return app.fetch(request);
-  if (request.method !== 'POST' || !admitted(path,request.headers,settings)) {
+  if (request.method !== 'POST' || !admitted(path,request.headers,settings,id=>evaluationSkillSessions.has(id))) {
     return Response.json({error:'acceptance_scope_denied'},{status:403});
   }
   return sessions.run(request.headers.get('x-session-id')!, () => app.fetch(request));

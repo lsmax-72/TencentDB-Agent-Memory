@@ -36,11 +36,8 @@ export function initAuth(cfg: AuthConfig): void {
     config = null;
     return;
   }
-  if (!cfg.url) {
-    log.warn("auth.init.skipped", { reason: "empty url" });
-    config = null;
-    return;
-  }
+  // Explicit auth must fail startup, not silently turn into passthrough.
+  if (!cfg.url.trim()) throw new Error("auth.url is required when auth is enabled");
   config = cfg;
   log.info("auth.init", { url: cfg.url });
 }
@@ -78,6 +75,7 @@ export async function verifyUserKey(userKey: string, serviceId: string): Promise
       headers: {
         "content-type": "application/json",
         "x-tdai-service-id": serviceId,
+        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
       },
       body: JSON.stringify({ user_key: userKey }),
     };

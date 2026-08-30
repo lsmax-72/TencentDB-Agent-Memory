@@ -31,7 +31,7 @@ export function observation(run, sessionId) {
   };
 }
 
-export function admitted(path, headers, settings) {
+export function admitted(path, headers, settings, hasEvaluationBinding = () => false) {
   if (path !== `/proxy/${settings.instance}/v1/chat/completions`) return false;
   // Proxy resolves x-conversation-id before x-session-id. Reject ambiguous
   // aliases so a caller cannot accidentally leave the trusted evaluation session.
@@ -39,6 +39,9 @@ export function admitted(path, headers, settings) {
     if (headers.has(alias) && headers.get(alias) !== headers.get('x-session-id')) return false;
   }
   const identity = settings.runs.find(r => r.session_id === headers.get('x-session-id'));
+  // The trusted local run declaration survives a registry loss. An evaluation
+  // request must never fall back to the ordinary capture/recall path.
+  if (identity?.mode === 'evaluation' && !hasEvaluationBinding(identity.session_id)) return false;
   return !!identity && headers.get('x-tdai-user-key') === settings.user_key
     && headers.get('x-team-id') === identity.team_id
     && headers.get('x-agent-id') === identity.agent_id

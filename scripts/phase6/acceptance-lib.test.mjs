@@ -31,3 +31,18 @@ test('test gateway fails closed for namespace/session/identity mismatches', () =
   h.set('x-conversation-id','other');
   assert.equal(admitted('/proxy/test-only/v1/chat/completions',h,settings),false);
 });
+
+test('evaluation admission fails closed after lost binding; normal is unchanged', () => {
+  const settings = {instance:'test',user_key:'key',runs:[{mode:'evaluation',session_id:'e',team_id:'t',agent_id:'a',task_id:'k'}]};
+  const headers = new Headers({'x-session-id':'e','x-team-id':'t','x-agent-id':'a','x-task-id':'k','x-tdai-user-key':'key'});
+  const bound = new Set(['e']);
+  const check = () => admitted('/proxy/test/v1/chat/completions',headers,settings,id=>bound.has(id));
+  assert.equal(check(),true);
+  bound.clear();
+  assert.equal(check(),false);
+  assert.equal(admitted('/proxy/test/v1/chat/completions',headers,settings),false);
+  bound.add('e');
+  assert.equal(check(),true);
+  settings.runs[0].mode='normal';
+  assert.equal(admitted('/proxy/test/v1/chat/completions',headers,settings),true);
+});

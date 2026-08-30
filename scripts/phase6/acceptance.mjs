@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, readdirSync } from 'node:fs';
+import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { hash, observation } from './acceptance-lib.mjs';
@@ -9,7 +9,7 @@ import { hash, observation } from './acceptance-lib.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here,'../..');
 const [stage, rootArg] = process.argv.slice(2);
-if (!['setup','storage','services','normal','evaluation','audit','hub-check'].includes(stage) || !rootArg) {
+if (!['setup','storage','services','security','restart','normal','evaluation','audit','hub-check'].includes(stage) || !rootArg) {
   throw new Error('Usage: node scripts/phase6/acceptance.mjs <stage> <NEW absolute output dir>');
 }
 const root = resolve(rootArg);
@@ -18,10 +18,21 @@ const docker = (...args) => execFileSync('docker',args,{encoding:'utf8',maxBuffe
 const read = p => JSON.parse(readFileSync(resolve(root,p),'utf8'));
 const save = (p,v) => writeFileSync(resolve(root,p),JSON.stringify(v,null,2)+'\n',{flag:'wx',mode:0o600});
 const settings = stage === 'setup' ? {} : read('private/settings.json');
+const secure = stage === 'setup' ? process.argv[4] === '--secure' : !!settings.gateway_key;
+const tag = basename(root);
+assert(/^[a-z0-9-]+$/.test(tag),'Output basename must be a safe test identifier');
+const infra = settings.infrastructure ?? (secure ? {
+  core:tag+'-core',proxy:tag+'-proxy',hub:tag+'-hub',network:tag,
+  corePort:19420,proxyPort:19096,hubPort:19125,knowledgePort:19424,
+} : {core:'phase6-core',proxy:'phase6-proxy',hub:'phase6-hub',network:'phase6-acceptance',
+  corePort:18420,proxyPort:18096,hubPort:18125,knowledgePort:18424});
+const coreUrl = `http://127.0.0.1:${infra.corePort}`;
+const proxyUrl = `http://127.0.0.1:${infra.proxyPort}`;
+const hubUrl = `http://127.0.0.1:${infra.hubPort}`;
 const persistSettings = () => writeFileSync(resolve(root,'private/settings.json'),JSON.stringify(settings,null,2),{mode:0o600});
 async function api(path, body={}, hub=false) {
-  const response = await fetch((hub?'http://127.0.0.1:18125/api/v1':'http://127.0.0.1:18420')+path,{
-    method:'POST',headers:{'content-type':'application/json','Authorization':'Bearer isolated-local-only','x-tdai-service-id':settings.instance,
+  const response = await fetch((hub?hubUrl+'/api/v1':coreUrl)+path,{
+    method:'POST',headers:{'content-type':'application/json','Authorization':`Bearer ${settings.gateway_key || 'isolated-local-only'}`,'x-tdai-service-id':settings.instance,
       'x-tdai-user-key':settings.user_key},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
   const value = await response.json();
   if (!response.ok || value.code !== 0) throw new Error(`${path}: HTTP ${response.status} ${JSON.stringify(value)}`);
@@ -44,12 +55,20 @@ function snapshot(container) {
     walk('/data/tdai-memory');process.stdout.write(JSON.stringify(out));`));
 }
 function identity(run) {return {team_id:run.team_id,agent_id:run.agent_id,user_id:settings.user_id,task_id:run.task_id,session_id:run.session_id};}
+function runtimeHashes(base) {
+  const out={};
+  function walk(dir) { for(const entry of readdirSync(resolve(base,dir),{withFileTypes:true})) {
+    const p=dir+'/'+entry.name;
+    if(entry.isDirectory()) walk(p); else if(entry.isFile()) out[p]=hash(readFileSync(resolve(base,p)));
+  }}
+  walk('src');walk('phase6');return out;
+}
 
 if (stage === 'setup') {
   assert(!existsSync(root),'Never overwrite an attempt');
   const models = await (await fetch('http://10.195.214.152:8100/v1/models',{signal:AbortSignal.timeout(8000)})).json();
   assert(models.data.some(m=>m.id==='qwen3.8-27b'));
-  for (const name of ['phase6-core','phase6-proxy','phase6-hub']) {
+  for (const name of [infra.core,infra.proxy,infra.hub]) {
     assert(!docker('ps','-a','--filter',`name=^${name}$`,'--format','{{.Names}}'),`${name} exists: retain it, choose consciously`);
   }
   mkdirSync(root,{mode:0o700});
@@ -61,24 +80,25 @@ if (stage === 'setup') {
     git:execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(),
     production_core_snapshot:snapshot('tdai-memory-core')});
   const localConfig = JSON.parse(readFileSync('/Users/lsmax/.nanobot/config.json','utf8'));
-  Object.assign(settings,{instance:'phase6-acceptance',user_key:'sk-mem-'+randomBytes(24).toString('hex'),
+  Object.assign(settings,{instance:secure?tag:'phase6-acceptance',infrastructure:infra,security_profile:secure?'gateway-bearer-v1':'legacy-local',
+    gateway_key:secure?randomBytes(32).toString('hex'):'',user_key:'sk-mem-'+randomBytes(24).toString('hex'),
     upstream:'http://10.195.214.152:8100/v1',upstream_key:localConfig.providers?.vllm?.apiKey || '',
     evaluation_skill:'Use the provided local tools, preserve the input and stop after completing the requested copy.\nISOLATION_SKILL_'+randomBytes(16).toString('hex'),runs:[]});
   persistSettings();
-  const coreConfig = {deployMode:'standalone',stateBackend:'local',server:{port:8420,host:'0.0.0.0'},
+  const coreConfig = {deployMode:'standalone',stateBackend:'local',server:{port:8420,host:'0.0.0.0',apiKey:settings.gateway_key},
     data:{baseDir:'/data/tdai-memory'},llm:{baseUrl:'',apiKey:'',model:''},
     memory:{storeBackend:'sqlite',embedding:{provider:'none'},capture:{enabled:true},extraction:{enabled:false},
       pipeline:{enableWarmup:false,everyNConversations:1000000,l1IdleTimeoutSeconds:86400}},
     skill:{enabled:false,extraction:{enabled:false}}};
   save('private/core.yaml',coreConfig); // JSON is valid YAML.
-  if (!docker('network','ls','--filter','name=^phase6-acceptance$','--format','{{.Name}}')) {
-    docker('network','create','phase6-acceptance');
+  if (!docker('network','ls','--filter',`name=^${infra.network}$`,'--format','{{.Name}}')) {
+    docker('network','create',infra.network);
   }
-  docker('run','-d','--name','phase6-core','--network','phase6-acceptance',
-    '-p','127.0.0.1:18420:8420','-v',`${root}/core-data:/data/tdai-memory`,
+  docker('run','-d','--name',infra.core,'--network',infra.network,
+    '-p',`127.0.0.1:${infra.corePort}:8420`,'-v',`${root}/core-data:/data/tdai-memory`,
     '-v',`${root}/private/core.yaml:/data/config/tdai-gateway.yaml:ro`,
     '-e','TDAI_GATEWAY_API_KEY=','-e','TDAI_DATA_DIR=/data/tdai-memory',images.core);
-  await ready('http://127.0.0.1:18420/health');
+  await ready(coreUrl+'/health');
   const admin = await api('/v3/internal/meta/user/init-admin',{username:'phase6-test-admin',user_key:settings.user_key});
   settings.user_id = admin.user_id ?? admin.user?.user_id;
   assert(settings.user_id,'Missing admin identity');persistSettings();
@@ -136,28 +156,126 @@ if (stage === 'storage') {
 
 if (stage === 'services') {
   const {images} = read('preflight.json');
-  docker('run','-d','--name','phase6-proxy','--network','phase6-acceptance',
-    '-p','127.0.0.1:18096:8096','-v',`${repo}/MemoryProxy/src:/app/src:ro`,
-    '-v',`${here}:/app/phase6:ro`,'-v',`${root}:/acceptance`,
+  // Materialize immutable runtime evidence; later working-tree changes cannot
+  // silently alter a running attempt or its restart behavior.
+  mkdirSync(resolve(root,'runtime'),{mode:0o700});
+  cpSync(resolve(repo,'MemoryProxy/src'),resolve(root,'runtime/src'),{recursive:true,errorOnExist:true,force:false});
+  cpSync(here,resolve(root,'runtime/phase6'),{recursive:true,errorOnExist:true,force:false});
+  save('runtime-freeze.json',{files:runtimeHashes(resolve(root,'runtime'))});
+  docker('run','-d','--name',infra.proxy,'--network',infra.network,
+    '-p',`127.0.0.1:${infra.proxyPort}:8096`,'-v',`${root}/runtime/src:/app/src:ro`,
+    '-v',`${root}/runtime/phase6:/app/phase6:ro`,'-v',`${root}:/acceptance`,
     '--entrypoint','node',images.proxy,'--import','tsx/esm','/app/phase6/proxy.ts');
-  await ready('http://127.0.0.1:18096/health');
+  await ready(proxyUrl+'/health');
   save('private/metadata-instances.json',{instances:[{id:settings.instance,name:'Phase 6 / TEST ONLY',
-    gateway_endpoint:'http://phase6-core:8420',proxy_endpoint:'http://127.0.0.1:18096',api_key:'isolated-local-only'}]});
-  docker('run','-d','--name','phase6-hub','--network','phase6-acceptance',
-    '-p','127.0.0.1:18125:8125','-p','127.0.0.1:18424:8424',
+    gateway_endpoint:`http://${infra.core}:8420`,proxy_endpoint:proxyUrl,api_key:settings.gateway_key || 'isolated-local-only'}]});
+  docker('run','-d','--name',infra.hub,'--network',infra.network,
+    '-p',`127.0.0.1:${infra.hubPort}:8125`,'-p',`127.0.0.1:${infra.knowledgePort}:8424`,
     '-v',`${root}/knowledge-data:/data/knowledge`,
     '-v',`${root}/private/metadata-instances.json:/app/panel/config/metadata-instances.json:ro`,
     '-e','KNOWLEDGE_LLM_BINDING_SYNC=0','-e','LLM_MODE=custom',images.hub);
-  await ready('http://127.0.0.1:18125/api/v1/meta/instances');
-  const instances=await (await fetch('http://127.0.0.1:18125/api/v1/meta/instances')).json();
+  await ready(hubUrl+'/api/v1/meta/instances');
+  const instances=await (await fetch(hubUrl+'/api/v1/meta/instances')).json();
   save('hub-instances.json',instances);
-  console.log('SERVICES_OK http://127.0.0.1:18125 (independent Hub)');
+  console.log(`SERVICES_OK ${hubUrl} (independent Hub)`);
+}
+
+if (stage === 'security') {
+  assert(secure,'Security acceptance requires --secure setup');
+  assert(!existsSync(resolve(root,'security.json')),'Preserve security evidence');
+  const cases=[];
+  for(const [label,key,userKey,expected] of [
+    ['missing-gateway',null,settings.user_key,401],
+    ['empty-gateway','',settings.user_key,401],
+    ['wrong-gateway','incorrect',settings.user_key,401],
+    ['valid-gateway',settings.gateway_key,settings.user_key,200],
+    ['wrong-user',settings.gateway_key,'incorrect',200],
+  ]) {
+    const headers={'content-type':'application/json','x-tdai-service-id':settings.instance};
+    if(key!==null) headers.Authorization=`Bearer ${key}`;
+    const resp=await fetch(coreUrl+'/v3/meta/auth/verify',{method:'POST',headers,
+      body:JSON.stringify({user_key:userKey}),signal:AbortSignal.timeout(10000)});
+    const body=await resp.json();
+    assert.equal(resp.status,expected,label);
+    if(label==='valid-gateway') assert(body.code===0 && body.data?.valid===true);
+    if(label==='wrong-user') assert(body.data?.valid===false);
+    cases.push({label,http:resp.status,valid:body.data?.valid??false});
+  }
+  const run=settings.runs[1];
+  const good={'content-type':'application/json','x-tdai-user-key':settings.user_key,
+    'x-session-id':run.session_id,'x-team-id':run.team_id,'x-agent-id':run.agent_id,'x-task-id':run.task_id};
+  for(const key of ['x-tdai-user-key','x-session-id','x-team-id','x-agent-id','x-task-id','x-conversation-id']) {
+    const resp=await fetch(proxyUrl+`/proxy/${settings.instance}/v1/chat/completions`,{
+      method:'POST',headers:{...good,[key]:'incorrect'},body:'{}',signal:AbortSignal.timeout(10000)});
+    assert.equal(resp.status,403,key);cases.push({label:`proxy-${key}`,http:resp.status});
+  }
+  // Admission rejections must not reach the real model at all.
+  assert(!existsSync(resolve(root,'proxy-events.jsonl')));
+  save('security.json',{status:'PASS',cases,upstream_calls:0,
+    scope:'Gateway service credential plus test-proxy identity allowlist; not universal Core row-level ACL'});
+  console.log('SECURITY_GATE_AND_IDENTITY_PASS');
+}
+
+if (stage === 'restart') {
+  assert(secure && [infra.core,infra.proxy,infra.hub].every(n=>n.startsWith(tag+'-')),'Only this new secure test stack may restart');
+  assert(!existsSync(resolve(root,'restart.json')),'Preserve restart evidence');
+  const normal=settings.runs[0], evaluation=settings.runs[1];
+  const marker='restartproof'+randomBytes(12).toString('hex');
+  const id={...identity(normal),session_id:'phase6-restart-proof'};
+  await api('/v3/conversation/add',{...id,messages:[{role:'user',content:marker}]});
+  const evalAssets=await api('/v3/meta/asset/list',{team_id:evaluation.team_id,limit:100});
+  docker('restart',infra.core,infra.proxy,infra.hub);
+  await ready(coreUrl+'/health');await ready(proxyUrl+'/health');await ready(hubUrl+'/api/v1/meta/instances');
+  const persisted=await api('/v3/conversation/query',id);
+  assert(persisted.messages.some(m=>m.content===marker),'L0 lost across restart');
+  const unboundName=tag+'-unbound';
+  const {images}=read('preflight.json');
+  // Independent fault process using the same frozen sources: no runtime admin
+  // endpoint to mutate session bindings is introduced.
+  docker('run','-d','--name',unboundName,'--network',infra.network,
+    '-p',`127.0.0.1:${infra.proxyPort+1}:8096`,
+    '-v',`${root}/runtime/src:/app/src:ro`,'-v',`${root}/runtime/phase6:/app/phase6:ro`,
+    '-v',`${root}:/acceptance`,'-e','PHASE6_SKIP_EVALUATION_BINDING=1',
+    '--entrypoint','node',images.proxy,'--import','tsx/esm','/app/phase6/proxy.ts');
+  const unboundUrl=`http://127.0.0.1:${infra.proxyPort+1}`;
+  const statuses=[];
+  try {
+    for(let i=0;i<2;i++) {
+      if(i) docker('restart',unboundName);
+      await ready(unboundUrl+'/health');
+      const resp=await fetch(unboundUrl+`/proxy/${settings.instance}/v1/chat/completions`,{
+        method:'POST',headers:{'content-type':'application/json','x-tdai-user-key':settings.user_key,
+          'x-session-id':evaluation.session_id,'x-team-id':evaluation.team_id,
+          'x-agent-id':evaluation.agent_id,'x-task-id':evaluation.task_id},
+        body:JSON.stringify({model:'qwen3.8-27b',messages:[{role:'user',content:settings.evaluation_skill+'\n'+evaluation.fixture}]}),
+        signal:AbortSignal.timeout(10000)});
+      statuses.push(resp.status);assert.equal(resp.status,403,'Lost binding must not downgrade to normal');
+    }
+    assert(!existsSync(resolve(root,'proxy-events.jsonl')),'Unbound request reached provider');
+    assert.equal((await api('/v3/conversation/query',identity(evaluation))).total,0);
+    assert.deepEqual(await api('/v3/meta/asset/list',{team_id:evaluation.team_id,limit:100}),evalAssets);
+  } finally {
+    docker('stop',unboundName); // Exact newly-created fault container; retained, not deleted.
+    await api('/v3/conversation/delete',{...id,session_ids:[id.session_id]});
+  }
+  assert.equal((await api('/v3/conversation/query',id)).total,0);
+  save('restart.json',{status:'PASS',normal_l0_persisted:true,temporary_record_cleaned:true,
+    evaluation_unbound_http:statuses,evaluation_l0:0,evaluation_assets_unchanged:true,
+    unbound_container:unboundName,upstream_calls:0,
+    rebinding:'Trusted settings rebound by the main proxy on restart; verified by subsequent real evaluation smoke'});
+  console.log('RESTART_PERSISTENCE_AND_UNBOUND_FAIL_CLOSED_PASS');
 }
 
 if (stage === 'normal' || stage === 'evaluation') {
   const sourceFiles=['scripts/phase6/nanobot_smoke.py','scripts/phase6/proxy.ts','scripts/phase6/acceptance-lib.mjs',
+    'scripts/phase6/acceptance.mjs','MemoryProxy/src/auth.ts','MemoryProxy/src/config.ts','MemoryProxy/src/types.ts',
     'MemoryProxy/src/handler.ts','MemoryProxy/src/injection/pipeline.ts',
     'MemoryProxy/src/injection/injectors/evaluation-skill-override.ts'];
+  assert.deepEqual(runtimeHashes(resolve(root,'runtime')),read('runtime-freeze.json').files,'Runtime changed');
+  for(const [p,digest] of Object.entries(read('runtime-freeze.json').files)) {
+    const local=p.startsWith('src/')?resolve(repo,'MemoryProxy',p):resolve(here,p.slice('phase6/'.length));
+    assert.equal(hash(readFileSync(local)),digest,`Working source differs from frozen runtime: ${p}`);
+  }
   const sourceHashes=Object.fromEntries(sourceFiles.map(p=>[p,hash(readFileSync(resolve(repo,p)))]));
   if(!existsSync(resolve(root,'source-freeze.json'))) {
     save('source-freeze.json',{at:new Date().toISOString(),files:sourceHashes,
@@ -199,6 +317,11 @@ if (stage === 'audit') {
   const normal=read('normal/run.json'),evaluation=read('evaluation/run.json');
   assert.equal(requests.length,responses.length,'Incomplete upstream response evidence');
   assert(requests.every(e=>e.model==='qwen3.8-27b' && e.temperature===0));
+  assert(responses.every(e=>e.status===200 && e.model==='qwen3.8-27b'),'Actual provider response/model differs');
+  assert(new Set(requests.map(e=>e.call_id)).size===requests.length,'Duplicate request IDs');
+  for(const request of requests) {
+    assert.equal(responses.filter(e=>e.call_id===request.call_id && e.session_id===request.session_id).length,1,'Unmatched response');
+  }
   for(const run of [normal,evaluation]) {
     const calls=requests.filter(e=>e.session_id===run.session_id);
     assert.equal(calls.length,run.model_calls,'Host iterations differ from real requests; preserve evidence');
@@ -210,8 +333,8 @@ if (stage === 'audit') {
   assert.equal(requests.filter(e=>e.evaluation_skill_present).length,evaluation.model_calls);
   const denied=[];
   const run=settings.runs[1];
-  for(const path of ['/proxy/default/v1/chat/completions','/skill-bridge/write','/proxy/phase6-acceptance/v1/chat/completions']) {
-    const response=await fetch('http://127.0.0.1:18096'+path,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+  for(const path of ['/proxy/default/v1/chat/completions','/skill-bridge/write',`/proxy/${settings.instance}/v1/chat/completions`]) {
+    const response=await fetch(proxyUrl+path,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
     assert.equal(response.status,403);denied.push({path,status:response.status});
   }
   for(const r of settings.runs){
@@ -221,18 +344,21 @@ if (stage === 'audit') {
   const evaluationL0=await api('/v3/conversation/query',identity(run));assert.equal(evaluationL0.total,0);
   // Include on-disk pages/WAL, not just search results, in the canary audit.
   const needles=[settings.evaluation_skill.split('\n').at(-1),run.fixture.trim()];
-  const scan = JSON.parse(execFileSync('docker',['exec','-i','phase6-core','node','-e',`
+  const scan = JSON.parse(execFileSync('docker',['exec','-i',infra.core,'node','-e',`
     const fs=require('fs'),p=require('path'),needles=JSON.parse(fs.readFileSync(0,'utf8')),hits=[];
     function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){
       const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(e.isFile()){
       const b=fs.readFileSync(f);if(needles.some(n=>b.includes(Buffer.from(n))))hits.push(f);}}}
     walk('/data/tdai-memory');console.log(JSON.stringify(hits));`],{input:JSON.stringify(needles),encoding:'utf8'}));
   assert.deepEqual(scan,[],'Evaluation canary leaked into Core');
-  for(const name of ['phase6-core','phase6-proxy','phase6-hub']){
+  const logContainers=[infra.core,infra.proxy,infra.hub];
+  if(existsSync(resolve(root,'restart.json'))) logContainers.push(read('restart.json').unbound_container);
+  const logNeedles=[...needles,settings.gateway_key,settings.user_key,settings.upstream_key].filter(n=>n && n.length>=12);
+  for(const name of logContainers){
     const logged=spawnSync('docker',['logs',name],{encoding:'utf8',maxBuffer:16*1024*1024});
     assert.equal(logged.status,0);
     const logs=logged.stdout+logged.stderr;
-    assert(!needles.some(n=>logs.includes(n)),`${name} logged raw canary`);
+    assert(!logNeedles.some(n=>logs.includes(n)),`${name} logged raw canary or credential`);
   }
   const formalAfter=snapshot('tdai-memory-core');
   assert.deepEqual(formalAfter,read('preflight.json').production_core_snapshot,'Formal storage changed; do not claim unchanged');

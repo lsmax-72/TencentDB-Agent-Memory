@@ -473,6 +473,7 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     auth: {
       enabled: yaml.auth?.enabled ?? DEFAULT_CONFIG.auth.enabled,
       url: yaml.auth?.url ?? DEFAULT_CONFIG.auth.url,
+      apiKey: yaml.auth?.apiKey,
       timeoutMs: yaml.auth?.timeoutMs ?? DEFAULT_CONFIG.auth.timeoutMs,
     },
     // Entries without a non-empty userId are silently dropped — matching is
