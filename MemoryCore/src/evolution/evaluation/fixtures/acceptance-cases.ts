@@ -82,7 +82,7 @@ export const PHASE5_REAL_LIMITS: CaseLimits = {
   timeout_ms: 180_000,
 };
 
-interface FixtureDefinition {
+export interface FixtureDefinition {
   files: Record<string, string>;
   commands?: PreparedFixture["commands"];
   schemas?: PreparedFixture["schemas"];

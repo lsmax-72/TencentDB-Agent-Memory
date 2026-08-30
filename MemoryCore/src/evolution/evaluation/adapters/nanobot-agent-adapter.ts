@@ -129,7 +129,7 @@ export class NanobotAgentAdapter implements AgentAdapter {
       evaluation_skill_content: input.skill_override,
       tool_policy: {
         allowed_tools: this.options.allowed_tools ?? DEFAULT_TOOLS,
-        enable_state_tools: input.evaluation_case.case_id === "AC-03",
+        enable_state_tools: input.run_spec.tools.toolset_id === "nanobot-workspace-plus-state-v1",
       },
     };
 

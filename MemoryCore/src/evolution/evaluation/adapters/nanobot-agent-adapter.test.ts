@@ -75,7 +75,7 @@ describe("NanobotAgentAdapter", () => {
     expect(output.trace_refs[0].trace_id).toBe("session-ac04");
   });
 
-  it("enables deterministic state tools only for AC-03", async () => {
+  it("enables deterministic state tools from the frozen RunSpec toolset", async () => {
     let captured: NanobotBridgeRequest | undefined;
     const adapter = new NanobotAgentAdapter({
       python_executable: "/python",
@@ -88,12 +88,21 @@ describe("NanobotAgentAdapter", () => {
 
     await adapter.run({
       evaluation_case: evaluationCase("AC-03"),
-      run_spec: runSpec("AC-03"),
+      run_spec: { ...runSpec("AC-03"), tools: { ...runSpec("AC-03").tools, toolset_id: "nanobot-workspace-plus-state-v1" } },
       workspace_dir: "/fixture/ac03",
       session_id: "session-ac03",
       skill_override: "<evaluation_skill>skill</evaluation_skill>",
     });
 
+    expect(captured?.tool_policy.enable_state_tools).toBe(true);
+
+    await adapter.run({
+      evaluation_case: evaluationCase("HO-07"),
+      run_spec: { ...runSpec("HO-07"), tools: { ...runSpec("HO-07").tools, toolset_id: "nanobot-workspace-plus-state-v1" } },
+      workspace_dir: "/fixture/ho07",
+      session_id: "session-ho07",
+      skill_override: "<evaluation_skill>skill</evaluation_skill>",
+    });
     expect(captured?.tool_policy.enable_state_tools).toBe(true);
   });
 

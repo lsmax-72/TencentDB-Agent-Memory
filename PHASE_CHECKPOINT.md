@@ -1,11 +1,9 @@
 # Autonomous Evolution Checkpoint
 
 - Branch: feat/evolution-candidate-refinement
-- HEAD before this continuation commit: b8dbb2a
 - Current candidate: phase5b-candidate-v4 (sha256:28537763d10ace8648ef8631801dac68962a68a11e56890c60869b709f62a075)
-- Last valid full evaluation: f5855171-9e8b-4526-b1e1-0e1087420fb1; Gate FAIL (NO_NEW_FIX).
-- Preserved historical infrastructure attempt: 8d23ae0a-d6bf-4311-ae68-86f988a53656; Gate INFRA_ERROR.
-- Current conclusion: v4 improves AC-05 from v2's 0/4 Candidate passes to 3/4, but one v4 probe still exhausts budget and the full v4 attempt has no newly_fixed case. Do not generate v5.
-- Completed work: AC-05 evidence analysis; v2 three-pair diagnostic probe; v3/v4 diagnosis, artifact freeze and full paired evaluations; v4 three-pair diagnostic probe; all outputs isolated and preserved.
-- Latest verification: 39 candidate-refinement/evaluation tests passed; TypeScript noEmit passed; each full/probe attempt audit was valid with matching observed conditions.
-- Next action: Critical Review. A user decision is needed before any Evaluation Protocol change or further research-direction work. No promotion, push, PR, merge, or official Skill write is authorized.
+- Held-out v2 is preserved but invalid due to the HO-07 unsupported tool enum. Valid held-out v3 suite hash: sha256:03510146cf5726a8b9e44aa02b3e4a64a942c323ac72950a86bc8bc54f8831d2.
+- v3 main had 0 newly_fixed and 0 newly_broken; required probes show a stable HO-08 Candidate regression (0/3 vs Baseline 2/3 pass).
+- Conclusion: promotion_evidence_v2 FAIL. Do not generate v5 or promote v4.
+- Completed: held-out fixtures, freeze guards, real v2/v3 attempts and probes, evidence report. All raw evidence is in outputs/heldout-protocol-v2 and outputs/heldout-protocol-v3.
+- Next action: Critical Review before any protocol/scope change. No push, PR, merge, or official Skill write is authorized.
