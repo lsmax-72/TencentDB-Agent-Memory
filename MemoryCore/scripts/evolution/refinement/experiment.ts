@@ -22,6 +22,16 @@ const EVIDENCE_FILES = [
   "phase-5-real-ac05-probe.json", "phase-5-stability-ac01-1.json",
   "phase-5-stability-ac01-2.json", "phase-5-stability-ac01-3.json",
 ];
+const DEFAULT_CANDIDATE_FILE = "candidate-v2/SKILL.md";
+
+export interface FreezeOptions {
+  candidate_id?: string;
+  candidate_file?: string;
+  parent_candidate?: string;
+  created_from_evaluation_attempt?: string;
+  diagnosis_file?: string;
+  lineage?: Record<string, unknown>;
+}
 
 export interface HistoricalEvidence {
   environment: { nanobot_repo: string; nanobot_revision: string; python: string; provider: string; model_id: string; model_preset: string; temperature: number; fallback: string };
@@ -70,6 +80,14 @@ function git(args: string[], cwd = REPO): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
+function assertPhase5ALineage(): void {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", PHASE5A_COMMIT, "HEAD"], { cwd: REPO });
+  } catch {
+    throw new Error(`Candidate freeze must descend from Phase 5A commit ${PHASE5A_COMMIT}`);
+  }
+}
+
 async function frozenSourceHashes(): Promise<Record<string, string>> {
   const paths = git(["ls-files", "MemoryCore/src/evolution/evaluation", "MemoryCore/scripts/evolution/run-nanobot-evaluation.ts"]).split("\n");
   const hashes: Record<string, string> = {};
@@ -98,18 +116,23 @@ async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
 }
 
-export async function freezeExperiment(outputDir: string): Promise<void> {
+export async function freezeExperiment(outputDir: string, options: FreezeOptions = {}): Promise<void> {
   const source = JSON.parse(await readFile(join(SOURCE_DIR, EVIDENCE_FILES[0]), "utf8")) as HistoricalEvidence;
-  assert.equal(git(["rev-parse", "HEAD"]), PHASE5A_COMMIT, "Freeze must start from Phase 5A commit");
+  const candidateId = options.candidate_id ?? CANDIDATE_ID;
+  const candidateFile = options.candidate_file ?? DEFAULT_CANDIDATE_FILE;
+  const parentCandidate = options.parent_candidate ?? source.attempt.candidate_id;
+  const sourceAttempt = options.created_from_evaluation_attempt ?? source.attempt.attempt_id;
+  const diagnosisFile = options.diagnosis_file ?? "diagnosis.json";
+  assertPhase5ALineage();
   assert.equal(git(["rev-parse", "HEAD"], source.environment.nanobot_repo), source.environment.nanobot_revision);
   assert.equal(git(["diff", "HEAD", "--", "nanobot"], source.environment.nanobot_repo), "", "nanobot source changed");
-  const content = await readFile(join(HERE, "candidate-v2/SKILL.md"), "utf8");
+  const content = await readFile(join(HERE, candidateFile), "utf8");
   assert(!/AC-\d\d|case_id|3000|STATUS_READY|\bsafe\b|old-name|new-name/.test(content), "Case answer in Skill");
-  const artifact = makeAcceptanceArtifact("CANDIDATE", CANDIDATE_ID, content);
+  const artifact = makeAcceptanceArtifact("CANDIDATE", candidateId, content);
   const experiment = buildExperiment(source, artifact);
   const sourceHashes = await frozenSourceHashes();
-  const diagnosis = JSON.parse(await readFile(join(HERE, "diagnosis.json"), "utf8"));
-  assert.equal(diagnosis.source_evaluation_attempt, source.attempt.attempt_id);
+  const diagnosis = JSON.parse(await readFile(join(HERE, diagnosisFile), "utf8"));
+  assert.equal(diagnosis.source_evaluation_attempt, sourceAttempt);
   // Refuse an existing experiment directory: one freeze, one main attempt, no overwrite.
   await mkdir(outputDir);
   await mkdir(join(outputDir, "phase5a-frozen"));
@@ -119,21 +142,21 @@ export async function freezeExperiment(outputDir: string): Promise<void> {
     await copyFile(join(SOURCE_DIR, file), target, constants.COPYFILE_EXCL);
     evidenceHashes[file] = sha256(await readFile(target));
   }
-  await copyFile(join(HERE, "candidate-v2/SKILL.md"), join(outputDir, "SKILL.md"), constants.COPYFILE_EXCL);
+  await copyFile(join(HERE, candidateFile), join(outputDir, "SKILL.md"), constants.COPYFILE_EXCL);
   await writeJson(join(outputDir, "diagnosis.json"), diagnosis);
   const freeze = {
     frozen_at: new Date().toISOString(), phase5a_commit: PHASE5A_COMMIT,
-    candidate_id: CANDIDATE_ID, base_skill_id: artifact.skill_id, base_version: artifact.base_version,
-    parent_candidate: source.attempt.candidate_id, created_from_evaluation_attempt: source.attempt.attempt_id,
+    candidate_id: candidateId, candidate_file: candidateFile, base_skill_id: artifact.skill_id, base_version: artifact.base_version,
+    parent_candidate: parentCandidate, created_from_evaluation_attempt: sourceAttempt, frozen_from_head: git(["rev-parse", "HEAD"]),
     diagnosis_summary: diagnosis.refinement_summary,
     diagnosis_hash: sha256(await readFile(join(outputDir, "diagnosis.json"))),
     artifact, environment: source.environment, evidence_hashes: evidenceHashes, source_hashes: sourceHashes,
-    config_hash: sha256(await readFile(CONFIG)), controls: controls(experiment),
+    config_hash: sha256(await readFile(CONFIG)), controls: controls(experiment), lineage: options.lineage,
     stability_policy: "Only if AC-01 v2 uses >=90% of a token/model/tool budget or fails budget; at most 3 independent paired probes, never replace main.",
   };
   await writeJson(join(outputDir, "freeze.json"), freeze);
   await writeFile(join(outputDir, "freeze.sha256"), sha256(await readFile(join(outputDir, "freeze.json"))), { flag: "wx" });
-  console.log(JSON.stringify({ output_dir: outputDir, candidate_id: CANDIDATE_ID, ...computeArtifactHashes(artifact), controls: "MATCH_PHASE5A", frozen_at: freeze.frozen_at }, null, 2));
+  console.log(JSON.stringify({ output_dir: outputDir, candidate_id: candidateId, ...computeArtifactHashes(artifact), controls: "MATCH_PHASE5A", frozen_at: freeze.frozen_at }, null, 2));
 }
 
 /** Read-only evidence snapshot; host control-plane contents are not copied as task data. */
@@ -168,7 +191,8 @@ export async function runExperiment(
   assert.equal(sha256(await readFile(CONFIG)), frozen.config_hash, "Model config drift");
   assert.equal(git(["rev-parse", "HEAD"], frozen.environment.nanobot_repo), frozen.environment.nanobot_revision);
   assert.equal(git(["diff", "HEAD", "--", "nanobot"], frozen.environment.nanobot_repo), "");
-  assert.equal(sha256(await readFile(join(HERE, "candidate-v2/SKILL.md"))), frozen.artifact.content_hash);
+  const candidateFile = frozen.candidate_file ?? DEFAULT_CANDIDATE_FILE;
+  assert.equal(sha256(await readFile(join(HERE, candidateFile))), frozen.artifact.content_hash);
   assert.equal(sha256(await readFile(join(outputDir, "SKILL.md"))), frozen.artifact.content_hash);
   assert.equal(sha256(await readFile(join(outputDir, "diagnosis.json"))), frozen.diagnosis_hash);
   for (const [file, hash] of Object.entries(frozen.evidence_hashes)) {
@@ -233,7 +257,7 @@ export async function runExperiment(
   });
   const cases = probe === undefined ? experiment.caseSet.cases : [selectProbeCase(experiment, probeCaseId)];
   const attempt = await new MinimalEvaluationRunner({ fixture: new AcceptanceFixtureAdapter(experiment.caseSet.fixtures), agent, runSpecFactory: experiment.factory }).run({
-    candidate_id: CANDIDATE_ID, cases,
+    candidate_id: frozen.candidate_id ?? CANDIDATE_ID, cases,
     suite: probe === undefined ? experiment.suite : makeAcceptanceSuite(
       diagnosticProbe ? `phase5b-diagnostic-${probeCaseId.toLowerCase()}-${probe}` : `phase5b-stability-ac01-${probe}`,
       cases,

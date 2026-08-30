@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { assertHistoricalControls, buildExperiment, CANDIDATE_ID, selectProbeCase, type HistoricalEvidence } from "../../scripts/evolution/refinement/experiment.js";
+import { assertHistoricalControls, buildExperiment, CANDIDATE_ID, selectProbeCase, type FreezeOptions, type HistoricalEvidence } from "../../scripts/evolution/refinement/experiment.js";
 import { acceptanceCaseSet, makeAcceptanceArtifact, PHASE5_REAL_LIMITS } from "../../src/evolution/evaluation/fixtures/acceptance-cases.js";
 
 const content = readFileSync(new URL("../../scripts/evolution/refinement/candidate-v2/SKILL.md", import.meta.url), "utf8");
+const v3Content = readFileSync(new URL("../../scripts/evolution/refinement/candidate-v3/SKILL.md", import.meta.url), "utf8");
+const v4Content = readFileSync(new URL("../../scripts/evolution/refinement/candidate-v4/SKILL.md", import.meta.url), "utf8");
 const artifact = makeAcceptanceArtifact("CANDIDATE", CANDIDATE_ID, content);
 const fingerprints = [
   "4702a83f0e178e486bc9eb8a852269e0f9a7cf65dc2193e129c4cc84247db4e3",
@@ -51,6 +53,29 @@ describe("Phase 5B experiment controls", () => {
     expect(probeCase.case_id).toBe("AC-05");
     expect(probeCase.case_hash).toBe(source.attempt.paired_results[4].case_ref.hash);
     expect(() => selectProbeCase(experiment, "AC-99")).toThrow("Unknown diagnostic probe case");
+  });
+
+  it("keeps refinement-freeze options explicit rather than mutating a frozen candidate", () => {
+    const options: FreezeOptions = {
+      candidate_id: "phase5b-candidate-v3",
+      candidate_file: "candidate-v3/SKILL.md",
+      parent_candidate: CANDIDATE_ID,
+      created_from_evaluation_attempt: "9f6d88f0-e3fe-402b-b9a0-7ee44426aeeb",
+    };
+    expect(options.candidate_id).not.toBe(CANDIDATE_ID);
+    expect(options.candidate_file).not.toContain("candidate-v2");
+  });
+
+  it("keeps v3 generic while expressing the trace-backed cross-file hypothesis", () => {
+    expect(v3Content).not.toMatch(/AC-\d\d|case_id|3000|STATUS_READY|\bsafe\b|old-name|new-name/);
+    expect(v3Content).toContain("identifier replacement");
+    expect(v3Content).toContain("repeat reference search");
+  });
+
+  it("keeps v4 generic while making resource-resolution precedence explicit", () => {
+    expect(v4Content).not.toMatch(/AC-\d\d|case_id|3000|STATUS_READY|\bsafe\b|old-name|new-name/);
+    expect(v4Content).toContain("literal identifier");
+    expect(v4Content).toContain("neither a usable path nor a searchable literal");
   });
 
   it.each(["task", "fixture", "oracle", "gate", "budget", "model", "tools"])("rejects %s drift", (kind) => {

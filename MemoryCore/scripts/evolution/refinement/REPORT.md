@@ -103,3 +103,37 @@ temperature=0 不能保证 hosted model 完全确定。AC-04 本次两 arm 都�
 ## 14. Next Recommendation
 
 停止在 Phase 5B。保留冻结 v2、历史 INFRA_ERROR 与本次 Gate FAIL；不要调考试、改预算或生成 v3。是否针对 AC-05 回归与 AC-04 不稳定性展开新设计，应由人工在下一阶段单独决定。
++
+## 15. Autonomous Continuation — AC-05 Diagnosis
+
+v2 的 AC-05 主结果加三次独立 diagnostic probe 中，Candidate 均完成四项 Oracle、均以 BUDGET_EXHAUSTED 失败：8 次 model call，total tokens 为 55,264、55,250、56,753、57,216。Baseline 为 3/4 PASS、1/4 budget FAIL，说明 Case 有预算敏感性，但 v2 的失败不是单次偶然。
+
+sidecar 显示 v2 通常串行执行 root/service discovery、reference search、rename/update、repeat search 和 JSON parse；Baseline 通常 grep-first 并在 6 次 model call 内完成。sidecar 不含逐轮 token 分解，故只形成额外模型回合假设，不声称精确因果。
+
+## 16. Candidate v3 and v4
+
+| Candidate | 主评测 attempt | 主结果 | AC-05 Candidate | Gate |
+|---|---|---|---|---|
+| v3 | c68882a4-ed90-4481-a335-fe561c899b76 | 1 newly_fixed / 1 newly_broken / 3 unchanged success | all Oracle PASS，但 44,374 input、7 model calls、BUDGET_EXHAUSTED | FAIL |
+| v4 | f5855171-9e8b-4526-b1e1-0e1087420fb1 | 5 unchanged success | PASS，39,691 input、6 model calls | FAIL (NO_NEW_FIX) |
+
+v3 暴露了通用资源解析错误：任务已有可搜索字面标识符时，模型仍先读取不存在的 task mapping。v4 明确优先级为路径直接使用、重命名/引用替换的字面标识符先搜索、仅两者均不存在才解析 logical alias。没有写入 Case ID、fixture path、固定答案或预算数字。
+
+## 17. v4 AC-05 Stability
+
+v4 主运行与三个独立 probe 均保留在 phase-5b-candidate-v4。Baseline 为 4/4 PASS；Candidate v4 为 3/4 PASS、1/4 BUDGET_EXHAUSTED。
+
+| Run | Baseline | Candidate v4 | Baseline total/model | Candidate total/model |
+|---|---|---|---:|---:|
+| main | PASS | PASS | 40,684 / 6 | 41,283 / 6 |
+| probe 1 | PASS | PASS | 39,058 / 6 | 38,437 / 6 |
+| probe 2 | PASS | PASS | 39,146 / 6 | 38,568 / 6 |
+| probe 3 | PASS | FAIL (budget) | 40,399 / 6 | 41,632 / 6 |
+
+每个 probe 都独立 labelled，不替换主评测，且 observed-conditions、config/source isolation 审计均通过。
+
+## 18. Critical Review Boundary
+
+v4 以通用规则将 AC-05 从 v2 的 0/4 Candidate PASS 改善为 3/4，但未满足 Gate：v4 主 paired attempt 没有 newly_fixed，因为 Baseline 也全部 PASS；另有 1/3 probe 越过 input budget。
+
+因此停止生成 v5。进一步通过措辞调参追求 Gate PASS 已缺乏新 Diagnosis。若继续，需要人工决定是否保持现有 Gate 并接受降低回归但无 newly_fixed 不能 Promotion，或另行评审独立、未污染的区分性任务设计。后者会修改 Evaluation Protocol，本轮未执行。

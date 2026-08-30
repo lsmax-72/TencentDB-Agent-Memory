@@ -1,0 +1,41 @@
+{
+  "source_evaluation_attempt": "c68882a4-ed90-4481-a335-fe561c899b76",
+  "method": "Qualitative diagnosis from the frozen Candidate v3 full paired evaluation and its raw AC-05 sidecar, reviewed against the v2 main attempt and diagnostic probes.",
+  "evidence": {
+    "candidate_v3_ac05": {
+      "oracle_status": "all four assertions PASS",
+      "evaluation_status": "TASK_FAIL/BUDGET_EXHAUSTED",
+      "usage": { "input_tokens": 44374, "total_tokens": 45762, "model_call_count": 7, "tool_call_count": 10 },
+      "first_tool_event": "read_file(.task/targets.json) failed because the mapping does not exist",
+      "subsequent_recovery": "A focused search for the literal identifier located both affected resources and the requested workspace state was completed."
+    },
+    "comparison": {
+      "v2_ac05_input_tokens": 53565,
+      "v2_ac05_model_calls": 8,
+      "v3_ac05_input_tokens": 44374,
+      "v3_ac05_model_calls": 7,
+      "baseline_v3_ac05": { "input_tokens": 37887, "model_call_count": 6, "status": "TASK_PASS" }
+    }
+  },
+  "root_cause": {
+    "category": "AMBIGUOUS_RESOURCE_RESOLUTION_PRIORITY",
+    "skill_controllable": true,
+    "confidence": "moderate",
+    "why": "Candidate v3 expresses both conditional alias resolution and identifier-first discovery, but the model chose the missing mapping before the literal identifier search. The failed call is not required by the task or Oracle and leaves only a small remaining budget gap. Per-turn token attribution is unavailable, so this is a bounded hypothesis rather than a guaranteed causal claim."
+  },
+  "candidate_change": {
+    "generic_rule": "An explicit path is direct; a literal identifier in a rename/reference task is a searchable discovery key; a logical mapping is consulted only when neither is available.",
+    "preserved_rules": [
+      "dedicated state-tool sequence",
+      "scoped edits and necessary references",
+      "single relevant verification and stop condition",
+      "structural validation when necessary"
+    ],
+    "prohibited_shortcuts": [
+      "case identifiers, fixture paths, target values or fixed answers",
+      "budget, Oracle, GatePolicy, model, toolset or fixture changes",
+      "removing required verification solely to reduce cost"
+    ]
+  },
+  "stop_condition": "This is the final authorized wording refinement for the current AC-05 hypothesis. If Candidate v4 does not eliminate the regression without creating another regression, stop Candidate iteration and perform a deeper research-validity analysis before any protocol change."
+}

@@ -1,0 +1,42 @@
+{
+  "source_evaluation_attempt": "9f6d88f0-e3fe-402b-b9a0-7ee44426aeeb",
+  "method": "Qualitative diagnosis from the valid Phase 5B retry plus three independently labelled AC-05 diagnostic stability probes; not an automated Diagnosis Service.",
+  "evidence": {
+    "candidate_v2": {
+      "runs": 4,
+      "task_oracle_passes": 4,
+      "budget_failures": 4,
+      "model_calls": [8, 8, 8, 8],
+      "total_tokens": [55264, 55250, 56753, 57216],
+      "observed_pattern": "The candidate repeatedly performs serial root/service discovery, a workspace reference search, rename/update, repeat search, and separate JSON parsing after the reference result is already sufficient."
+    },
+    "baseline": {
+      "runs": 4,
+      "task_oracle_passes": 4,
+      "budget_failures": 1,
+      "model_calls": [6, 7, 6, 6],
+      "observed_pattern": "The baseline commonly searches first and completes the same workspace state in six model calls; one independent run also crosses the budget, so the case is budget-sensitive."
+    }
+  },
+  "root_cause": {
+    "category": "SERIAL_DISCOVERY_AND_DUPLICATE_VERIFICATION",
+    "skill_controllable": true,
+    "confidence": "moderate",
+    "why": "The candidate's repeated eight-call pattern persists across all observations despite all four task Oracles passing. Its extra cost is primarily two model rounds, not a requirement imposed by an Oracle failure or an additional fixture change. Baseline variability remains a confounder, so the change is a bounded hypothesis rather than a claim of determinism."
+  },
+  "candidate_change": {
+    "generic_rule": "For cross-file renames or identifier replacements, discover scope with a focused identifier search, batch supported updates, and reuse completed-update/reference-search evidence while retaining a structural check when it is necessary.",
+    "preserved_rules": [
+      "conditional logical-alias resolution",
+      "dedicated state-tool sequence",
+      "scoped edits and required references",
+      "one necessary verification and stop condition"
+    ],
+    "prohibited_shortcuts": [
+      "case identifiers or fixture paths",
+      "fixed target values or answers",
+      "budget, Oracle, GatePolicy, model, toolset or fixture changes"
+    ]
+  },
+  "re_evaluation_plan": "Freeze Candidate v3 as a new lineage, then run the unchanged five-case paired suite once. Any subsequent stability probe remains separate and never replaces the main attempt."
+}
