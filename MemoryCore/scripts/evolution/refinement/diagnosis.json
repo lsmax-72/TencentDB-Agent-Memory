@@ -1,0 +1,79 @@
+{
+  "source_evaluation_attempt": "f22eb499-3654-448e-ab33-bff096523967",
+  "method": "Codex qualitative diagnosis of saved real tool events, outputs, Oracle evidence and cumulative usage; not an automated Diagnosis Service",
+  "evidence_limitations": [
+    "Phase 5A tool event excerpts are truncated at 512 characters; missing suffixes are not reconstructed.",
+    "Phase 5A stores cumulative usage only. Token budgets are evaluated after the run, so the exact model iteration crossing the token threshold is unknown.",
+    "Phase 5A temporary workspaces were disposed; saved Oracle excerpts/hashes and tool results are the available workspace evidence.",
+    "Temperature zero does not prove deterministic inference; AC-01 v1 probes were PASS/FAIL/PASS."
+  ],
+  "cases": [
+    {
+      "case_id": "AC-01",
+      "observed_difference": "Both arms satisfy all four Oracles. Baseline passes; v1 uses 44,740 input tokens versus the 40,000 limit and fails the budget.",
+      "candidate_behavior_problem": "A structured shell edit is denied (#3), the allowed edit succeeds (#4), and reread confirms the change (#5); v1 then executes two irrelevant Git inspections (#6/#7) in a non-Git workspace.",
+      "root_cause_category": "MISSING_STOP_CONDITION",
+      "secondary_categories": ["UNNECESSARY_VERIFICATION", "MODEL_STOCHASTICITY"],
+      "skill_controllable": true,
+      "recommended_skill_change": "Retain manifest resolution and read-before-edit; make verification minimal and supported by the environment; stop after sufficient verification. Respect denied tool operations and use permitted alternatives.",
+      "do_not_change": ["token limits", "Gate", "provider", "tool safety policy", "JSON Oracle"],
+      "evidence_pointer": "/attempt/paired_results/0/candidate",
+      "budget_exhaustion_point": "Final cumulative input usage exceeds the limit by 4,740; per-iteration crossing is not recorded."
+    },
+    {
+      "case_id": "AC-02",
+      "observed_difference": "Both arms pass with six tools. v1 finds the manifest directly but performs Git inspection after the target reread; v1 costs 39,415 versus Baseline 37,324 tokens.",
+      "candidate_behavior_problem": "Post-edit verification includes unavailable Git (#5) and then another search (#6); explicit target resolution itself is useful.",
+      "root_cause_category": "UNNECESSARY_VERIFICATION",
+      "secondary_categories": ["CASE_TOO_EASY_FOR_BASELINE"],
+      "skill_controllable": true,
+      "recommended_skill_change": "Keep conditional manifest resolution; verify the changed target and necessary scope once, without requiring Git.",
+      "do_not_change": ["task difficulty", "fixture", "Baseline", "allowlist Oracle"],
+      "evidence_pointer": "/attempt/paired_results/1",
+      "budget_exhaustion_point": "No exhaustion: 38,371 input tokens and 39,415 total tokens are below their limits."
+    },
+    {
+      "case_id": "AC-03",
+      "observed_difference": "Baseline executes exactly state_read/state_apply/state_verify and passes. v1 reaches the correct state/revision but inserts three file operations and fails the exact sequence Oracle.",
+      "candidate_behavior_problem": "Missing manifest read (#1), .task listing (#3), and state-file reread (#4) are unrelated to the dedicated tool operation.",
+      "root_cause_category": "SKILL_CASE_CONFLICT",
+      "secondary_categories": ["OVER_GENERAL_RULE"],
+      "skill_controllable": true,
+      "recommended_skill_change": "Condition rules on task type: dedicated state tools use read/apply/verify directly, without file-manifest discovery.",
+      "do_not_change": ["state tool implementation", "exact sequence Oracle", "fixture"],
+      "evidence_pointer": "/attempt/paired_results/2/candidate",
+      "budget_exhaustion_point": "No exhaustion in the main attempt; failure is the sequence assertion."
+    },
+    {
+      "case_id": "AC-04",
+      "observed_difference": "Both arms mistake the display separator space in '1| OPEN' for file content and write a leading space. v1 also adds missing-manifest discovery and Git inspection, exceeding input budget.",
+      "candidate_behavior_problem": "The host display/model interpretation problem affects both arms; v1's unrelated discovery adds cost independently.",
+      "root_cause_category": "HOST_TOOL_PRESENTATION",
+      "secondary_categories": ["OVER_GENERAL_RULE", "UNNECESSARY_VERIFICATION"],
+      "skill_controllable": false,
+      "recommended_skill_change": "Only apply the general explicit-path and minimal-verification changes to the separable overhead; do not add a case-specific display workaround.",
+      "do_not_change": ["nanobot read_file/edit_file implementation", "exact content Oracle", "critical flag", "expected text"],
+      "evidence_pointer": "/attempt/paired_results/3",
+      "budget_exhaustion_point": "v1 final input usage 43,088 exceeds 40,000 by 3,088; both final workspace excerpts are ' DONE\\n'."
+    },
+    {
+      "case_id": "AC-05",
+      "observed_difference": "Both arms complete the rename and registry Oracles. v1 spends 62,213 total tokens and 12 tools versus Baseline 40,987 tokens and 11 tools, failing input and total budgets.",
+      "candidate_behavior_problem": "v1 first reads a nonexistent manifest (#1), then resolves the concrete resource. It attempts a shell JSON edit that fails (#7), uses allowed writes (#8/#9), and verifies files/references (#10-12). Those final checks are relevant, not proven wholly redundant.",
+      "root_cause_category": "OVER_GENERAL_RULE",
+      "secondary_categories": ["CASE_TOO_EASY_FOR_BASELINE", "OTHER"],
+      "skill_controllable": true,
+      "recommended_skill_change": "Use a concrete resource directly; retain required reference updates and sufficient verification. Condition structured JSON execution on available supported tools, and stop after valid completion.",
+      "do_not_change": ["cross-file fixture", "reference integrity Oracle", "budget", "tool safety guard"],
+      "evidence_pointer": "/attempt/paired_results/4/candidate",
+      "budget_exhaustion_point": "Final input 59,148 > 40,000 and total 62,213 > 48,000. Exact crossing is unknown; do not attribute all overrun to post-completion verification."
+    }
+  ],
+  "refinement_summary": [
+    "Replace the over-general manifest step with conditional alias resolution.",
+    "Separate state-tool operations from file discovery.",
+    "Preserve scoped edits, structured JSON intent and necessary verification.",
+    "Remove unconditional workspace/Git diff and add an explicit stop condition.",
+    "Do not change host presentation, task answers or evaluation controls."
+  ]
+}
