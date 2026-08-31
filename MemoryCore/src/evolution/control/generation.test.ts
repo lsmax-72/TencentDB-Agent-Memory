@@ -6,12 +6,14 @@ import { EvolutionDispatcher } from "./dispatcher.js";
 import { generateStandaloneProposals } from "./generation.js";
 import { createProposalRunner } from "./proposal-runner.js";
 import type { ReviewBinding } from "./model-bindings.js";
+import { memorySnapshotHash, type MemoryTargetSnapshot } from "./memory-snapshot.js";
+import { validateFrozenContent } from "./validation.js";
 const stores: SqliteMetadataStore[] = [];
 afterEach(() => stores.splice(0).forEach(store => store.close()));
 const completion = { team_id: "team", agent_id: "agent", task_id: "task", session_id: "session", run_id: "run", completion: "host_task_complete", asset_ids: [],
   task_input: "我正在整理项目文档和任务证据，请记录当前工作的背景。", final_output: "offline test task output", tool_events: [],
   usage: { input_tokens: null, output_tokens: null, model_calls: 0, tool_calls: 0 }, actual_model: "OFFLINE_FIXTURE", outcome: "PASS", used_asset_versions: {} };
-function setup(route = "memory_gap", assetOwner = "owner") {
+function setup(route = "memory_gap", assetOwner = "owner", enableValidation = false) {
   const metadata = new SqliteMetadataStore(":memory:"); metadata.init(); stores.push(metadata);
   metadata.createUser({ user_id: "owner", auth_provider: "local", external_id: "owner", username: "test-owner", default_key_value: "test-key" });
   metadata.createTeam({ team_id: "team", name: "TEST ONLY", owner_user_id: "owner" });
@@ -26,18 +28,23 @@ function setup(route = "memory_gap", assetOwner = "owner") {
     return { text: JSON.stringify({ route, explanation: "Offline diagnosis response for wiring test", evidence: [{ record_id: trace.id, observation: "input contains task context" }] }), input_tokens: 20, output_tokens: 10 };
   });
   const request = vi.fn(async () => {
-    const trace = store.list("team", "trace")[0];
+    const trace = store.list("team", "trace").find(record => record.payload.completion === "host_task_complete")!;
     return Response.json({ id: "offline", object: "chat.completion", created: 1, model: "offline-review", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: JSON.stringify([{ scene_name: "项目", memories: [{ content: "用户正在整理项目文档和任务证据。", type: "episodic", source_message_ids: [`${trace.id}:input`] }] }]) } }], usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 } });
   });
   const binding: ReviewBinding = { id: "review", fingerprint: "offline-binding", model: { modelId: "offline-review", tokenCeiling: 1000, complete },
     createProposalRunner: context => createProposalRunner({ provider: "openai-compatible", base_url: "http://offline.invalid/v1", api_key: "offline-only", model: "offline-review", max_output_tokens: 1000, token_ceiling: 64000, timeout_ms: 1000, temperature: 0, fallback: false }, context, request) };
   let service: EvolutionService;
+  const snapshot = { scope: { team_id: "team", agent_id: "agent", user_id: "owner" }, records: [], files: [] };
+  const snapshotMemory = vi.fn(async (): Promise<MemoryTargetSnapshot> => ({ ...snapshot, hash: memorySnapshotHash(snapshot) }));
   const authorize = (source: Parameters<EvolutionService["authorizeDispatch"]>[0], grant: typeof profile) => service.authorizeDispatch(source, grant);
+  const validate = vi.fn((candidate: Parameters<typeof validateFrozenContent>[1]) => validateFrozenContent({ store, metadata, permissions, snapshotMemory,
+    canRead: record => service.canReadRecord(record, candidate.owner_user_id) }, candidate));
   const dispatcher = new EvolutionDispatcher(store, { admitted: () => true, resolveModel: () => binding, authorize,
-    generate: (source, job, grant, model) => generateStandaloneProposals({ store, metadata, permissions, authorize, getSkillCore: () => undefined }, source, job, grant, model),
+    generate: (source, job, grant, model) => generateStandaloneProposals({ store, metadata, permissions, authorize, snapshotMemory, getSkillCore: () => undefined }, source, job, grant, model),
+    ...(enableValidation ? { validate } : {}),
   });
   service = new EvolutionService(store, metadata, permissions, true, dispatcher);
-  return { metadata, store, profile, service, dispatcher, complete, request };
+  return { metadata, store, profile, service, dispatcher, complete, request, snapshotMemory, validate };
 }
 describe("explicit completion to real extraction pipeline with offline model responses", () => {
   it("continues diagnosis into one frozen Memory candidate without a second user command", async () => {
@@ -107,5 +114,54 @@ describe("explicit completion to real extraction pipeline with offline model res
     const privateCandidate = test.store.list("team", "candidate")[0];
     test.metadata.updateAsset("chat_memory-team-agent", { visibility: "team" });
     await expect(test.service.invoke("records/get", { team_id: "team", id: privateCandidate.id }, "other-key")).rejects.toThrow("RECORD_NOT_FOUND");
+  });
+  it("automatically validates content with a durable receipt, but never calls it proven improvement or auto adopts", async () => {
+    const test = setup("memory_gap", "owner", true);
+    await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
+    const [candidate] = test.store.list("team", "candidate"), [attempt] = test.store.list("team", "attempt");
+    expect(candidate.status).toBe("VALIDATED");
+    expect(attempt).toMatchObject({ status: "PASS", payload: { attempt_type: "content_validation", candidate_hash: candidate.artifact_hash,
+      auto_eligible: false, demonstrates_improvement: false, conflict_assessment: "HUMAN_REVIEW_REQUIRED", model_calls: 0 } });
+    expect(test.store.list("team", "adoption")).toHaveLength(0);
+    await test.service.invoke("validation/request", { team_id: "team", id: candidate.id }, "test-key"); await test.dispatcher.idle();
+    expect(test.validate).toHaveBeenCalledOnce(); expect(test.request).toHaveBeenCalledOnce();
+    await test.service.invoke("review/decide", { team_id: "team", id: candidate.id, revision: candidate.revision, decision: "REVIEW_APPROVED", reason: "offline test reviewer has checked source and conflicting facts" }, "test-key");
+    expect(test.store.get(candidate.id)?.status).toBe("REVIEW_APPROVED"); expect(test.store.list("team", "adoption")).toHaveLength(0);
+  });
+  it("a changed target becomes stale; validation retries never rewrite the frozen candidate", async () => {
+    const test = setup("memory_gap", "owner", true), validate = test.validate.getMockImplementation()!;
+    test.validate.mockImplementationOnce(async candidate => {
+      const snapshot = await test.snapshotMemory(); snapshot.files.push({ key: "persona.md", content: "changed after generation" }); snapshot.hash = memorySnapshotHash(snapshot);
+      test.snapshotMemory.mockResolvedValue(snapshot); return validate(candidate);
+    });
+    await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
+    const [candidate] = test.store.list("team", "candidate"); expect(candidate.status).toBe("STALE");
+    expect(test.store.list("team", "attempt")[0].payload.reasons).toContain("MEMORY_SOURCE_OR_TARGET_CHANGED");
+    const [job] = test.store.jobs(["COMPLETED"], ["validation"]);
+    await expect(test.service.invoke("validation/retry", { team_id: "team", id: job.id, request_id: "cannot-update-frozen" }, "test-key")).rejects.toThrow("CANDIDATE_NOT_VALIDATABLE");
+    expect(test.store.get(candidate.id)).toEqual(candidate); expect(test.request).toHaveBeenCalledOnce();
+  });
+  it("skips an exact duplicate without hiding or deleting the existing memory", async () => {
+    const test = setup("memory_gap", "owner", true), snapshot = await test.snapshotMemory();
+    snapshot.records = [{ record_id: "existing", content: "用户正在整理项目文档和任务证据。", version: 1 }] as MemoryTargetSnapshot["records"];
+    snapshot.hash = memorySnapshotHash(snapshot); test.snapshotMemory.mockResolvedValue(snapshot);
+    await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
+    expect(test.store.list("team", "candidate")[0].status).toBe("DUPLICATE_NO_CHANGE");
+    expect(test.store.list("team", "attempt")[0].payload.existing_records_unchanged).toBe(true);
+    expect(test.store.list("team", "adoption")).toHaveLength(0);
+    expect(snapshot.records).toHaveLength(1);
+  });
+  it("rejects a tampered frozen provenance with a failed content receipt and no model call", async () => {
+    const test = setup("memory_gap", "owner", true);
+    await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
+    const [good] = test.store.list("team", "candidate");
+    const invalid = test.store.append({ team_id: good.team_id, agent_id: good.agent_id, owner_user_id: good.owner_user_id, asset_ids: good.asset_ids,
+      parent_id: good.parent_id, kind: "candidate", origin: "runtime", status: "FROZEN", title: "offline forged provenance negative case",
+      payload: { ...good.payload, extracted_memory: { content: good.payload.after, source_message_ids: ["assistant-answer-is-not-proof"] } },
+    }, "invalid-provenance", "owner");
+    await test.service.invoke("validation/request", { team_id: "team", id: invalid.id }, "test-key"); await test.dispatcher.idle();
+    expect(test.store.get(invalid.id)?.status).toBe("VALIDATION_FAILED");
+    expect(test.store.list("team", "attempt")[0].payload.reasons).toContain("L1_UNTRUSTED_SOURCE");
+    expect(test.request).toHaveBeenCalledOnce();
   });
 });

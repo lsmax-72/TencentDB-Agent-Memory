@@ -19,7 +19,7 @@ const profileSchema = scopeSchema.extend({
   auto_memory: z.boolean(), auto_wiki_maintenance: z.boolean(),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "review/decide"] as const;
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "review/decide"] as const;
 
 export class EvolutionService {
   readonly dispatcher: EvolutionDispatcher;
@@ -96,6 +96,11 @@ export class EvolutionService {
     return records.filter((_, index) => allowed[index]);
   }
 
+  async canReadRecord(record: EvolutionRecord, userId: string): Promise<boolean> {
+    const [user, member, team] = await Promise.all([this.metadata.getUserById(userId), this.metadata.getTeamMember(record.team_id, userId), this.metadata.getTeamById(record.team_id)]);
+    return user?.status === "active" && member?.status === "active" && team?.status === "active" && await this.mayRead(record, userId);
+  }
+
   async invoke(action: string, body: unknown, userKey: string): Promise<unknown> {
     const { team_id } = scopeSchema.parse(body);
     const actor = await this.actor(userKey, team_id);
@@ -119,7 +124,12 @@ export class EvolutionService {
       const input = recordSchema.parse(body);
       const record = this.store.get(input.id);
       if (!record || record.team_id !== team_id || !await this.mayRead(record, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
-      return { record, events: this.store.events(record.id) };
+      const related: EvolutionRecord[] = [];
+      for (const child of this.store.list(team_id)) {
+        if (child.parent_id === record.id && await this.mayRead(child, actor.id)) related.push(child);
+        if (related.length >= 100) break;
+      }
+      return { record, events: this.store.events(record.id), related };
     }
     if (action === "profiles/list") {
       // Grants reveal private target IDs; only their author may inspect them.
@@ -178,14 +188,24 @@ export class EvolutionService {
       this.dispatcher.wake();
       return job;
     }
-    if (action === "diagnosis/retry" || action === "generation/retry") {
+    if (action === "validation/request") {
+      const input = recordSchema.strict().parse(body), candidate = this.store.get(input.id);
+      if (!candidate || candidate.team_id !== team_id || !await this.mayRead(candidate, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      if (actor.id !== candidate.owner_user_id && !["admin", "reviewer"].includes(actor.role)) throw new EvolutionError(403, "REVIEWER_REQUIRED");
+      const job = this.dispatcher.enqueueValidation(candidate);
+      if (!job) throw new EvolutionError(503, "VALIDATOR_UNAVAILABLE");
+      this.dispatcher.wake(); return job;
+    }
+    if (action === "diagnosis/retry" || action === "generation/retry" || action === "validation/retry") {
       const input = recordSchema.extend({ request_id: id }).strict().parse(body);
       const previous = this.store.get(input.id);
       if (!previous || previous.team_id !== team_id || !await this.mayRead(previous, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
       const source = this.store.get(String(previous.payload.source_id));
       if (!source || source.team_id !== team_id || !await this.mayRead(source, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
       if (actor.id !== source.owner_user_id) throw new EvolutionError(403, "TASK_OWNER_REQUIRED");
-      const job = action === "generation/retry" ? this.dispatcher.retryProposal(source, previous, input.request_id) : this.dispatcher.enqueue(source, { previous, requestId: input.request_id });
+      const job = action === "validation/retry" ? this.dispatcher.enqueueValidation(source, { previous, requestId: input.request_id })
+        : action === "generation/retry" ? this.dispatcher.retryProposal(source, previous, input.request_id) : this.dispatcher.enqueue(source, { previous, requestId: input.request_id });
+      if (!job) throw new EvolutionError(503, "VALIDATOR_UNAVAILABLE");
       this.dispatcher.wake();
       return job;
     }

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { EvolutionError, type EvolutionRecord, type EvolutionProfile, type RecordKind } from "./types.js";
 import { canonicalJson } from "../evaluation/contracts/hash.js";
+import type { ValidationReport } from "./validation.js";
 
 export function contentHash(value: unknown): string {
   // Hash the exact JSON representation that is persisted (optional fields are omitted).
@@ -73,7 +74,7 @@ export class EvolutionStore {
 
   jobTransition(job: EvolutionRecord, status: string, evidence: Record<string, unknown> = {}): EvolutionRecord {
     return this.transaction(() => {
-      if (job.kind !== "job" || !["diagnosis", "proposal", "proposal_model_step", "proposal_tool_event"].includes(String(job.payload.job_type))) throw new EvolutionError(409, "EXECUTION_JOB_REQUIRED");
+      if (job.kind !== "job" || !["diagnosis", "proposal", "proposal_model_step", "proposal_tool_event", "validation"].includes(String(job.payload.job_type))) throw new EvolutionError(409, "EXECUTION_JOB_REQUIRED");
       const result = this.transition(job.id, job.revision, [job.status], status, "evolution-dispatcher");
       this.event(job.id, "evolution-dispatcher", "JOB_EVIDENCE", evidence);
       return result;
@@ -84,6 +85,28 @@ export class EvolutionStore {
     this.transaction(() => {
       this.jobTransition(job, "COMPLETED", { result_id: result.id, result_hash: result.artifact_hash, usage: result.payload.usage });
       enqueue();
+    });
+  }
+
+  completeProposal(job: EvolutionRecord, results: EvolutionRecord[], enqueue: () => void): void {
+    this.transaction(() => {
+      this.jobTransition(job, "COMPLETED", { result_ids: results.map(record => record.id), result_hashes: results.map(record => record.artifact_hash), no_change: results.length === 0 });
+      enqueue();
+    });
+  }
+
+  completeValidation(job: EvolutionRecord, candidate: EvolutionRecord, report: ValidationReport): EvolutionRecord {
+    return this.transaction(() => {
+      if (job.payload.job_type !== "validation" || job.payload.source_id !== candidate.id || job.payload.source_hash !== candidate.artifact_hash) throw new EvolutionError(409, "VALIDATION_JOB_MISMATCH");
+      const attempt = this.append({ team_id: candidate.team_id, agent_id: candidate.agent_id, owner_user_id: candidate.owner_user_id,
+        kind: "attempt", origin: "runtime", title: `内容校验：${candidate.title}`, status: report.result, asset_ids: candidate.asset_ids, parent_id: candidate.id,
+        payload: { ...report, candidate_hash: candidate.artifact_hash, job_id: job.id,
+          ...(candidate.payload.evidence_mode === "offline_test" ? { evidence_mode: "offline_test" } : {}) },
+      }, job.id, "evolution-validator");
+      const status = report.result === "PASS" ? "VALIDATED" : report.result === "FAIL" ? "VALIDATION_FAILED" : report.result;
+      this.transition(candidate.id, candidate.revision, ["FROZEN", "NEEDS_EVIDENCE", "VALIDATION_FAILED"], status, "evolution-validator");
+      this.jobTransition(job, "COMPLETED", { result_id: attempt.id, result: report.result, model_calls: 0 });
+      return attempt;
     });
   }
 

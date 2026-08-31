@@ -15,7 +15,7 @@
  */
 
 import http from "node:http";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { URL } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import zlib from "node:zlib";
@@ -112,6 +112,8 @@ import { EvolutionDispatcher } from "../evolution/control/dispatcher.js";
 import { fileReviewBindings } from "../evolution/control/model-bindings.js";
 import { localLegacyMutationGuard } from "../evolution/control/legacy-governance.js";
 import { generateStandaloneProposals } from "../evolution/control/generation.js";
+import { localMemorySnapshot } from "../evolution/control/memory-snapshot.js";
+import { validateFrozenContent } from "../evolution/control/validation.js";
 import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
 import type { OffloadV2Deps } from "../offload_server/router.js";
@@ -467,7 +469,12 @@ export class TdaiGateway {
           generate: (source, job, profile, binding) => generateStandaloneProposals({
             store: store.getEvolutionStore(), metadata: store, permissions,
             getSkillCore: () => this.core.getSkillCore(), authorize: (record, grant) => service.authorizeDispatch(record, grant),
+            snapshotMemory: localMemorySnapshot(resolve(this.config.data.baseDir), async () => (await this.resolveMemoryContentTargets(instanceId)).store),
           }, source, job, profile, binding),
+          validate: candidate => validateFrozenContent({ store: store.getEvolutionStore(), metadata: store, permissions,
+            snapshotMemory: localMemorySnapshot(resolve(this.config.data.baseDir), async () => (await this.resolveMemoryContentTargets(instanceId)).store),
+            canRead: record => service.canReadRecord(record, candidate.owner_user_id),
+          }, candidate),
           onError: () => this.logger.error("[evolution] dispatcher failed; durable jobs retained"),
         });
         service = new EvolutionService(store.getEvolutionStore(), store, permissions, admitted, dispatcher);

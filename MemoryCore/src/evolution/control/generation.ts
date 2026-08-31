@@ -7,6 +7,8 @@ import { EvolutionError, type EvolutionProfile, type EvolutionRecord } from "./t
 import { contentHash, type EvolutionStore } from "./store.js";
 import { generateSkillProposals } from "./proposals.js";
 import { proposeL1 } from "./memory-proposals.js";
+import type { SnapshotMemory } from "./memory-snapshot.js";
+import { memorySnapshotHash } from "./memory-snapshot.js";
 
 export interface GenerationDependencies {
   store: EvolutionStore;
@@ -14,6 +16,7 @@ export interface GenerationDependencies {
   permissions: Pick<MetadataService, "checkAssetPermission" | "resolveChatMemoryTargets">;
   getSkillCore: () => SkillCore | undefined;
   authorize: (source: EvolutionRecord, profile: EvolutionProfile) => Promise<boolean>;
+  snapshotMemory?: SnapshotMemory;
 }
 
 /** Local host integration: no formal writer is given to a reviewer or to a generation job. */
@@ -53,10 +56,19 @@ export async function generateStandaloneProposals(deps: GenerationDependencies, 
     if (targets.length !== 1) throw new EvolutionError(409, "ONE_EXPLICIT_MEMORY_TARGET_REQUIRED");
     const [target] = await permissions.resolveChatMemoryTargets([targets[0].asset_id]);
     if (target.team_id !== source.team_id || target.agent_id !== source.agent_id) throw new EvolutionError(403, "MEMORY_TARGET_AGENT_MISMATCH");
+    if (!deps.snapshotMemory) throw new EvolutionError(503, "MEMORY_SNAPSHOT_UNAVAILABLE");
+    const scope = { team_id: source.team_id, agent_id: source.agent_id, user_id: source.owner_user_id };
+    const snapshot = await deps.snapshotMemory(scope);
+    if (contentHash(snapshot.scope) !== contentHash(scope) || snapshot.hash !== memorySnapshotHash(snapshot)) throw new EvolutionError(409, "MEMORY_SNAPSHOT_INVALID");
+    const snapshotRecord = store.append({ team_id: source.team_id, agent_id: source.agent_id, owner_user_id: source.owner_user_id,
+      kind: "trace", origin: "runtime", status: "SNAPSHOT", title: `Memory 来源快照：${source.title}`, asset_ids: job.asset_ids, parent_id: source.id,
+      payload: { evidence_type: "memory_snapshot", target_id: target.asset_id, snapshot_hash: snapshot.hash, snapshot },
+    }, `${job.id}/memory-snapshot`, source.owner_user_id);
+    const authorizeSnapshot = async () => await authorize() && (await deps.snapshotMemory!(scope)).hash === snapshot.hash;
     const allocationId = store.allocateCandidateSlots(job.id);
-    const runner = binding.createProposalRunner({ store, source, jobId: job.id, allocationId, authorize });
+    const runner = binding.createProposalRunner({ store, source, jobId: job.id, allocationId, authorize: authorizeSnapshot });
     // Only task input is offered as an L1 fact source; an assistant answer is not factual proof.
-    return proposeL1({ store, source, allocationId, targetId: target.asset_id, snapshot: new Map(), runner }, [{
+    return proposeL1({ store, source, allocationId, targetId: target.asset_id, snapshotRecord, snapshot: new Map(snapshot.files.map(file => [file.key, Buffer.from(file.content)])), runner }, [{
       id: `${trace.id}:input`, role: "user", content: String(trace.payload.task_input ?? ""), timestamp: Date.parse(trace.created_at),
     }]);
   }

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const [stage, rootArg] = process.argv.slice(2);
-assert(['setup', 'verify', 'restart', 'governance'].includes(stage) && rootArg, 'Usage: node scripts/evolution/isolated-acceptance.mjs setup|verify|restart|governance <NEW absolute output directory>');
+assert(['setup', 'verify', 'restart', 'governance', 'validation'].includes(stage) && rootArg, 'Usage: node scripts/evolution/isolated-acceptance.mjs setup|verify|restart|governance|validation <NEW absolute output directory>');
 const root = resolve(rootArg);
 assert(rootArg === root && basename(root).startsWith('evolution-') && root !== repo, 'Dedicated absolute evolution-* path required');
 const tag = basename(root); assert(/^[a-z0-9-]+$/.test(tag));
@@ -110,7 +110,7 @@ if (stage === 'verify' || stage === 'restart') {
   const identity = read('identity.json');
   const scope = { team_id: identity.team_id };
   const overview = await api('/evolution/overview', scope); assert.equal(overview.automation_ready, false);
-  const list = await api('/evolution/records/list', { ...scope, kind: 'attempt' });
+  const list = await api('/evolution/records/list', { ...scope, kind: 'attempt', origin: 'historical' });
   assert.equal(list.total, 1); assert.equal(list.items[0].status, 'FAIL');
   const record = await api('/evolution/records/get', { ...scope, id: list.items[0].id });
   assert.equal(record.record.payload.gate.reasons[0].code, 'NO_NEW_FIX');
@@ -133,7 +133,7 @@ if (stage === 'verify' || stage === 'restart') {
   assert.deepEqual(await api('/evolution/task/complete', completion), trace);
   const job = await api('/evolution/diagnosis/request', { ...scope, id: trace.id });
   assert.equal(job.status, 'BLOCKED_AUTOMATION_DISABLED');
-  assert.equal((await api('/evolution/records/list', { ...scope, kind: 'job' })).total, 1);
+  assert.equal((await api('/evolution/records/list', { ...scope, kind: 'job' })).items.filter(item => item.payload.job_type === 'diagnosis' && item.payload.source_id === trace.id).length, 1);
   await api('/evolution/diagnosis/retry', { ...scope, id: job.id, request_id: '../../etc/passwd' }, { error: 400 });
   await api('/evolution/task/complete', { ...completion, final_output: 'conflicting replay' }, { error: 409 });
   assert.deepEqual(await api('/meta/asset/list', { ...scope }, { core: true }), assetsBefore);
@@ -181,4 +181,63 @@ if (stage === 'governance') {
   assert.deepEqual(snapshotFiles(join(root, 'runtime')), read('runtime-hashes.json'));
   save(`governance-${Date.now()}.json`, { status: 'PASS', origin: 'OFFLINE_OPERATOR_PROFILE_FIXTURE', model_calls: 0, denied, profile_restored_disabled: true, official_assets_unchanged: true, automation_admission_disabled: true });
   console.log('GOVERNANCE_PASS; cross-instance legacy routes blocked; profile restored disabled; no model calls');
+}
+if (stage === 'validation') {
+  assert.equal(read('preflight.json').production_mounts, false);
+  assert.equal(read('private/core.yaml').llm.apiKey, '');
+  const identity = read('identity.json'), scope = { team_id: identity.team_id };
+  const assetsBefore = await api('/meta/asset/list', scope, { core: true });
+  const seed = execFileSync('docker', ['exec', '-i', settings.core, 'node', '--import', 'tsx', '--input-type=module', '-e', `
+    import { readFileSync } from 'node:fs';
+    import { SqliteMetadataStore } from '/app/src/metadata/store/sqlite-adapter.ts';
+    import { resolveSqliteDbPath } from '/app/src/metadata/store/db-name.ts';
+    import { contentHash } from '/app/src/evolution/control/store.ts';
+    import { localMemorySnapshot } from '/app/src/evolution/control/memory-snapshot.ts';
+    const input = JSON.parse(readFileSync(0, 'utf8'));
+    const metadata = new SqliteMetadataStore(resolveSqliteDbPath('/data/tdai-memory/metadata', input.instance)); metadata.init();
+    try {
+      const store = metadata.getEvolutionStore(), trace = store.list(input.team_id, 'trace').find(row => row.payload.run_id === 'offline-api-host-receipt');
+      if (!trace) throw new Error('Run verify first');
+      const asset = metadata.listAssetsByTeam(input.team_id).items.find(row => row.asset_type === 'chat_memory' && row.asset_id.endsWith(input.agent_id));
+      if (!asset) throw new Error('Native Agent memory asset missing');
+      const base = { team_id: input.team_id, agent_id: input.agent_id, owner_user_id: input.owner_user_id, asset_ids: [asset.asset_id], origin: 'runtime' };
+      const diagnosis = store.append({ ...base, kind: 'diagnosis', status: 'DIAGNOSED', parent_id: trace.id, title: '[OFFLINE FIXTURE] 人工构造的校验来源，未运行复盘模型',
+        payload: { evidence_mode: 'offline_test', route: 'memory_gap', evidence: [{ record_id: trace.id, observation: 'API fixture, not real task' }] } }, 'validation-fixture/diagnosis', input.owner_user_id);
+      // New isolated instance has no L1 content. The live validator independently checks the actual store.
+      const snapshot = await localMemorySnapshot('/data/tdai-memory', async () => ({ queryL1Records: async () => [] }))({ team_id: input.team_id, agent_id: input.agent_id, user_id: input.owner_user_id });
+      const source = store.append({ ...base, kind: 'trace', status: 'SNAPSHOT', parent_id: diagnosis.id, title: '[OFFLINE FIXTURE] 空白测试 Memory 快照',
+        payload: { evidence_mode: 'offline_test', evidence_type: 'memory_snapshot', target_id: asset.asset_id, snapshot_hash: snapshot.hash, snapshot } }, 'validation-fixture/snapshot', input.owner_user_id);
+      const text = '这是一条离线界面校验测试事实，不代表真实业务记忆。';
+      const candidate = store.append({ ...base, kind: 'candidate', status: 'FROZEN', parent_id: diagnosis.id, title: '[OFFLINE FIXTURE] Memory L1 校验/审查测试，禁止当成效果证据',
+        payload: { evidence_mode: 'offline_test', asset_kind: 'memory', layer: 'L1', operation: 'create', target_id: asset.asset_id,
+          base_hash: contentHash(''), base_version: null, before: '', after: text, source_record_ids: [diagnosis.id, source.id],
+          target_snapshot_id: source.id, target_snapshot_hash: snapshot.hash, extracted_memory: { content: text, source_message_ids: [trace.id + ':input'] } } }, 'validation-fixture/candidate', input.owner_user_id);
+      console.log(JSON.stringify({ candidate_id: candidate.id }));
+    } finally { metadata.close(); }
+  `], { input: JSON.stringify({ ...identity, instance: settings.instance }), encoding: 'utf8' });
+  const { candidate_id } = JSON.parse(seed);
+  await api('/evolution/validation/request', { ...scope, id: candidate_id, command: 'touch /tmp/not-allowed' }, { error: 400 });
+  const requests = await Promise.all([api('/evolution/validation/request', { ...scope, id: candidate_id }), api('/evolution/validation/request', { ...scope, id: candidate_id })]);
+  assert.equal(requests[0].id, requests[1].id);
+  let detail;
+  for (let i = 0; i < 20; i++) {
+    detail = await api('/evolution/records/get', { ...scope, id: candidate_id });
+    if (detail.record.status !== 'FROZEN') break;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  assert.equal(detail.record.status, 'VALIDATED');
+  const receipt = detail.related.find(item => item.kind === 'attempt');
+  assert(receipt); assert.equal(receipt.payload.attempt_type, 'content_validation'); assert.equal(receipt.payload.result, 'PASS');
+  assert.equal(receipt.payload.auto_eligible, false); assert.equal(receipt.payload.demonstrates_improvement, false); assert.equal(receipt.payload.model_calls, 0);
+  const review = { ...scope, id: candidate_id, revision: detail.record.revision, decision: 'REVIEW_APPROVED', reason: 'OFFLINE TEST ONLY: native review API, no formal adoption requested' };
+  await api('/evolution/review/decide', review);
+  await api('/evolution/review/decide', review, { error: 409 });
+  assert.equal((await api('/evolution/records/list', { ...scope, kind: 'adoption' })).total, 0);
+  assert.deepEqual(await api('/meta/asset/list', scope, { core: true }), assetsBefore);
+  assert.equal((await api('/evolution/overview', scope)).automation_ready, false);
+  assert.deepEqual(snapshotFiles(join(root, 'runtime')), read('runtime-hashes.json'));
+  save(`validation-${Date.now()}.json`, { status: 'PASS', origin: 'OFFLINE_OPERATOR_CANDIDATE_FIXTURE', model_calls: 0, candidate_id, validation_id: receipt.id,
+    independent_live_source_check: true, duplicate_request_same_job: true, review_is_not_adoption: true, stale_double_review_denied: true,
+    arbitrary_command_denied: true, official_assets_unchanged: true, no_improvement_claim: true, automation_admission_disabled: true });
+  console.log('VALIDATION_PASS; offline fixture; live source checks; review is not adoption; zero models/formal writes');
 }

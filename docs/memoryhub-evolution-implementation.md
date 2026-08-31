@@ -4,6 +4,8 @@
 
 ## 最新运行接线（2026-09-01 03:04）
 
+03:19补充：Memory实际来源快照、生成后自动内容校验job、版本过期/重复新增/伪造引用拒绝已接入。自然语言冲突不冒充已确定，保持人工审查、auto_eligible=false；界面单列内容校验并支持来源链与独立retry。Core141tests/Panel3tests及构建通过。新隔离r4（30920/30725）真实HTTP的validation/review/幂等/重启通过；候选为明确OFFLINE FIXTURE、零模型且不采用，不是业务效果证据。后续真实采用和8125交付仍未完成。
+
 明确任务完成现已自动衔接诊断和持久proposal job；Memory L1用真实提取类在候选区冻结，Skill复用原Review。模型为独立binding，每次HTTP预留，候选数量在生成前预留且整批原子结算。失败通过`generation/retry`独立重试；已冻结的中断job仅核对恢复，不重复生成。
 
 源/目标采用原生Metadata权限，候选、工具及模型evidence继承目标ACL并递归验证来源。新测试覆盖共享任务读取私有目标时不向其他管理员暴露衍生物，以及共享目标不能解除私有原轨迹限制。Core133tests、plugin build、Panel3tests/build通过；control类型检查0错误，传递依赖仍101条，不代表全仓strict通过。

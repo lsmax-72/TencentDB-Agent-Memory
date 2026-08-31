@@ -1,8 +1,16 @@
-import { Table } from 'tea-component';
+import { Alert, Table } from 'tea-component';
 
 function object(value: unknown): Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function display(value: unknown): string { return typeof value === 'number' || typeof value === 'string' ? String(value) : '未提供'; }
 export function EvaluationEvidence({ payload }: { payload: Record<string, unknown> }) {
+  if (payload.attempt_type === 'content_validation') return <div>
+    <Alert type="info">这是内容校验，不是 Baseline / Candidate 效果实验，也不证明 Agent 能力提升。</Alert>
+    <p><strong>内容校验：{display(payload.result)}</strong></p>
+    <p>检查项目：{Array.isArray(payload.checked) ? payload.checked.join(' / ') : '详见下方证据'}</p>
+    <p>原因：{Array.isArray(payload.reasons) ? payload.reasons.join(' / ') : '未提供'}</p>
+    {payload.conflict_assessment === 'HUMAN_REVIEW_REQUIRED' && <p>自然语言事实是否准确、是否冲突仍需人工审查。来源引用正确不等于事实已经证实。</p>}
+    <p>自动采用资格：{payload.auto_eligible === true ? '须再次核验授权' : '无'}；本次模型调用：{display(payload.model_calls)}</p>
+  </div>;
   const cost = object(payload.cost_summary);
   const gate = object(payload.gate);
   const pairs = Array.isArray(payload.pairs) ? payload.pairs.map(object) : [];

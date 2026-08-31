@@ -19,6 +19,11 @@ interface MemoryProposalInput {
   snapshot: ReadonlyMap<string, Buffer>;
   /** Must reserve each actual model/tool step upstream; no default/fallback runner exists here. */
   runner: LLMRunner;
+  snapshotRecord?: EvolutionRecord;
+}
+function snapshotEvidence(input: MemoryProposalInput) {
+  return { source_record_ids: [input.source.id, ...(input.snapshotRecord ? [input.snapshotRecord.id] : [])],
+    ...(input.snapshotRecord ? { target_snapshot_hash: input.snapshotRecord.payload.snapshot_hash, target_snapshot_id: input.snapshotRecord.id } : {}) };
 }
 function requireSource(source: EvolutionRecord): void {
   if (source.origin !== "runtime" || !["trace", "diagnosis"].includes(source.kind)) throw new EvolutionError(409, "LIVE_MEMORY_SOURCE_REQUIRED");
@@ -37,7 +42,7 @@ export async function proposeL1(input: MemoryProposalInput, messages: Conversati
       for (const memory of memories) payloads.push({
         asset_kind: "memory", target_id: input.targetId, layer: "L1", operation: "create",
         base_hash: contentHash(""), base_version: null, before: "", after: memory.content,
-        source_record_ids: [input.source.id], extracted_memory: memory,
+        ...snapshotEvidence(input), extracted_memory: memory,
       });
     } },
   });
@@ -67,7 +72,7 @@ export async function proposeHigherMemory(input: MemoryProposalInput, layer: "L2
   return freezeCandidate(input.store, input.source, {
     asset_kind: "memory", target_id: input.targetId, layer, operation: "update",
     base_hash: contentHash(before), base_version: null, before, after,
-    source_record_ids: [input.source.id], memory_files: files,
+    ...snapshotEvidence(input), memory_files: files,
     source_snapshot_hash: contentHash([...input.snapshot].map(([key, bytes]) => [key, bytes.toString("base64")]).sort()),
   }, input.allocationId);
 }

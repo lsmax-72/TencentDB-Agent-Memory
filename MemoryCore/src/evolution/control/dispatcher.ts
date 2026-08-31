@@ -2,6 +2,7 @@ import { diagnose } from "./diagnosis.js";
 import type { ResolveReviewBinding, ReviewBinding } from "./model-bindings.js";
 import { contentHash, EvolutionStore } from "./store.js";
 import { EvolutionError, type EvolutionProfile, type EvolutionRecord } from "./types.js";
+import type { ValidationReport } from "./validation.js";
 
 interface DispatcherOptions {
   /** Enabled only after all governed writers and adoption paths have passed admission. */
@@ -9,6 +10,7 @@ interface DispatcherOptions {
   resolveModel: ResolveReviewBinding;
   authorize: (source: EvolutionRecord, profile: EvolutionProfile) => Promise<boolean>;
   generate?: (source: EvolutionRecord, job: EvolutionRecord, profile: EvolutionProfile, binding: ReviewBinding) => Promise<EvolutionRecord[]>;
+  validate?: (candidate: EvolutionRecord) => Promise<ValidationReport>;
   onError?: () => void;
 }
 
@@ -53,8 +55,10 @@ export class EvolutionDispatcher {
     }
     for (const job of this.store.jobs(["RUNNING"], ["proposal", "proposal_model_step"])) {
       const batch = job.payload.job_type === "proposal" ? this.store.frozenBatch(job) : null;
-      this.store.jobTransition(job, batch ? "COMPLETED" : "RECONCILE_REQUIRED", { result_ids: batch?.map(record => record.id) ?? null, reason: batch ? "FROZEN_BATCH_RECOVERED" : "INTERRUPTED_CALL_OUTCOME_UNKNOWN" });
+      if (batch) this.store.completeProposal(job, batch, () => batch.forEach(candidate => this.enqueueValidation(candidate)));
+      else this.store.jobTransition(job, "RECONCILE_REQUIRED", { reason: "INTERRUPTED_CALL_OUTCOME_UNKNOWN" });
     }
+    for (const job of this.store.jobs(["RUNNING"], ["validation"])) this.store.jobTransition(job, "RECONCILE_REQUIRED", { reason: "VALIDATION_INTERRUPTED_NO_FORMAL_WRITE", model_calls: 0 });
     this.wake();
   }
 
@@ -101,9 +105,24 @@ export class EvolutionDispatcher {
     }, key, source.owner_user_id);
   }
 
+  enqueueValidation(candidate: EvolutionRecord, retry?: { previous: EvolutionRecord; requestId: string }): EvolutionRecord | null {
+    if (!this.options.validate) return null;
+    if (candidate.kind !== "candidate" || candidate.origin !== "runtime") throw new EvolutionError(409, "LIVE_CANDIDATE_REQUIRED");
+    if (retry && (retry.previous.payload.job_type !== "validation" || retry.previous.origin !== "runtime"
+      || retry.previous.payload.source_id !== candidate.id || retry.previous.payload.source_hash !== candidate.artifact_hash
+      || !["COMPLETED", "INFRA_ERROR", "RECONCILE_REQUIRED"].includes(retry.previous.status) && !retry.previous.status.startsWith("BLOCKED_"))) throw new EvolutionError(409, "RETRY_REQUIRES_TERMINAL_VALIDATION");
+    const key = retry ? `${candidate.id}/validation/retry/${retry.previous.id}/${retry.requestId}` : `${candidate.id}/validation`;
+    const existing = this.store.find(candidate.team_id, "job", key); if (existing) return existing;
+    if (!["FROZEN", "NEEDS_EVIDENCE", "VALIDATION_FAILED"].includes(candidate.status)) throw new EvolutionError(409, "CANDIDATE_NOT_VALIDATABLE");
+    return this.store.append({ team_id: candidate.team_id, owner_user_id: candidate.owner_user_id, agent_id: candidate.agent_id,
+      kind: "job", origin: "runtime", title: `校验：${candidate.title}`, status: "QUEUED", asset_ids: candidate.asset_ids, parent_id: candidate.id,
+      payload: { job_type: "validation", source_id: candidate.id, source_hash: candidate.artifact_hash, retry_of: retry?.previous.id ?? null },
+    }, key, candidate.owner_user_id);
+  }
+
   private async drain(): Promise<void> {
     while (!this.stopping) {
-      const job = this.store.jobs(["QUEUED"], ["diagnosis", "proposal"])[0];
+      const job = this.store.jobs(["QUEUED"], ["diagnosis", "proposal", "validation"])[0];
       if (!job) return;
       try { await this.execute(job); }
       catch (error) {
@@ -121,6 +140,13 @@ export class EvolutionDispatcher {
     const profile = this.store.profile(job.team_id, job.agent_id);
     const block = (status: string, reason: string) => this.store.jobTransition(job, status, { reason, model_calls: 0 });
     if (!source || source.artifact_hash !== job.payload.source_hash) { block("NEEDS_EVIDENCE", "SOURCE_MISSING_OR_CHANGED"); return; }
+    if (job.payload.job_type === "validation") {
+      if (!this.options.validate) { block("BLOCKED_VALIDATOR_CONFIGURATION", "VALIDATOR_UNAVAILABLE"); return; }
+      const claimed = this.store.jobTransition(job, "RUNNING", { model_calls: 0 });
+      try { this.store.completeValidation(claimed, source, await this.options.validate(source)); }
+      catch (error) { this.store.jobTransition(claimed, error instanceof EvolutionError && error.code === 403 ? "BLOCKED_SOURCE_PERMISSION" : "INFRA_ERROR", { reason: error instanceof EvolutionError ? error.message : "VALIDATION_FAILED_TO_RUN", model_calls: 0 }); }
+      return;
+    }
     if (!profile?.enabled) { block("BLOCKED_AUTOMATION_DISABLED", "AUTOMATION_NOT_ENABLED"); return; }
     if (!this.options.admitted()) { block("BLOCKED_AUTOMATION_ADMISSION", "AUTOMATION_ADMISSION_REQUIRED"); return; }
     if (contentHash(profile) !== job.payload.profile_hash) { block("BLOCKED_PROFILE_CHANGED", "RENEW_DISPATCH_REQUIRED"); return; }
@@ -137,7 +163,7 @@ export class EvolutionDispatcher {
       const claimed = this.store.jobTransition(job, "RUNNING", { actual_model: binding.model.modelId });
       try {
         const results = await this.options.generate(source, claimed, profile, binding);
-        this.store.jobTransition(claimed, "COMPLETED", { result_ids: results.map(record => record.id), result_hashes: results.map(record => record.artifact_hash), no_change: results.length === 0 });
+        this.store.completeProposal(claimed, results, () => results.forEach(candidate => this.enqueueValidation(candidate)));
       } catch (error) {
         const known = error instanceof EvolutionError;
         this.store.jobTransition(claimed, known && error.code === 429 ? "BLOCKED_BUDGET" : known && [403, 409, 501].includes(error.code) ? "BLOCKED_GENERATION" : "INFRA_ERROR", { reason: known ? error.message : "PROPOSAL_GENERATION_FAILED", usage: null });

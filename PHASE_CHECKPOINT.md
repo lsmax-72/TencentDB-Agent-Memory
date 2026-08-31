@@ -1,5 +1,15 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 03:19 续跑：来源快照、内容校验与 Hub 操作
+
+- 从 `829effc` 继续。Standalone Memory快照读取真实Team/Agent/user的L1及对应profile目录，不回退global；拒绝链接、错误scope、过大内容。L1生成前持久化源快照，模型前后复查变化。
+- 生成完成自动排内容校验job；校验源引用、目标权限/范围、快照hash、L1来源及L2/L3整包路径/基础bytes。结果/候选状态/job完成同一transaction；过期STALE要求新candidate，重复新增DUPLICATE_NO_CHANGE不碰旧记忆。
+- 内容PASS仅表示格式/来源引用/CAS合格；任意自然语言事实真伪/冲突仍HUMAN_REVIEW_REQUIRED、auto_eligible=false、demonstrates_improvement=false。Skill仍要求原paired效果评测；Wiki缺bridge明确待证据，不伪造PASS。
+- 原生Tea页面新增来源/后续记录跳转、内容校验说明、独立retry按钮和运行中自动刷新；源快照不提供任务诊断按钮。没有MyUI。仅审查不执行采用。
+- Core **141tests/27files PASS**、plugin build PASS；control严格0错误（101既有传递诊断）。Panel3tests/build、web build PASS；保留既有bundle/dependency警告。
+- 新冻结隔离 `evolution-hub-20260901-r4`（Core30920/Hub30725）：setup/verify/validation/restart PASS。validation使用明确标题OFFLINE FIXTURE的操作员候选，真实HTTP后台校验+重复请求+审查双击409+历史FAIL+正式asset不变，零模型/采用。未登录此端口。快照后的源码仅补offline标签继承，不修改r4冻结运行。
+- 当前仍未完成三类真实采用、Wiki接線、Memory高层运行续接及旧写并发治理；8125未更新。下一步先补旧写/配置切换的完整临界区与clear入口，避免只做调用前检查的race，再接实际采用。
+
 ## 2026-09-01 03:04 续跑：诊断到冻结候选的真实后台接线
 
 - 起点 `993b2ee`，继续执行而非等待确认。明确task-complete→持久诊断→proposal job→真实L1 extractor已自动串起；Skill route接原Skill Review及只读过滤后的正式Skill视图。每次生成前预留candidate slots，每个模型/工具步骤预算与权限复查，批次原子冻结。
