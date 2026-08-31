@@ -98,7 +98,7 @@ function EvolutionPageBody({ section }: { section: Section }) {
       {section === 'reviews' && <div className="evolution-toolbar"><Button onClick={() => { setSubview(''); setPage(0); }}>待审候选</Button><Button onClick={() => { setSubview('history'); setPage(0); }}>审查记录</Button></div>}
       <div className="evolution-toolbar"><span>共 {total} 条记录</span>{section === 'candidates' && <label>资产类型 <Select value={filter} onChange={value => { setFilter(value); setPage(0); }} options={[{ value: '', text: '全部' }, { value: 'skill', text: 'Skill' }, { value: 'memory', text: 'Memory' }, { value: 'wiki', text: 'Wiki' }]} /></label>}</div>
       <Table records={visible} recordKey="id" columns={[
-        { key: 'title', header: '记录', render: record => <Button type="link" onClick={() => setParams({ record: record.id })}>{record.title}</Button> },
+        { key: 'title', header: '记录', render: record => <Button className="evolution-record-link" type="link" onClick={() => setParams({ record: record.id })}>{record.title}</Button> },
         { key: 'kind', header: '类型', render: record => String(record.payload.asset_kind ?? record.kind) },
         { key: 'status', header: '状态', render: record => <Tag>{statusText(record.status)}</Tag> },
         { key: 'origin', header: '证据性质', render: record => origins[record.origin] },

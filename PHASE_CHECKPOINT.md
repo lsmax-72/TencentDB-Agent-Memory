@@ -7,7 +7,8 @@
 - 新增 Core 控制记录/预算/权限、Panel 代理及 Hub 六页源码（沿用 Tea）。Core 全部87 tests、Panel3 tests、Knowledge8 tests PASS；Core/Panel/web build、Knowledge typecheck PASS。新增 control strict typecheck 零错误，既有 Core 依赖35 diagnostics 单列。
 - Skill Review / Memory L1/L2/L3 / Wiki extract+merge 均已有隔离候选封装与离线测试；采用 coordinator 持久意图/核验/恢复只读测试通过。仍未完成旧入口治理和实际正式 writer 接线，不允许提前开启自动化。
 - 本轮独立实例 r2 API+重启 PASS；最新 `/Users/lsmax/Coder/phase6-artifacts/outputs/evolution-hub-20260831-r4` Core26920 / Hub26725，真实历史 v4 FAIL + 冻结 diff 已导入，setup/verify PASS；重启结果见输出。r1/r3 失败保留（端口发布 / SHA前缀兼容），自己的失败容器停止但没删除。
-- 浏览器仅到24725登录页，临时测试Key登录许可已异步询问、尚未填写；不绕过认证，也不将API验收写成浏览器PASS。
+- 用户本轮明确许可后，仅用临时测试账号登录24725；六页导航、历史详情/刷新、Playbook/审查子页和分类控件浏览器验收通过，console 无 error/warn。r2 的空候选/审查页不等于完整闭环通过；原始 trace 未导入明确显示。
+- 浏览器发现实验长标题跨列，已用局部 Tea 按钮换行修复；独立 `evolution-browser-20260831-r1` 冻结预览在同一已授权24725验证：1280×720 下标题完全在单元格内，六页和 v4 FAIL 正常。预览仅复用隔离 r2 Core；不改旧运行文件，验完恢复原测试 Hub。截图与 JSON 在相应输出目录。
 - 当前自动化明确 fail-closed：尚未完成所有旧写入口治理与采用恢复，不允许通过 profiles/save 开启。不是已完成真实闭环。
 - 不调用/探测 vLLM；没有部署/重启主服务；8125 尚未更新。保留历史 v4 FAIL 和所有 Attempt。
 - 用户 `deploy/global-images/start-memory-core.sh` 修改及两个 nanobot 未跟踪脚本保持原样。

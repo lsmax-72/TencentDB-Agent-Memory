@@ -2,6 +2,10 @@
 .evolution-page { padding: 24px; color: #242933; }
 .evolution-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .evolution-header h2 { font-size: 22px; margin: 0 0 8px; font-weight: 600; }
+.evolution-header h3 { min-width: 0; overflow-wrap: anywhere; }
+.evolution-header > button { flex-shrink: 0; }
+/* Native Tea link buttons otherwise keep long experiment IDs on one line across adjacent cells. */
+.evolution-page .evolution-record-link { max-width: 100%; height: auto; white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .evolution-header p, .evolution-policy p, .evolution-empty p { color: #666; margin: 8px 0; }
 .evolution-page .tea-alert { margin-bottom: 16px; }
 .evolution-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 20px 0; }

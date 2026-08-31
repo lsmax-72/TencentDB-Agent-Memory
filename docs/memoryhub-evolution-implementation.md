@@ -41,7 +41,11 @@
 - r4 增加历史候选 diff 导入：setup / verify / restart PASS。真实 v4 `FAIL / NO_NEW_FIX` 不变。
 - r1：Docker internal network 不发布 Mac loopback 端口导致 setup INFRA，已停止自己创建的容器但保留文件/容器。
 - r3：导入器误将 bare SHA 与 `sha256:` 比较，历史 main 导入成功、candidate 导入失败；失败记录保留，修复后独立 r4。没有修改历史内容或 hash。
-- 浏览器已到隔离 Hub 登录页；发送了仅使用本轮临时测试 Key 登录 24725 的许可请求，未得到许可前不填 Key、不绕过登录。尚未验收六页真实浏览器流程，也没有请用户去检查空页面。
+- 用户明确授权后，临时账号在24725登录成功；六页导航、详情深链接/刷新、Playbook/审查子页、候选分类控件实测通过。console 没有 error/warn；真实 v4 `FAIL / NO_NEW_FIX`、5条 unchanged_success 与原成本一致，原始 trace 未导入也明确标注。
+- 浏览器发现 Tea link 按钮的长实验名跨列；增加仅作用于自进化页面的换行样式，没有替换 TencentDB 主题。web build 和 Panel3 tests 再次 PASS。
+- 独立冻结预览 `/Users/lsmax/Coder/phase6-artifacts/outputs/evolution-browser-20260831-r1` 在同一已授权24725验证修复：按钮右边420.8px，小于单元格右边438.8px。六页再验通过，无 console error/warn。预览复用隔离 r2 Core，只读访问；暂时停止旧测试 Hub，但保留其容器与冻结文件，验完恢复。主8125未受影响。
+- `scripts/evolution/browser-preview.mjs` 可复现同源前端预览及恢复，输出独立 build hashes；不覆盖旧 Attempt，不需要另一端口重新登录。r2与预览各有 `browser-acceptance.json` 和截图。
+- 这是基础浏览器验收；r2候选/审查为空，不代表完整生成/审查/采用通过。r4历史候选diff仍仅API验收，本次未登录26725。
 
 ## 尚未完成
 
@@ -50,6 +54,6 @@
 3. 三类正式 writer、原生全局并发锁、scope/grant/base-version/source 权限再核验、登记与索引确认、完整重启恢复。现有采用 coordinator 不能代替这些接口验收。
 4. Skill 评测任务与现有 nanobot bridge 的固定任务适配；服务端 validation/evaluation receipt 和风险授权封口。旧 Oracle/Pair/Gate 不改。
 5. 完整配置和采用 UI（当前预算草案只保存关闭状态），更多历史 trace/diagnosis/Playbook 的受控关联导入；不能伪造记录填空页面。
-6. 真实浏览器六页/证据/审查流程；隔离完整端到端验收后，备份再更新主 8125。
+6. 浏览器真实候选生成/证据关联/审查/采用流程（六页导航与历史详情已验）；隔离完整端到端验收后，备份再更新主 8125。
 
 目前未修改运行中的服务，不能告诉用户 8125 已有新功能；未证明真实模型自进化闭环或收益。
