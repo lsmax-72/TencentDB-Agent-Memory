@@ -4,6 +4,7 @@ OpenAI max_retries=0 does not disable nanobot's outer chat_with_retry loop.
 This opt-in provider leaves the official SDK untouched and makes one attempt.
 """
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from copy import deepcopy
 
 
 class BoundedProvider(OpenAICompatProvider):
@@ -13,6 +14,7 @@ class BoundedProvider(OpenAICompatProvider):
         self.calls = 0
         self.observed_usage = {}
         self.responses = []
+        self.requests = []
 
     async def chat_with_retry(self, **kwargs):
         kwargs.pop('retry_mode', None)
@@ -20,6 +22,9 @@ class BoundedProvider(OpenAICompatProvider):
         if self.calls >= self.call_budget:
             raise RuntimeError('BUDGET_EXHAUSTED: actual model calls')
         self.calls += 1
+        # Capture immutable pre-Proxy context; recall blocks are recorded at the Proxy.
+        self.requests.append(deepcopy({k: kwargs.get(k) for k in
+            ('messages', 'tools', 'model', 'temperature', 'max_tokens')}))
         response = await self.chat(**kwargs)
         self.responses.append({'finish_reason': response.finish_reason,
                                'usage': dict(response.usage or {})})

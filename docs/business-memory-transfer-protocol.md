@@ -50,3 +50,16 @@
 本轮 r1：`/Users/lsmax/Coder/phase6-artifacts/outputs/business-xlsx-memory-20260831-r1`，独立端口 20920 / 20696 / 20725 / 20924。历史 r1 smoke、Phase6 r5/r2 和主 8420/8096/8125 不改动。
 
 当前文档是冻结协议说明，实际成绩以独立结果报告为准，不把协议完成当实验完成。
+
+## Producer revision 与失败保留（追加，不覆盖 v1）
+
+- r1：nanobot 外层标准重试导致 actual upstream calls 超过 iteration hook 计数；343-20 超时、成本证据不完整，整体保留 INFRA_ERROR。379-36 PASS，L1 最终有10条；未用于迁移。
+- r2：项目侧 `BoundedProvider` 使用 SDK 的公开构造扩展，禁隐式重试、在实际模型调用处计数；SDK源码不修改。343-20 仍超时；379-36 PASS。L1两次生成均达到4096tokens，JSON截断，0条记忆；保留 INFRA_ERROR，不把空快照当作有记忆对照。
+- 对 r2 晚到 response 独立核账：形成任务真实 wire 成本72,271tokens /11model calls /8tool calls。原 run 的失败状态不变，不能事后恢复为 TASK_PASS。
+- 用33tokens独立格式诊断确认本机实际 vLLM0.19.0支持请求级 `enable_thinking:false` 和 JSON Schema。对应[官方推理配置](https://docs.vllm.ai/en/v0.19.0/features/reasoning_outputs/)与[结构化输出接口](https://docs.vllm.ai/en/v0.19.0/features/structured_outputs/)。这不修改服务器或正式模型默认值。
+- r3是 `MEMORY_PRODUCER_REVISION`，不是声称 v1 无变化的 retry。只变形成端输出配置，复用 r2 完整原始形成 trace（含失败）；不重跑形成 Agent，不筛选 trace。原 code-mode prompt/parser、提取模型与4096预算、两次上限不变。实际迁移 Agent 的 thinking/model/temperature/tools/budget 不变。
+- 自动提取7条，共18,200tokens /2model calls，正常 stop；全量 snapshot SHA `c4e564dee12df5747eea335edd157399c7d758260648535fe90fbf67d1dea6b1`。所有生成失败计入工程成本，不宣称从第一轮就稳定。
+- r3全资产 freeze `f584f655741854e2ff6f5497424f8c183b6c45b64bb9c94957c2fb79d4b1e972`，独立端口22920/22696/22725/22924。首个迁移 run 在上述freeze和来源审计后发生。
+- 源审计发现 task-specific 清H列被提取成宽泛 work_method，保留并记录风险，未按预想收益手工修记忆。迁移结果必须结合非目标区域审计解释，不能把历史事实直接当通用 Skill。
+
+因此本实验最多说明“这一个冻结形成 corpus 经 producer-v2 得到的 Memory，在这三个首次运行任务中的条件性效果”。不能宣称形成过程整体稳定或普遍改善，更不构成旧 v4 Promotion 证据。

@@ -38,3 +38,8 @@ BUSINESS_DOCKER_TESTS=1 /Users/lsmax/Coder/nanobot/.venv/bin/python -m unittest 
 ## 恢复
 
 先读 `PHASE_CHECKPOINT.md`、`docs/business-memory-execution-plan.md` 和真实 smoke 报告。用户已授权代理自行决定这类独立测试配置，冻结协议是 `protocol-smoke-v1.json`。首次 smoke 已完成，不重复运行；下一步是新的 Memory 收益协议与任务冻结，旧服务、旧评测和全部失败继续保留。
+# Memory transfer continuation
+
+独立研究协议见 `docs/business-memory-transfer-protocol.md`。`study.mjs` 按 `init → formation → snapshot → transfer → probes → audit` 执行；后续 stage 使用 Attempt 内 frozen 副本。`init ROOT producer-v2` 只在新根目录建立新的形成端 revision，复用版本化真实 trace，不覆盖旧结果。`audit_study.mjs hub|post ROOT` 仅采集 API/usage/隔离证据，不运行 Agent 或重写成绩。
+
+`BoundedProvider` 控制 nanobot 外层 retry 与实际模型调用计数，不修改官方源码；容器工具继续保持网络关闭、输入只读。旧 smoke 协议和旧 Skill Evaluation 不改变。

@@ -2,6 +2,12 @@
 
 ## 2026-08-31 Memory 迁移对照（进行中，优先恢复入口）
 
+- **当前实际运行是 r4（替代下面 r3 进行状态）**：`/Users/lsmax/Coder/phase6-artifacts/outputs/business-xlsx-memory-20260831-r4`；freeze `1fd417412dc56a378124b6a32be17fbc9c93dda3cd1abf94d18bbfcfdeac02a3`，独立 Proxy23696。
+- r3发现SDK会将含none/memory的workspace路径放进system prompt，判为 `INVALID_FAIRNESS`。23-24-none已PASS但不用于收益推断；23-24-memory在途时停止调度进程，保留部分证据/输出；其余未启动。不会把被中断样本当成TASK_FAIL。
+- r4为 `IMPLEMENTATION_FIX_RETRY`，只修workspace匿名化与完整pre-Proxy请求上下文采集。所有workspace位于`root/workspaces/<random hex>`，不含case/arm标签；真实runner+mock provider回归已验证实际system context不含条件标签。
+- r4复用r3相同冻结7条Memory（hash不变），不重提取、不换题、不改模型/预算；仅新增Proxy接原隔离r3 Core22920/Hub22725。新session/新workspace；逻辑只读Memory、测试Task观测隔离。
+- r4主transfer批次正在运行；完成后执行 frozen study.mjs probes/audit；新版源码 audit_study.mjs post 检查匿名化、晚到usage、非目标区域、泄漏扫描。当前没有可信最终收益结论。
+
 - **当前正在运行 r3 首次迁移对照**：`/Users/lsmax/Coder/phase6-artifacts/outputs/business-xlsx-memory-20260831-r3`，freeze `f584f655741854e2ff6f5497424f8c183b6c45b64bb9c94957c2fb79d4b1e972`，端口 22920/22696/22725/22924。
 - r2 在修正计数后，343-20 仍 300s 超时，379-36 PASS；两个 L1 输出均4096tokens截断JSON、0条记忆。`attempt-status.json` 保留 INFRA_ERROR；迁移题尚未运行，未调题或扩预算。
 - 最小格式诊断 HTTP200/33tokens，验证 vLLM0.19.0 支持 request-level non-thinking + JSON Schema。新增独立 `memory-producer-v2`，仅修改形成端序列化；实际任务 Agent thinking/model/budget 均未改变。

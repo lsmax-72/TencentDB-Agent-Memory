@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import et_xmlfile
@@ -72,7 +73,12 @@ async def run(root: Path, run_key=None):
     manifest = json.loads((prepared / "manifest.json").read_text())
     run_dir = root / "runs" / run_key if run_key else root / "run"
     run_dir.mkdir(mode=0o700)
-    inputs, outputs, workspace = run_dir / "inputs", run_dir / "outputs", run_dir / "workspace"
+    inputs, outputs = run_dir / "inputs", run_dir / "outputs"
+    if run_key:
+        (root / 'workspaces').mkdir(mode=0o700, exist_ok=True)
+        workspace = root / 'workspaces' / uuid.uuid4().hex
+    else:
+        workspace = run_dir / 'workspace'
     inputs.mkdir(mode=0o755)
     outputs.mkdir(mode=0o777)
     outputs.chmod(0o777)
@@ -136,6 +142,8 @@ async def run(root: Path, run_key=None):
               "session_id": identity["session_id"], "input_hash_before": entry["sha256"],
               "sdk_usage": result.usage if result else evidence.usage,
               "provider_responses": provider.responses if provider else None,
+              "provider_requests": provider.requests if provider else None,
+              "workspace_ref": str(workspace),
               "input_hash_after": __import__("hashlib").sha256((inputs / "input.xlsx").read_bytes()).hexdigest()}
     with (run_dir / "agent-run.json").open("x") as stream:
         json.dump(record, stream, ensure_ascii=False, indent=2)

@@ -51,7 +51,38 @@ class StudyTests(unittest.TestCase):
                         result=await bot.run('Return done',session_key='test',ephemeral=True)
                     self.assertEqual(result.content,'done');self.assertEqual(chat.await_count,1)
                 self.assertEqual(provider.calls,1);self.assertEqual(provider.observed_usage['total_tokens'],3)
+                self.assertTrue(provider.requests[0]['messages'])
+                self.assertEqual(provider.requests[0]['model'],p['model'])
             asyncio.run(exercise())
+
+    def test_actual_runner_hides_arm_labels_in_system_context(self):
+        import hashlib
+        from bounded_provider import BoundedProvider
+        from nanobot_business import run
+        from nanobot.providers.base import LLMResponse
+        p=json.loads(Path(__file__).with_name('protocol-transfer-v1.json').read_text())
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            for folder in ('private','runtime/business','runtime/packages/openpyxl','runtime/packages/et_xmlfile','prepared','runs'):
+                (root/folder).mkdir(parents=True,exist_ok=True)
+            data=b'input fixture, not opened by mock';(root/'prepared/input.xlsx').write_bytes(data)
+            (root/'prepared/manifest.json').write_text(json.dumps({'task':{'instruction':'Return done'},'files':[{
+                'role':'input','path':'input.xlsx','sha256':hashlib.sha256(data).hexdigest()}]}))
+            (root/'runtime/business/protocol-transfer-v1.json').write_text(json.dumps(p))
+            (root/'private/settings.json').write_text(json.dumps({'proxy_url':'http://127.0.0.1:23696/proxy/business-test/v1','user_key':'test-key'}))
+            key='23-24-memory'
+            (root/'runspecs.json').write_text(json.dumps({key:{'prepared':str(root/'prepared'),'identity':{
+                'team_id':'t','agent_id':'a','task_id':'j','session_id':'s'}}}))
+            response=LLMResponse(content='done',finish_reason='stop',usage={'prompt_tokens':2,'completion_tokens':1,'total_tokens':3})
+            with patch('study_contract.verify_freeze'),patch.object(BoundedProvider,'chat',AsyncMock(return_value=response)):
+                asyncio.run(run(root,key))
+            result=json.loads((root/'runs'/key/'agent-run.json').read_text())
+            self.assertEqual(Path(result['workspace_ref']).parent,root/'workspaces')
+            self.assertRegex(Path(result['workspace_ref']).name,r'^[a-f0-9]{32}$')
+            context=json.dumps(result['provider_requests'])
+            self.assertNotIn(key,context)
+            self.assertNotIn('FROZEN_HISTORY_MEMORY',context)
+            self.assertNotIn('NO_HISTORY_MEMORY',context)
 
     def test_protocol_is_independent_and_disjoint(self):
         p=json.loads(Path(__file__).with_name('protocol-transfer-v1.json').read_text())
