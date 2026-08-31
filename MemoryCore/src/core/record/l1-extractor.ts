@@ -62,6 +62,8 @@ interface SceneSegment {
 }
 
 export interface L1ExtractionResult {
+  /** Isolated proposals are not counted as officially stored memories. */
+  proposedCount?: number;
   /** Whether extraction succeeded */
   success: boolean;
   /** Number of memories extracted */
@@ -101,6 +103,8 @@ export async function extractL1Memories(params: {
   baseDir: string;
   config: unknown;
   options?: {
+    /** Opt-in governance seam: called before dedup/write; failure must never fall back to direct storage. */
+    proposalSink?: (memories: ExtractedMemory[]) => Promise<void>;
     /** Max new messages to send in one extraction call */
     maxMessagesPerExtraction?: number;
     /** Max background messages for context */
@@ -261,6 +265,11 @@ export async function extractL1Memories(params: {
   }
 
   // Assign temporary IDs to extracted memories (needed for batch dedup)
+  if (options.proposalSink) {
+    await options.proposalSink(extracted);
+    return { success: true, extractedCount: extracted.length, proposedCount: extracted.length, storedCount: 0, records: [], sceneNames, lastSceneName: sceneNames.at(-1) };
+  }
+
   const memoriesWithIds = extracted.map((m) => ({
     ...m,
     record_id: generateMemoryId(),

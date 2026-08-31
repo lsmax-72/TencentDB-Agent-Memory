@@ -18,6 +18,12 @@ const { Body, Sider, Content } = Layout;
 
 /** 路由 path → PageId */
 const PATH_TO_PAGE: Record<string, PageId> = {
+  '/evolution/overview': 'evolution_overview',
+  '/evolution/traces': 'evolution_traces',
+  '/evolution/diagnoses': 'evolution_diagnoses',
+  '/evolution/candidates': 'evolution_candidates',
+  '/evolution/evaluations': 'evolution_evaluations',
+  '/evolution/reviews': 'evolution_reviews',
   '/': 'workbench_board',
   '/wiki': 'wiki',
   '/code': 'code',
@@ -219,4 +225,3 @@ export function ConsoleLayout() {
     </div>
   );
 }
- 

@@ -1,6 +1,13 @@
 /** English translation — en-US */
 
 export const enUS = {
+  'menu.group.evolution': 'Evolution',
+  'menu.evolution_overview': 'Evolution overview',
+  'menu.evolution_traces': 'Run traces',
+  'menu.evolution_diagnoses': 'Diagnosis and Playbook',
+  'menu.evolution_candidates': 'Candidates',
+  'menu.evolution_evaluations': 'Evaluations',
+  'menu.evolution_reviews': 'Human review',
   // ===== App =====
   'app.checkingSession': 'Checking session…',
 

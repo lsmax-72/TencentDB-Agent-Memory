@@ -105,6 +105,10 @@ import { makeKnowledgeRouteTable } from "./knowledge-handlers.js";
 import { makeChatMemoryRouteTable, clearChatMemoryContentResilient } from "./chat-memory-handlers.js";
 import { makeMemoryPromptRouteTable } from "./memory-prompt-handlers.js";
 import { makeMemoryGenerationLogRouteTable } from "./memory-generation-log-handlers.js";
+import { makeEvolutionRouteTable } from "./evolution-handlers.js";
+import { EvolutionService } from "../evolution/control/service.js";
+import { EvolutionError } from "../evolution/control/types.js";
+import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
 import type { OffloadV2Deps } from "../offload_server/router.js";
 import { resolveV3StrictIsolation } from "../utils/env-config.js";
@@ -1021,6 +1025,11 @@ export class TdaiGateway {
         ...makeChatMemoryRouteTable(),
         ...makeMemoryPromptRouteTable(),
         ...makeMemoryGenerationLogRouteTable(),
+        ...makeEvolutionRouteTable(async instanceId => {
+          const store = await this.ensureMetadataStore(instanceId);
+          if (!(store instanceof SqliteMetadataStore)) throw new EvolutionError(503, "EVOLUTION_STANDALONE_ONLY");
+          return new EvolutionService(store.getEvolutionStore(), store, await this.ensureMetadataService(instanceId));
+        }, typeof req.headers["x-tdai-user-key"] === "string" ? req.headers["x-tdai-user-key"] : ""),
       } as Record<
         string,
         (body: unknown, auth: import("./v2-schemas.js").V2AuthContext, requestId: string, deps: unknown) => Promise<import("./v2-schemas.js").ApiResponseEnvelope>

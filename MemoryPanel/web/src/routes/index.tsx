@@ -15,12 +15,19 @@ import { MembersPage } from '@/pages/MembersPage';
 import { AgentsPage } from '@/pages/AgentsPage';
 import { ApiKeysPage } from '@/pages/ApiKeysPage';
 import { GuidePage } from '@/pages/GuidePage';
+import { EvolutionPage } from '@/pages/EvolutionPage';
 
 export const routes: RouteObject[] = [
   {
     path: '/',
     element: <ConsoleLayout />,
     children: [
+      { path: 'evolution/overview', element: <EvolutionPage section="overview" /> },
+      { path: 'evolution/traces', element: <EvolutionPage section="traces" /> },
+      { path: 'evolution/diagnoses', element: <EvolutionPage section="diagnoses" /> },
+      { path: 'evolution/candidates', element: <EvolutionPage section="candidates" /> },
+      { path: 'evolution/evaluations', element: <EvolutionPage section="evaluations" /> },
+      { path: 'evolution/reviews', element: <EvolutionPage section="reviews" /> },
       { index: true, element: <WorkbenchPage /> },
       { path: 'wiki', element: <WikiPage /> },
       { path: 'code', element: <CodePage /> },

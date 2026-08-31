@@ -1,0 +1,27 @@
+/* Extend the existing TencentDB console; do not replace its theme or layout. */
+.evolution-page { padding: 24px; color: #242933; }
+.evolution-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.evolution-header h2 { font-size: 22px; margin: 0 0 8px; font-weight: 600; }
+.evolution-header p, .evolution-policy p, .evolution-empty p { color: #666; margin: 8px 0; }
+.evolution-page .tea-alert { margin-bottom: 16px; }
+.evolution-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 20px 0; }
+.evolution-metrics > div { background: white; border: 1px solid #e5e8ed; padding: 20px; }
+.evolution-metrics span { display: block; color: #666; }
+.evolution-metrics strong { display: block; font-size: 28px; margin-top: 12px; font-weight: 500; }
+.evolution-policy, .evolution-detail { background: white; border: 1px solid #e5e8ed; padding: 20px; margin: 20px 0; }
+.evolution-toolbar, .evolution-pagination { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin: 16px 0; }
+.evolution-toolbar select { padding: 6px 12px; border: 1px solid #ddd; background: white; }
+.evolution-empty { text-align: center; padding: 40px 20px; border: 1px solid #e5e8ed; background: white; }
+.evolution-empty h3 { font-size: 16px; font-weight: 500; }
+.evolution-pagination { justify-content: flex-end; }
+.evolution-detail pre { background: #f7f8fa; padding: 16px; max-height: 480px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.evolution-hash { font-family: monospace; overflow-wrap: anywhere; color: #666; }
+.evolution-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.evolution-diff > div { min-width: 0; }
+.evolution-review label { display: block; }
+.evolution-review textarea { display: block; width: 100%; min-height: 80px; border: 1px solid #ddd; padding: 8px; margin: 8px 0 16px; }
+.evolution-review button { margin-right: 12px; }
+.evolution-settings { display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
+.evolution-settings label { display: flex; flex-direction: column; gap: 8px; }
+.evolution-settings input, .evolution-settings select { border: 1px solid #ddd; padding: 6px 8px; background: white; }
+@media (max-width: 850px) { .evolution-metrics { grid-template-columns: repeat(2, 1fr); } .evolution-diff { grid-template-columns: 1fr; } }

@@ -1,0 +1,13 @@
+import ts from '../../MemoryCore/node_modules/typescript/lib/typescript.js';
+import { readdirSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const dir = resolve(repo, 'MemoryCore/src/evolution/control');
+const roots = readdirSync(dir).filter(file => file.endsWith('.ts')).map(file => resolve(dir, file));
+const program = ts.createProgram(roots, { noEmit: true, strict: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, skipLibCheck: true, esModuleInterop: true });
+const diagnostics = ts.getPreEmitDiagnostics(program);
+const relevant = diagnostics.filter(item => item.file?.fileName.startsWith(dir));
+if (relevant.length) console.error(ts.formatDiagnosticsWithColorAndContext(relevant, { getCanonicalFileName: name => name, getCurrentDirectory: () => repo, getNewLine: () => '\n' }));
+console.log(JSON.stringify({ checked: 'new evolution/control files', errors: relevant.length, existing_dependency_diagnostics: diagnostics.length - relevant.length }));
+process.exitCode = relevant.length ? 1 : 0;

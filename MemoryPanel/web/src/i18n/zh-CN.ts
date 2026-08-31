@@ -1,6 +1,13 @@
 /** 中文翻译 — zh-CN */
 
 export const zhCN = {
+  'menu.group.evolution': '自进化',
+  'menu.evolution_overview': '进化概览',
+  'menu.evolution_traces': '运行轨迹',
+  'menu.evolution_diagnoses': '诊断与经验',
+  'menu.evolution_candidates': '候选资产',
+  'menu.evolution_evaluations': '评测中心',
+  'menu.evolution_reviews': '人工审查',
   // ===== App =====
   'app.checkingSession': '正在检测登录态…',
 

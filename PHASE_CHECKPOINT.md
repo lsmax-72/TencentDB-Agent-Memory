@@ -1,5 +1,18 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-08-31 MemoryHub 自进化实施中（最新入口）
+
+- 用户已批准完整 Skill/Memory/Wiki 统一方案并要求实施；最新补充：前端以 TencentDB 为主，不用 MyUI。
+- branch `feat/evolution-candidate-refinement`；起始 HEAD `16b640c46a287cc33c0833df91188ce388827a3b`；本节随本轮基础实现小步提交，准确 HEAD 用 `git rev-parse HEAD` 读取。
+- 新增 Core 控制记录/预算/权限、Panel 代理及 Hub 六页源码（沿用 Tea）。Core 全部87 tests、Panel3 tests、Knowledge8 tests PASS；Core/Panel/web build、Knowledge typecheck PASS。新增 control strict typecheck 零错误，既有 Core 依赖35 diagnostics 单列。
+- Skill Review / Memory L1/L2/L3 / Wiki extract+merge 均已有隔离候选封装与离线测试；采用 coordinator 持久意图/核验/恢复只读测试通过。仍未完成旧入口治理和实际正式 writer 接线，不允许提前开启自动化。
+- 本轮独立实例 r2 API+重启 PASS；最新 `/Users/lsmax/Coder/phase6-artifacts/outputs/evolution-hub-20260831-r4` Core26920 / Hub26725，真实历史 v4 FAIL + 冻结 diff 已导入，setup/verify PASS；重启结果见输出。r1/r3 失败保留（端口发布 / SHA前缀兼容），自己的失败容器停止但没删除。
+- 浏览器仅到24725登录页，临时测试Key登录许可已异步询问、尚未填写；不绕过认证，也不将API验收写成浏览器PASS。
+- 当前自动化明确 fail-closed：尚未完成所有旧写入口治理与采用恢复，不允许通过 profiles/save 开启。不是已完成真实闭环。
+- 不调用/探测 vLLM；没有部署/重启主服务；8125 尚未更新。保留历史 v4 FAIL 和所有 Attempt。
+- 用户 `deploy/global-images/start-memory-core.sh` 修改及两个 nanobot 未跟踪脚本保持原样。
+- 详见 `docs/memoryhub-evolution-implementation.md` 已实现/待完成清单；继续完成普通工程工作，不因一个测试失败等待用户。
+
 ## 2026-08-31 避开vLLM的离线交付完成（最新入口）
 
 - 用户最新要求：继续离线执行，完成后先总结并讨论；当前不调用/探测vLLM，不启动新的真实实验。

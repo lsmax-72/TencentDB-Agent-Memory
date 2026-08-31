@@ -1,0 +1,146 @@
+import { z } from "zod";
+import type { IMetadataStore } from "../../metadata/store/interface.js";
+import type { MetadataService } from "../../metadata/service/metadata-service.js";
+import { EvolutionStore } from "./store.js";
+import { EvolutionError, type EvolutionRecord } from "./types.js";
+import { redactEvidence } from "./evidence.js";
+
+const id = z.string().min(1).max(180).regex(/^[\w.:-]+$/);
+const scopeSchema = z.object({ team_id: id });
+const recordSchema = scopeSchema.extend({ id });
+const kind = z.enum(["trace", "diagnosis", "candidate", "attempt", "review", "adoption", "playbook", "job"]);
+const profileSchema = scopeSchema.extend({
+  agent_id: id, enabled: z.boolean(), revision: z.number().int().nonnegative(),
+  asset_kinds: z.array(z.enum(["skill", "memory", "wiki"])).max(3), asset_ids: z.array(id).max(50),
+  daily_tokens: z.number().int().positive().nullable(), daily_model_calls: z.number().int().positive().nullable(),
+  daily_candidates: z.number().int().positive().nullable(), evaluation_profile_id: id.nullable(),
+  auto_memory: z.boolean(), auto_wiki_maintenance: z.boolean(),
+}).strict();
+
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "review/decide"] as const;
+
+export class EvolutionService {
+  constructor(
+    readonly store: EvolutionStore,
+    private readonly metadata: IMetadataStore,
+    private readonly permissions: Pick<MetadataService, "checkAssetPermission">,
+    /** Set only after governed legacy writers, executor and adoption admission pass. */
+    private readonly automationReady = false,
+  ) {}
+
+  private async actor(userKey: string, teamId: string) {
+    const user = await this.metadata.getUserByKey(userKey);
+    if (!user || user.status !== "active") throw new EvolutionError(401, "UNAUTHORIZED");
+    const member = await this.metadata.getTeamMember(teamId, user.user_id);
+    if (!member || member.status !== "active") throw new EvolutionError(403, "TEAM_ACCESS_DENIED");
+    return { id: user.user_id, role: member.role };
+  }
+
+  private async mayRead(record: Pick<EvolutionRecord, "asset_ids" | "owner_user_id" | "team_id">, userId: string): Promise<boolean> {
+    // Unbound raw evidence is private, including to team administrators.
+    if (!record.asset_ids.length) return record.owner_user_id === userId;
+    for (const asset_id of record.asset_ids) {
+      const asset = await this.metadata.getAssetById(asset_id);
+      if (!asset || asset.team_id !== record.team_id || !(await this.permissions.checkAssetPermission({ user_id: userId, asset_id, action: "read" })).allowed) return false;
+    }
+    return true;
+  }
+
+  private async visible(teamId: string, userId: string) {
+    const records = this.store.list(teamId);
+    const allowed = await Promise.all(records.map(record => this.mayRead(record, userId)));
+    return records.filter((_, index) => allowed[index]);
+  }
+
+  async invoke(action: string, body: unknown, userKey: string): Promise<unknown> {
+    const { team_id } = scopeSchema.parse(body);
+    const actor = await this.actor(userKey, team_id);
+    if (action === "overview") {
+      const records = await this.visible(team_id, actor.id);
+      return {
+        records: records.length,
+        counts: Object.fromEntries(kind.options.map(value => [value, records.filter(record => record.kind === value).length])),
+        statuses: records.reduce<Record<string, number>>((counts, record) => ({ ...counts, [record.status]: (counts[record.status] ?? 0) + 1 }), {}),
+        automation_ready: this.automationReady,
+        runtime_status: this.automationReady ? "READY" : "OFFLINE_ONLY",
+        notices: ["内容校验不等于效果提升", "历史 FAIL / INFRA_ERROR 保留，不能通过导入采用", "模型服务未调用；自动化默认关闭"],
+      };
+    }
+    if (action === "records/list") {
+      const input = scopeSchema.extend({ kind: kind.optional(), asset_kind: z.enum(["skill", "memory", "wiki"]).optional(), origin: z.enum(["runtime", "historical", "offline_test"]).optional(), statuses: z.array(z.string().max(80)).max(10).optional(), offset: z.number().int().min(0).default(0), limit: z.number().int().min(1).max(100).default(30) }).parse(body);
+      const records = (await this.visible(team_id, actor.id)).filter(record => (!input.kind || record.kind === input.kind) && (!input.statuses || input.statuses.includes(record.status)) && (!input.origin || record.origin === input.origin) && (!input.asset_kind || record.payload.asset_kind === input.asset_kind));
+      return { items: records.slice(input.offset, input.offset + input.limit), total: records.length };
+    }
+    if (action === "records/get") {
+      const input = recordSchema.parse(body);
+      const record = this.store.get(input.id);
+      if (!record || record.team_id !== team_id || !await this.mayRead(record, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      return { record, events: this.store.events(record.id) };
+    }
+    if (action === "profiles/list") {
+      // Grants reveal private target IDs; only their author may inspect them.
+      return { items: this.store.profiles(team_id).filter(profile => profile.authorized_by === actor.id) };
+    }
+    if (action === "profiles/save") {
+      if (actor.role !== "admin") throw new EvolutionError(403, "ADMIN_REQUIRED");
+      const { revision, ...input } = profileSchema.parse(body);
+      const agent = await this.metadata.getAgentById(input.agent_id);
+      if (!agent || agent.team_id !== team_id || agent.status !== "active") throw new EvolutionError(404, "AGENT_NOT_FOUND");
+      for (const asset_id of input.asset_ids) {
+        const asset = await this.metadata.getAssetById(asset_id);
+        if (!asset || asset.team_id !== team_id || !(await this.permissions.checkAssetPermission({ asset_id, user_id: actor.id, action: "write" })).allowed) throw new EvolutionError(403, "TARGET_WRITE_DENIED");
+      }
+      if (input.enabled && (!input.daily_tokens || !input.daily_model_calls || !input.daily_candidates || !input.asset_kinds.length)) throw new EvolutionError(400, "BUDGET_AND_SCOPE_REQUIRED");
+      if (input.enabled && !this.automationReady) throw new EvolutionError(409, "AUTOMATION_ADMISSION_REQUIRED");
+      return this.store.saveProfile({ ...input, authorized_by: actor.id }, revision);
+    }
+    if (action === "task/complete") {
+      const input = scopeSchema.extend({
+        agent_id: id, task_id: id, session_id: id, run_id: id,
+        completion: z.literal("host_task_complete"),
+        asset_ids: z.array(id).max(50), task_input: z.string().max(100_000),
+        final_output: z.string().max(100_000),
+        tool_events: z.array(z.object({ name: z.string().max(120), arguments: z.string().max(20_000), result: z.string().max(40_000), success: z.boolean(), sequence: z.number().int().nonnegative() })).max(100),
+        usage: z.object({ input_tokens: z.number().int().nonnegative().nullable(), output_tokens: z.number().int().nonnegative().nullable(), model_calls: z.number().int().nonnegative().nullable(), tool_calls: z.number().int().nonnegative().nullable() }),
+        actual_model: z.string().max(200), outcome: z.enum(["PASS", "FAIL", "INFRA_ERROR", "UNKNOWN"]),
+        used_asset_versions: z.record(z.string(), z.string().max(200)),
+      }).strict().parse(body);
+      const task = await this.metadata.getTaskById(input.task_id);
+      const agent = await this.metadata.getAgentById(input.agent_id);
+      if (!task || !agent || task.team_id !== team_id || agent.team_id !== team_id || task.creator_user_id !== actor.id || agent.owner_user_id !== actor.id) throw new EvolutionError(403, "TASK_OWNER_REQUIRED");
+      const inputText = redactEvidence(input.task_input), outputText = redactEvidence(input.final_output);
+      const toolEvidence = input.tool_events.map(event => ({ event, args: redactEvidence(event.arguments), result: redactEvidence(event.result) }));
+      const payload = { ...input, task_input: inputText.text, final_output: outputText.text,
+        tool_events: toolEvidence.map(({ event, args, result }) => ({ ...event, arguments: args.text, result: result.text })),
+        redaction: { policy: "credential-patterns-v1", task_input_hash: inputText.original_sha256, final_output_hash: outputText.original_sha256,
+          replacements: inputText.replacements + outputText.replacements + toolEvidence.reduce((sum, item) => sum + item.args.replacements + item.result.replacements, 0),
+          tool_original_hashes: toolEvidence.map(({ event, args, result }) => ({ sequence: event.sequence, arguments: args.original_sha256, result: result.original_sha256 })),
+        },
+      };
+      const draft = { team_id, owner_user_id: actor.id, agent_id: input.agent_id, kind: "trace" as const, origin: "runtime" as const, title: task.title, status: "RECORDED", asset_ids: input.asset_ids, payload };
+      if (!await this.mayRead(draft, actor.id)) throw new EvolutionError(403, "SOURCE_READ_DENIED");
+      if (Object.keys(input.used_asset_versions).some(assetId => !input.asset_ids.includes(assetId))) throw new EvolutionError(400, "ASSET_PROVENANCE_INCOMPLETE");
+      // This receipt records a host assertion, not an Oracle certification.
+      return this.store.append(draft, `${actor.id}/${input.run_id}`, actor.id);
+    }
+    if (action === "diagnosis/request") {
+      const input = recordSchema.parse(body);
+      const source = this.store.get(input.id);
+      if (!source || source.team_id !== team_id || !await this.mayRead(source, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      if (source.kind !== "trace" || source.origin !== "runtime") throw new EvolutionError(409, "LIVE_TRACE_REQUIRED");
+      const profile = this.store.profile(team_id, source.agent_id);
+      const status = !profile?.enabled ? "BLOCKED_AUTOMATION_DISABLED" : "BLOCKED_EXECUTOR_UNAVAILABLE";
+      return this.store.append({ team_id, owner_user_id: source.owner_user_id, agent_id: source.agent_id, kind: "job", origin: "runtime", title: `诊断：${source.title}`, status, asset_ids: source.asset_ids, parent_id: source.id, payload: { source_id: source.id, source_hash: source.artifact_hash, model_calls: 0 } }, `${source.id}/diagnosis`, actor.id);
+    }
+    if (action === "review/decide") {
+      const input = recordSchema.extend({ revision: z.number().int().positive(), decision: z.enum(["REJECTED", "NEEDS_EVIDENCE", "REVIEW_APPROVED"]), reason: z.string().min(1).max(4000) }).parse(body);
+      if (!["admin", "reviewer"].includes(actor.role)) throw new EvolutionError(403, "REVIEWER_REQUIRED");
+      const candidate = this.store.get(input.id);
+      if (!candidate || candidate.team_id !== team_id || !await this.mayRead(candidate, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      if (candidate.kind !== "candidate" || candidate.origin !== "runtime") throw new EvolutionError(409, "LIVE_CANDIDATE_REQUIRED");
+      if (input.decision === "REVIEW_APPROVED" && candidate.status !== "VALIDATED") throw new EvolutionError(409, "VALIDATION_REQUIRED");
+      return this.store.review(candidate.id, input.revision, input.decision, input.reason, actor.id);
+    }
+    throw new EvolutionError(404, "UNKNOWN_EVOLUTION_ACTION");
+  }
+}

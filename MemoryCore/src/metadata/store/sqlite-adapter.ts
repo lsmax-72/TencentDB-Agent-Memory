@@ -60,6 +60,7 @@ import type {
 import { DEFAULT_PAGINATION } from "../pagination.js";
 import { buildChatMemoryAssetId } from "../utils/chat-memory-asset.js";
 import { DuplicateUserKeyError } from "./interface.js";
+import { EvolutionStore } from "../../evolution/control/store.js";
 
 const require = createRequire(import.meta.url);
 function requireNodeSqlite(): typeof import("node:sqlite") {
@@ -91,6 +92,7 @@ function isStorePkCollision(err: unknown): boolean {
 type Row = Record<string, SQLInputValue>;
 
 export class SqliteMetadataStore implements IMetadataStore {
+  private evolution?: EvolutionStore;
   private db!: DatabaseSync;
   private readonly dbPath: string;
   private initialized = false;
@@ -117,7 +119,14 @@ export class SqliteMetadataStore implements IMetadataStore {
     if (this.initialized) {
       this.db.close();
       this.initialized = false;
+      this.evolution = undefined;
     }
+  }
+
+  /** Local evolution records share this instance's metadata DB, never the asset listing. */
+  getEvolutionStore(): EvolutionStore {
+    this.init();
+    return this.evolution ??= new EvolutionStore(this.db);
   }
 
   // ============================================================

@@ -17,6 +17,12 @@ import {
 } from 'tea-icons-react';
 
 export type PageId =
+  | 'evolution_overview'
+  | 'evolution_traces'
+  | 'evolution_diagnoses'
+  | 'evolution_candidates'
+  | 'evolution_evaluations'
+  | 'evolution_reviews'
   | 'workbench_board'
   | 'wiki'
   | 'code'
@@ -43,6 +49,12 @@ export interface PageMeta {
 export function usePageMeta(): Record<PageId, PageMeta> {
   const { t } = useTranslation();
   return {
+    evolution_overview: { id: 'evolution_overview', label: t('menu.evolution_overview'), desc: '运行变化 / 成本 / 阻塞', group: t('menu.group.evolution'), order: 0 },
+    evolution_traces: { id: 'evolution_traces', label: t('menu.evolution_traces'), desc: '任务 / 工具 / 资产版本', group: t('menu.group.evolution'), order: 1 },
+    evolution_diagnoses: { id: 'evolution_diagnoses', label: t('menu.evolution_diagnoses'), desc: '归因 / 证据 / 进化经验', group: t('menu.group.evolution'), order: 2 },
+    evolution_candidates: { id: 'evolution_candidates', label: t('menu.evolution_candidates'), desc: 'Skill / Memory / Wiki', group: t('menu.group.evolution'), order: 3 },
+    evolution_evaluations: { id: 'evolution_evaluations', label: t('menu.evolution_evaluations'), desc: '对照 / 回归 / 校验', group: t('menu.group.evolution'), order: 4 },
+    evolution_reviews: { id: 'evolution_reviews', label: t('menu.evolution_reviews'), desc: '审查 / 采用记录', group: t('menu.group.evolution'), order: 5 },
     workbench_board: { id: 'workbench_board', label: t('menu.workbench_board'), desc: t('menu.desc.workbench_board'), group: t('menu.group.workbench'), order: 0, affix: true },
     wiki:            { id: 'wiki',            label: t('menu.wiki'), desc: t('menu.desc.wiki'), group: t('menu.group.assets'), order: 2 },
     code:            { id: 'code',            label: t('menu.code'), desc: t('menu.desc.code'), group: t('menu.group.assets'), order: 3 },
@@ -55,10 +67,16 @@ export function usePageMeta(): Record<PageId, PageMeta> {
 }
 
 /** 分组排序顺序 */
-export const GROUP_ORDER_KEYS = ['workbench', 'organization', 'assets'] as const;
+export const GROUP_ORDER_KEYS = ['workbench', 'organization', 'assets', 'evolution'] as const;
 
 /** 每个页面在侧边栏菜单中的图标（Tea 官方图标，size 16） */
 export const ITEM_ICON: Record<PageId, JSX.Element> = {
+  evolution_overview: <DashboardIcon size={16} />,
+  evolution_traces: <CodeIcon size={16} />,
+  evolution_diagnoses: <BooksIcon size={16} />,
+  evolution_candidates: <BooksIcon size={16} />,
+  evolution_evaluations: <BooksIcon size={16} />,
+  evolution_reviews: <UserIcon size={16} />,
   workbench_board: <DashboardIcon size={16} />,
   team_members: <UserIcon size={16} />,
   team_agents: <UsergroupIcon size={16} />,
