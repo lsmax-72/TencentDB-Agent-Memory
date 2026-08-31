@@ -71,9 +71,15 @@ class PythonSandbox:
             raise ValueError("concurrent tool execution rejected")
         self._idle.clear()
         self._cancel.clear()
-        if tree_hash(self.inputs) != self.input_hashes:
+        try:
+            return self._run_locked(code, timeout_seconds)
+        finally:
+            # Mount validation or Docker startup can fail before a process exists.
             self._idle.set()
             self._lock.release()
+
+    def _run_locked(self, code, timeout_seconds):
+        if tree_hash(self.inputs) != self.input_hashes:
             raise ValueError("input snapshot changed before execution")
         tree_hash(self.outputs)
         name = "business-tool-" + uuid.uuid4().hex
@@ -129,8 +135,6 @@ class PythonSandbox:
         result = {"ok": process.returncode == 0 and stop is None, "exit_code": process.returncode,
                   "stop_reason": stop, "output": text, "output_hashes": outputs,
                   "elapsed_ms": round((time.monotonic() - started) * 1000), "image": self.image}
-        self._idle.set()
-        self._lock.release()
         return result
 
     def cancel(self):

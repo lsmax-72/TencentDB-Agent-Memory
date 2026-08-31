@@ -12,6 +12,8 @@ def validate_protocol(protocol):
                 "max_model_calls": 6, "max_tool_calls": 6,
                 "max_output_tokens_per_call": 4096, "timeout_seconds": 240,
                 "tool_timeout_seconds": 20}
+    if protocol.get("revision") == "business-memory-transfer-v1":
+        expected.update(max_model_calls=8, max_tool_calls=8, timeout_seconds=300)
     for key, value in expected.items():
         if protocol.get(key) != value:
             raise ValueError(f"RUNSPEC_MISMATCH: {key}")

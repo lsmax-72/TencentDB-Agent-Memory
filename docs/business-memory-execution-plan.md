@@ -1,5 +1,7 @@
 # 业务任务与 Memory 收益验证：连续实施计划
 
+最新执行入口（2026-08-31）：用户已授权独立实验配置自主决策，旧 R0 等待条目仅作历史。B3 真实 smoke 已 PASS；B4/B5 按 [Memory 迁移协议](business-memory-transfer-protocol.md) 执行，任务与预算已在真实 run 前冻结。具体进行状态见 `PHASE_CHECKPOINT.md`，不因写完计划而标记实验完成。
+
 日期：2026-08-31。状态：IMPLEMENTATION_PLAN；没有开始新的业务模型 run。
 
 执行更新：用户已要求开始执行并允许适配性换题，随后明确独立测试配置无需人工审查、由代理直接执行。B0、B1/B2 和 B3 已完成，见[离线 admission](business-memory-offline-admission-report.md)及[真实 smoke 报告](business-xlsx-smoke-report.md)。B6 已实现 Task 摘要与本地结果交付；B4/B5 Memory 收益对照未启动，B7 仅完成本轮 smoke 收口。以下原规划仍作为边界，不把 smoke PASS 扩大解释。

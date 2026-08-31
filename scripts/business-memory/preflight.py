@@ -63,5 +63,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("archive", type=Path)
     parser.add_argument("destination", type=Path)
+    parser.add_argument("--task-id", default="141-20")
     args = parser.parse_args()
-    print(json.dumps(prepare(args.archive, args.destination), ensure_ascii=False, indent=2))
+    print(json.dumps(prepare(args.archive, args.destination, args.task_id), ensure_ascii=False, indent=2))

@@ -28,9 +28,9 @@ class Evidence(AgentHook):
         self.usage = {}
 
     async def before_iteration(self, context):
-        self.model_calls += 1
-        if self.model_calls > self.protocol["max_model_calls"]:
+        if self.model_calls >= self.protocol["max_model_calls"]:
             raise RuntimeError("BUDGET_EXHAUSTED: model calls")
+        self.model_calls += 1
 
     async def after_iteration(self, context):
         if context.usage:
@@ -58,13 +58,19 @@ class Evidence(AgentHook):
             event.update(result=str(error), outcome="FAILED")
 
 
-async def run(root: Path):
+async def run(root: Path, run_key=None):
     settings = json.loads((root / "private/settings.json").read_text())
-    protocol = json.loads((root / "runtime/business/protocol-smoke-v1.json").read_text())
+    if run_key:
+        from study_contract import verify_freeze
+        verify_freeze(root)
+        spec = json.loads((root / "runspecs.json").read_text())[run_key]
+        settings = {**settings, **spec}
+    protocol_name = "protocol-transfer-v1.json" if run_key else "protocol-smoke-v1.json"
+    protocol = json.loads((root / "runtime/business" / protocol_name).read_text())
     validate_protocol(protocol)
     prepared = Path(settings["prepared"])
     manifest = json.loads((prepared / "manifest.json").read_text())
-    run_dir = root / "run"
+    run_dir = root / "runs" / run_key if run_key else root / "run"
     run_dir.mkdir(mode=0o700)
     inputs, outputs, workspace = run_dir / "inputs", run_dir / "outputs", run_dir / "workspace"
     inputs.mkdir(mode=0o755)
@@ -77,11 +83,12 @@ async def run(root: Path):
     identity = settings["identity"]
     config = build_config(protocol, proxy_url=settings["proxy_url"],
                           user_key=settings["user_key"], identity=identity)
-    config_path = root / "private/nanobot-business.json"
+    config_path = root / "private" / (f"nanobot-{run_key}.json" if run_key else "nanobot-business.json")
     with config_path.open("x") as stream:
         json.dump(config, stream)
     config_path.chmod(0o600)
-    sandbox = PythonSandbox(inputs, outputs, Path(et_xmlfile.__file__).parent.parent,
+    packages = root / "runtime/packages" if run_key else Path(et_xmlfile.__file__).parent.parent
+    sandbox = PythonSandbox(inputs, outputs, packages,
                             protocol["sandbox_image"])
     bot = Nanobot.from_config(config_path=config_path, workspace=workspace)
     register_spreadsheet_only(bot, sandbox)
@@ -89,7 +96,8 @@ async def run(root: Path):
     task = manifest["task"]["instruction"] + (
         "\n\nHost delivery contract: use spreadsheet_python with openpyxl to process /inputs/input.xlsx. "
         "Save the completed workbook as /outputs/result.xlsx. Do not merely describe or print macro code. "
-        "Preserve workbook structure and all unmatched records. Stop after verifying the output exists."
+        + (protocol["delivery_suffix"] if run_key else
+           "Preserve workbook structure and all unmatched records. Stop after verifying the output exists.")
     )
     started = time.monotonic()
     result, error = None, None
@@ -124,4 +132,4 @@ async def run(root: Path):
 
 
 if __name__ == "__main__":
-    asyncio.run(run(Path(sys.argv[1]).resolve()))
+    asyncio.run(run(Path(sys.argv[1]).resolve(), sys.argv[2] if len(sys.argv) > 2 else None))

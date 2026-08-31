@@ -15,8 +15,9 @@ const save=(p,v)=>writeFileSync(resolve(root,p),JSON.stringify(v,null,2)+'\n',{f
 const read=p=>JSON.parse(readFileSync(resolve(root,p),'utf8'));
 const hash=b=>createHash('sha256').update(b).digest('hex');
 const settings=stage==='setup'?{}:read('private/settings.json');
+const studySetup=stage==='setup'&&process.argv[5]?JSON.parse(readFileSync(process.argv[5],'utf8')):null;
 const infra=settings.infrastructure??{core:tag+'-core',proxy:tag+'-proxy',hub:tag+'-hub',network:tag,
-  corePort:19920,proxyPort:19696,hubPort:19725,knowledgePort:19924};
+  ...(studySetup?.ports??{corePort:19920,proxyPort:19696,hubPort:19725,knowledgePort:19924})};
 const coreUrl=`http://127.0.0.1:${infra.corePort}`,proxyUrl=`http://127.0.0.1:${infra.proxyPort}`,
   hubUrl=`http://127.0.0.1:${infra.hubPort}`;
 async function ready(url){for(let i=0;i<45;i++){try{if((await fetch(url,{signal:AbortSignal.timeout(2000)})).ok)return;}catch{}await new Promise(r=>setTimeout(r,1000));}throw Error('unhealthy '+url);}
@@ -37,6 +38,7 @@ if(stage==='setup'){
   Object.assign(settings,{instance:tag,infrastructure:infra,prepared,gateway_key:randomBytes(32).toString('hex'),
     user_key:'sk-mem-'+randomBytes(24).toString('hex'),upstream:'http://10.195.214.152:8100/v1',
     upstream_key:local.providers?.vllm?.apiKey||''});assert(settings.upstream_key);
+  if(studySetup) Object.assign(settings,{study:true,extraction_key:randomBytes(32).toString('hex')});
   save('preflight.json',{at:new Date().toISOString(),git:execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(),
     provider:'vllm',model:'qwen3.8-27b',temperature:0,fallback:false,backend:'standalone/sqlite',
     images:{core:'sha256:9798254a8cc06276b7c5b3c19df49f136fae25d579564e1f01f9c4b9b8cd2d11',
@@ -45,6 +47,12 @@ if(stage==='setup'){
     production_snapshot:snapshot('tdai-memory-core')});
   const core={deployMode:'standalone',stateBackend:'local',server:{port:8420,host:'0.0.0.0',apiKey:settings.gateway_key},data:{baseDir:'/data/tdai-memory'},
     llm:{baseUrl:'',apiKey:'',model:''},memory:{storeBackend:'sqlite',embedding:{provider:'none'},capture:{enabled:false},extraction:{enabled:false},pipeline:{enableWarmup:false,everyNConversations:1000000,l1IdleTimeoutSeconds:86400}},skill:{enabled:false,extraction:{enabled:false}}};
+  if(studySetup){
+    core.instanceId=tag;
+    core.llm={baseUrl:`http://${infra.proxy}:8096/formation/v1`,apiKey:settings.extraction_key,model:'qwen3.8-27b',maxTokens:4096,timeoutMs:180000};
+    core.memory.extraction={enabled:true,enableDedup:false,maxMemoriesPerSession:6,promptMode:'code'};
+    core.memory.pipeline={enableWarmup:false,everyNConversations:1,l1IdleTimeoutSeconds:86400,l2DelayAfterL1Seconds:864000,l2MinIntervalSeconds:864000,l2MaxIntervalSeconds:864000};
+  }
   save('private/core.yaml',core);writeFileSync(resolve(root,'private/settings.json'),JSON.stringify(settings,null,2),{flag:'wx',mode:0o600});
   docker('network','create',infra.network);docker('run','-d','--name',infra.core,'--network',infra.network,'-p',`127.0.0.1:${infra.corePort}:8420`,
     '-v',`${root}/core-data:/data/tdai-memory`,'-v',`${root}/private/core.yaml:/data/config/tdai-gateway.yaml:ro`,'-e','TDAI_GATEWAY_API_KEY=','-e','TDAI_DATA_DIR=/data/tdai-memory',read('preflight.json').images.core);
