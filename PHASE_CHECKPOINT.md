@@ -1,5 +1,14 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 02:40 续跑：候选专用受预算执行器
+
+- 前一稳定提交 `b2f6871`：旧入口写屏障+后台生命周期；本节继续实现，没有等待用户下一步。
+- 新增 `proposal-runner.ts`，由独立私有review binding构造；复用现有AI SDK和Skill Review/L2/L3工具形态，但不复用聊天模型和默认文件系统工具。只有真实ShadowStorageBackend或固定Skill候选工具名单可运行，任意shell/缺shadow拒绝。
+- 在实际HTTP请求前逐次预留token/model-call预算，包含工具后续轮次；SDK maxRetries=0，model/temperature/endpoint受核验，usage缺失不填0、5xx不重试，返回错模型/截断拒绝。每个模型step和工具result入持久记录，调用前及工具执行前复查授权/profile。
+- 10项新增离线测试通过：真实AI SDK消费mock HTTP responses，调用真实Skill Review生成隔离candidate，以及L2/L3真实后处理生成冻结文件；预算第2轮阻断、缺usage、5xx、授权撤销、路径逃逸和任意工具拒绝。零真实provider访问，不等于真实模型效果成立。
+- 首轮6项失败因旧jobTransition只接受diagnosis；扩为固定内部任务类型并复测。另1项测试误读event字段payload，按真实document结构修正断言。没有改冻结Oracle/Gate或模型协议。
+- **尚未将诊断job接到三类生成job。** 下一步先补候选数量的调用前slot预留+冻结原子提交，再接持久generation dispatcher、ACL过滤的实际目标/源快照、Wiki服务侧隔离调用。当前helper不能代替完整接线，admission继续关闭。
+
 ## 2026-09-01 02:32 续跑：旧入口写屏障与生命周期
 
 - 从 `e209649` 接续，仍未完成全量目标，未更新主8125。用户三个deployment改动保持原样。

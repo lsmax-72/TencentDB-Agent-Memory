@@ -10,11 +10,16 @@ const configSchema = z.object({
 }).strict();
 export type ReviewModelConfig = z.infer<typeof configSchema>;
 
-/** Independent, server-resolved reviewer binding. It does not inherit the chatting model. */
-export function createReviewModel(raw: ReviewModelConfig, request: typeof fetch = fetch): DiagnosisModel {
+export function parseReviewModelConfig(raw: ReviewModelConfig): ReviewModelConfig {
   const config = configSchema.parse(raw);
   const base = new URL(config.base_url);
   if (!["http:", "https:"].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw new EvolutionError(400, "REVIEW_ENDPOINT_INVALID");
+  return config;
+}
+
+/** Independent, server-resolved reviewer binding. It does not inherit the chatting model. */
+export function createReviewModel(raw: ReviewModelConfig, request: typeof fetch = fetch): DiagnosisModel {
+  const config = parseReviewModelConfig(raw);
   return {
     modelId: config.model,
     tokenCeiling: config.token_ceiling,

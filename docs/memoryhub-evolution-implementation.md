@@ -23,6 +23,8 @@
 
 ## 已锁定边界
 
+候选执行器补充（2026-09-01）：独立binding已能构造受预算proposal runner；真实SDK+mock HTTP测试验证Skill Review与L2/L3影子工具、逐次usage/权限/禁retry和沙箱拒绝。尚未接诊断后的持久生成调度，候选数量slot/原子冻结和实际目标快照也仍待完成；不开放自动化，不宣称真实模型闭环。
+
 - 主交付为现有 8125 Hub；沿用 TencentDB / Tea 界面，不使用 MyUI。
 - Skill、Memory L1/L2/L3、Wiki 纳入候选治理；Code Graph 不变。
 - Wiki 维护自动、正文审查；Skill 采用单独人工操作；Memory 只有可独立确认的低风险变动允许自动采用。
