@@ -140,7 +140,8 @@ class ToolMappingTests(unittest.TestCase):
 
     def test_protocol_requires_explicit_decision_and_preserves_model(self):
         from runner_contract import build_config, validate_protocol
-        protocol = json.loads(Path(__file__).with_name("protocol-smoke.draft.json").read_text())
+        protocol = json.loads(Path(__file__).with_name("protocol-smoke-v1.json").read_text())
+        protocol.update(status="REVIEW_REQUIRED", approval_ref=None)
         with self.assertRaisesRegex(ValueError, "REVIEW_REQUIRED"):
             validate_protocol(protocol)
         protocol.update(status="APPROVED_BY_USER", approval_ref="test-only-decision")
@@ -156,7 +157,7 @@ class ToolMappingTests(unittest.TestCase):
 
     def test_old_proxy_and_incomplete_usage_are_rejected(self):
         from runner_contract import build_config, usage_summary
-        protocol = json.loads(Path(__file__).with_name("protocol-smoke.draft.json").read_text())
+        protocol = json.loads(Path(__file__).with_name("protocol-smoke-v1.json").read_text())
         protocol.update(status="APPROVED_BY_USER", approval_ref="test-only-decision")
         with self.assertRaisesRegex(ValueError, "historical proxy"):
             build_config(protocol, proxy_url="http://127.0.0.1:19096/proxy/business-test/v1",

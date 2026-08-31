@@ -2,7 +2,7 @@
 
 日期：2026-08-31。状态：IMPLEMENTATION_PLAN；没有开始新的业务模型 run。
 
-执行更新：用户已要求开始执行并允许适配性换题。B0 和 B1/B2 离线部分已有实现与测试证据，见 [离线 admission 报告](business-memory-offline-admission-report.md)；完整真实 runner 尚未实现，R0 配置决定待回复，B3–B7 不算完成。以下内容保留原规划基线，不把“本轮请求是规划”继续当成用户未授权任何开发。
+执行更新：用户已要求开始执行并允许适配性换题，随后明确独立测试配置无需人工审查、由代理直接执行。B0、B1/B2 和 B3 已完成，见[离线 admission](business-memory-offline-admission-report.md)及[真实 smoke 报告](business-xlsx-smoke-report.md)。B6 已实现 Task 摘要与本地结果交付；B4/B5 Memory 收益对照未启动，B7 仅完成本轮 smoke 收口。以下原规划仍作为边界，不把 smoke PASS 扩大解释。
 
 ## 1. 目标、起点与授权
 

@@ -1,7 +1,7 @@
 {
-  "revision": "business-xlsx-smoke-v1-draft",
-  "status": "REVIEW_REQUIRED",
-  "approval_ref": null,
+  "revision": "business-xlsx-smoke-v1",
+  "status": "APPROVED_BY_USER",
+  "approval_ref": "chat-2026-08-31-user-delegated-independent-test-decisions",
   "scope": "one isolated development smoke, not Memory efficacy or Skill evaluation",
   "task_id": "141-20",
   "provider": "vllm",

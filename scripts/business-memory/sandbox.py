@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -36,6 +37,10 @@ class PythonSandbox:
         if self.inputs == self.outputs or self.inputs in self.outputs.parents or self.outputs in self.inputs.parents:
             raise ValueError("input and output mounts must be disjoint")
         self.image = image
+        self._cancel = threading.Event()
+        self._idle = threading.Event()
+        self._idle.set()
+        self._lock = threading.Lock()
         self.input_hashes = tree_hash(self.inputs)
         for module in ("openpyxl", "et_xmlfile"):
             if not (self.packages / module).is_dir() or (self.packages / module).is_symlink():
@@ -62,7 +67,13 @@ class PythonSandbox:
             raise ValueError("code must be bounded UTF-8 text")
         if not 0 < timeout_seconds <= 60:
             raise ValueError("tool timeout must be in (0,60]")
+        if not self._lock.acquire(blocking=False):
+            raise ValueError("concurrent tool execution rejected")
+        self._idle.clear()
+        self._cancel.clear()
         if tree_hash(self.inputs) != self.input_hashes:
+            self._idle.set()
+            self._lock.release()
             raise ValueError("input snapshot changed before execution")
         tree_hash(self.outputs)
         name = "business-tool-" + uuid.uuid4().hex
@@ -74,7 +85,9 @@ class PythonSandbox:
             process = subprocess.Popen(self.command(name), stdin=source, stdout=logs, stderr=logs)
             try:
                 while process.poll() is None:
-                    if time.monotonic() - started > timeout_seconds:
+                    if self._cancel.is_set():
+                        stop = "AGENT_ABORTED"
+                    elif time.monotonic() - started > timeout_seconds:
                         stop = "TOOL_TIMEOUT"
                     elif logs.tell() > LOG_LIMIT:
                         stop = "TOOL_OUTPUT_LIMIT"
@@ -113,9 +126,18 @@ class PythonSandbox:
             outputs, stop = {}, "TOOL_POLICY_VIOLATION"
         if tree_hash(self.inputs) != self.input_hashes:
             stop = "INPUT_SNAPSHOT_CHANGED"
-        return {"ok": process.returncode == 0 and stop is None, "exit_code": process.returncode,
-                "stop_reason": stop, "output": text, "output_hashes": outputs,
-                "elapsed_ms": round((time.monotonic() - started) * 1000), "image": self.image}
+        result = {"ok": process.returncode == 0 and stop is None, "exit_code": process.returncode,
+                  "stop_reason": stop, "output": text, "output_hashes": outputs,
+                  "elapsed_ms": round((time.monotonic() - started) * 1000), "image": self.image}
+        self._idle.set()
+        self._lock.release()
+        return result
+
+    def cancel(self):
+        self._cancel.set()
+
+    def wait_idle(self, timeout):
+        return self._idle.wait(timeout)
 
 
 def tool_result(result):

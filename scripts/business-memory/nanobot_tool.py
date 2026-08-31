@@ -14,7 +14,7 @@ class SpreadsheetPythonTool(Tool):
         "Output files persist between calls; Python variables do not. No network, macros, "
         "host files or additional packages. Print observations/results needed for the task."
     )
-    parameters = {"type": "object", "properties": {"code": {"type": "string"}},
+    parameters = {"type": "object", "properties": {"code": {"type": "string", "maxLength": 128000}},
                   "required": ["code"], "additionalProperties": False}
     exclusive = True
 

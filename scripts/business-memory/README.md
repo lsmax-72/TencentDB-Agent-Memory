@@ -4,7 +4,9 @@
 
 当前已实现：固定数据校验/分离、XLSX 检查、独立单元格判分、受限 Python 执行器、nanobot SDK 工具注册、配置/usage 校验及可重复离线 admission。
 
-当前**未实现/未执行**：完整 Agent.run 编排、新隔离 Core/Proxy/Hub 启动、真实 LLM smoke、Memory 提取/迁移对照。`runner_contract.py` 是纯输入/证据校验，不是已经跑通的运行器。不要将 `validation.json` 的 PASS 当作业务任务完成。
+当前已新增并验证：`nanobot_business.py` + `acceptance.mjs` 的完整 Agent.run、新隔离 Core/Proxy/Hub、真实 LLM smoke 和审计。Attempt 与结果见 `docs/business-xlsx-smoke-report.md`。
+
+当前**未实现/未执行**：Memory 提取/迁移对照。`runner_contract.py` 仍是纯输入/证据校验；不要将离线 `validation.json` 的 PASS 单独当作业务任务完成。
 
 ## 运行
 
@@ -35,4 +37,4 @@ BUSINESS_DOCKER_TESTS=1 /Users/lsmax/Coder/nanobot/.venv/bin/python -m unittest 
 
 ## 恢复
 
-先读 `PHASE_CHECKPOINT.md` 和 `docs/business-memory-execution-plan.md`。真实业务协议草案是本目录 `protocol-smoke.draft.json`，当前 `REVIEW_REQUIRED`，不能自动改成批准。确认后继续实现完整 runner/独立服务实例，冻结再跑；旧服务、旧评测和全部失败保留。
+先读 `PHASE_CHECKPOINT.md`、`docs/business-memory-execution-plan.md` 和真实 smoke 报告。用户已授权代理自行决定这类独立测试配置，冻结协议是 `protocol-smoke-v1.json`。首次 smoke 已完成，不重复运行；下一步是新的 Memory 收益协议与任务冻结，旧服务、旧评测和全部失败继续保留。

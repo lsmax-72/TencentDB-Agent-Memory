@@ -2,6 +2,8 @@
 
 日期：2026-08-31。结论：**nanobot SDK 工具层可以处理所选 XLSX 样例，不需要因工具能力不足换题；真实 Agent + LLM 是否完成任务尚未验证。**
 
+> 后续状态：用户授权代理自主决定独立测试配置后，真实 Agent smoke 已完成并 PASS。见 [真实 smoke 报告](business-xlsx-smoke-report.md)。本报告保留此前离线 admission 时点，不重写历史结论。
+
 ## 已执行
 
 - 从上游固定 revision 下载 SpreadsheetBench Verified archive，SHA-256 `10ef893dd29cb13ab97143ea787e68cdc9574a13873ab9a54e50b31dc03fc949`，与已记录数据指纹一致。

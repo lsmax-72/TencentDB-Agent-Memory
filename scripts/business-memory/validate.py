@@ -76,7 +76,7 @@ def validate(prepared: Path, root: Path):
         write_json(root / "negative-control-oracle.json", oracle)
         if oracle["status"] != "TASK_FAIL":
             raise RuntimeError("unchanged copy did not produce expected negative control")
-        sources = [*here.glob("*.py"), here / "protocol-smoke.draft.json"]
+        sources = [*here.glob("*.py"), here / "protocol-smoke-v1.json"]
         freeze = {"image": IMAGE, "python": sys.version, "openpyxl": openpyxl.__version__,
                   "nanobot_revision": subprocess.check_output(["git", "-C", "/Users/lsmax/Coder/nanobot",
                                                                "rev-parse", "HEAD"], text=True).strip(),
