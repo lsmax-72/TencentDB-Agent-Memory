@@ -52,6 +52,10 @@ if(stage==='init'){
   writeFileSync(opts,JSON.stringify({ports:{corePort:base+920,proxyPort:base+696,hubPort:base+725,knowledgePort:base+924}}),{flag:'wx',mode:0o600});
   execFileSync('node',[resolve(here,'acceptance.mjs'),'setup',root,root+'-prepared/'+protocol.formation_tasks[0],opts],{stdio:'pipe'});
   settings=read('private/settings.json');
+  if(process.argv[4]==='producer-v2'){
+    settings.memory_producer='business-memory-producer-v2';
+    writeFileSync(resolve(root,'private/settings.json'),JSON.stringify(settings,null,2),{mode:0o600});
+  }
   cpSync(root+'-prepared',resolve(root,'prepared'),{recursive:true,errorOnExist:true,force:false});
   const specs={};
   for(const id of [...protocol.formation_tasks,...protocol.transfer_tasks]){
@@ -70,6 +74,21 @@ if(stage==='init'){
   }
   save('runspecs.json',specs);mkdirSync(resolve(root,'runs'),{mode:0o700});
   execFileSync('node',[resolve(here,'acceptance.mjs'),'services',root],{stdio:'pipe'});
+  if(settings.memory_producer){
+    const producer=JSON.parse(readFileSync(resolve(here,'memory-producer-v2.json'))),source=producer.source_root;
+    assert(source.endsWith('/outputs/'+producer.parent_attempt));
+    mkdirSync(resolve(root,'runtime/formation-sources'),{mode:0o700});
+    for(const id of protocol.formation_tasks)cpSync(resolve(source,`runs/${id}-formation/l0-source.json`),resolve(root,`runtime/formation-sources/${id}.json`));
+    const es=readFileSync(resolve(source,'proxy-events.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+    const req=es.filter(e=>e.kind==='request'),res=es.filter(e=>e.kind==='response');
+    assert.equal(req.length,res.length);assert(req.every(r=>res.some(s=>s.call_id===r.call_id)));
+    save('formation-source-cost.json',{source,original_status:'INFRA_ERROR (retained)',
+      actual_wire_totals:totals(res.map(r=>({...r,usage:{...r.usage,model_calls:1,tool_calls:0}}))),
+      tool_calls:protocol.formation_tasks.reduce((s,id)=>s+JSON.parse(readFileSync(resolve(source,`runs/${id}-formation/agent-run.json`))).usage.tool_calls,0),
+      includes_late_responses:true,reran_agent:false});
+    save('attempt-lineage.json',{kind:'MEMORY_PRODUCER_REVISION',parent:producer.parent_attempt,source,
+      producer_revision:producer.revision,transfer_runs_before_freeze:0,historical_attempts_unchanged:true});
+  }
   mkdirSync(resolve(root,'runtime/packages'),{mode:0o755});
   const packages='/Users/lsmax/Coder/nanobot/.venv/lib/python3.13/site-packages';
   for(const module of ['openpyxl','et_xmlfile'])cpSync(resolve(packages,module),resolve(root,'runtime/packages',module),{
@@ -132,14 +151,21 @@ if(stage==='formation'){
   }
   const denied=await fetch(`http://127.0.0.1:${settings.infrastructure.proxyPort}/formation/v1/chat/completions`,{method:'POST',body:'{}'});assert.equal(denied.status,403);
   assert(!events().length);save('admission.json',{status:'PASS',negative_cases:9,model_calls:0});
-  for(const id of protocol.formation_tasks)await runOne(id+'-formation');
+  if(!settings.memory_producer)for(const id of protocol.formation_tasks)await runOne(id+'-formation');
   // Only original training requests and actual tool/output evidence enter L0. Never oracle data.
   for(const id of protocol.formation_tasks){
-    const spec=read('runspecs.json')[id+'-formation'],r=read(`runs/${id}-formation/agent-run.json`),task=read(`prepared/${id}/manifest.json`).task;
-    const messages=[{role:'user',content:task.instruction},
+    const spec=read('runspecs.json')[id+'-formation'];
+    let messages;
+    if(settings.memory_producer){
+      mkdirSync(resolve(root,`runs/${id}-formation`),{mode:0o700});
+      messages=read(`runtime/formation-sources/${id}.json`);
+    }else{
+    const r=read(`runs/${id}-formation/agent-run.json`),task=read(`prepared/${id}/manifest.json`).task;
+    messages=[{role:'user',content:task.instruction},
       ...r.tool_events.map(e=>({role:'assistant',content:JSON.stringify({tool:e.name,arguments:e.arguments,result:e.result,outcome:e.outcome})})),
       {role:'assistant',content:r.final_output||'No final output was produced.'}].flatMap(m=>{
         const parts=[];for(let i=0;i<m.content.length;i+=7000)parts.push({...m,content:m.content.slice(i,i+7000)});return parts;});
+    }
     assert(messages.length<=100);save(`runs/${id}-formation/l0-source.json`,messages);
     const stored=await api('/v3/conversation/add',{...scope(),session_id:spec.identity.session_id,task_id:spec.identity.task_id,messages});
     save(`runs/${id}-formation/l0-receipt.json`,stored);
@@ -210,7 +236,7 @@ if(stage==='audit'){
   const cost=Object.fromEntries(['total_tokens','tool_calls','model_calls'].map(k=>[k,memory[k]/none[k]]));
   const quality=pairs.some(p=>p.classification==='newly_fixed')&&!pairs.some(p=>p.classification==='newly_broken');
   const result={kind:'EXPLORATORY_MEMORY_TRANSFER_NOT_PROMOTION',status:pairs.some(p=>p.classification==='incomparable')?'INFRA_ERROR':quality&&Object.values(cost).every(v=>v<=1.2)?'POSITIVE_MAIN_SIGNAL':'NO_ACCEPTABLE_MAIN_BENEFIT',
-    pairs,none_totals:none,memory_totals:memory,cost_ratios:cost,formation_task_cost:totals(all.filter(r=>r.arm==='FORMATION')),
+    pairs,none_totals:none,memory_totals:memory,cost_ratios:cost,formation_task_cost:settings.memory_producer?read('formation-source-cost.json'):totals(all.filter(r=>r.arm==='FORMATION')),
     extraction_cost:snapshot.extraction_usage,probes:all.filter(r=>/-p[12]$/.test(r.key)),memory_unchanged:true,
     l1_count:rows.total,transfer_l0_count:0,skill_assets:0,production_storage_unchanged:productionUnchanged,
     limitation:'3 tasks; public benchmark potential pretraining exposure; value-only oracle; SQLite/FTS, not cloud TencentDB'};

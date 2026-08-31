@@ -1,0 +1,18 @@
+{
+  "revision": "business-memory-producer-v2",
+  "parent_attempt": "business-xlsx-memory-20260831-r2",
+  "source_root": "/Users/lsmax/Coder/phase6-artifacts/outputs/business-xlsx-memory-20260831-r2",
+  "source_tasks": ["343-20", "379-36"],
+  "purpose": "Fix structured extraction reliability before any transfer task is executed; retain failed producer v1 and use the same full real source traces, including failure.",
+  "chat_template_kwargs": {"enable_thinking": false},
+  "response_format": {"type": "json_schema", "json_schema": {"name": "work_memory_scenes", "strict": true,
+    "schema": {"type": "array", "items": {"type": "object", "required": ["scene_name", "message_ids", "memories"], "additionalProperties": false,
+      "properties": {"scene_name": {"type": "string"}, "message_ids": {"type": "array", "items": {"type": "string"}},
+        "memories": {"type": "array", "items": {"type": "object", "required": ["content", "type", "priority", "source_message_ids", "metadata"], "additionalProperties": false,
+          "properties": {"content": {"type": "string"}, "type": {"type": "string"}, "priority": {"type": "number"}, "source_message_ids": {"type": "array", "items": {"type": "string"}}, "metadata": {"type": "object"}}}}}}}}},
+  "unchanged": ["Core L1 code-mode prompt/parser", "formation trace content", "model id", "temperature 0", "4096 extraction output-token budget", "max two extraction calls", "all transfer Agent configuration/cases/Oracle/budget/recall/criteria"],
+  "not_changed": "Thinking remains at original default for the actual nanobot task arms; only the separate memory producer is non-thinking.",
+  "approval_basis": "User delegated implementation and independent business experiment decisions; no production or old evaluation changes.",
+  "provider_probe": "r2/extraction-format-diagnostic.json: HTTP 200, 33 tokens, valid JSON, no reasoning",
+  "sources": ["https://docs.vllm.ai/en/v0.19.0/features/reasoning_outputs/", "https://docs.vllm.ai/en/v0.19.0/features/structured_outputs/"]
+}

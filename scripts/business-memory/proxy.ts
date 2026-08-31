@@ -115,12 +115,19 @@ serve({hostname:'0.0.0.0',port:8096,fetch:async request=>{
     if(body.model!=='qwen3.8-27b'||body.stream===true||body.tools?.length)
       return Response.json({error:'formation_model_contract'},{status:403});
     body.temperature=0;body.max_tokens=4096;
+    if(settings.memory_producer){
+      const producer=JSON.parse(readFileSync('/acceptance/runtime/business/memory-producer-v2.json','utf8'));
+      body.chat_template_kwargs=producer.chat_template_kwargs;
+      body.response_format=producer.response_format;
+    }
     const call_id=++formationCalls;
-    event({kind:'formation_request',call_id,model:body.model,temperature:body.temperature,body_hash:sha(JSON.stringify(body))});
+    event({kind:'formation_request',call_id,model:body.model,temperature:body.temperature,
+      producer:settings.memory_producer??'v1',body_hash:sha(JSON.stringify(body))});
     const response=await originalFetch(settings.upstream+'/chat/completions',{method:'POST',
       headers:{'content-type':'application/json',Authorization:`Bearer ${settings.upstream_key}`},body:JSON.stringify(body)});
     const value:any=await response.clone().json();
-    event({kind:'formation_response',call_id,status:response.status,model:value.model,usage:value.usage,output_hash:sha(JSON.stringify(value))});
+    event({kind:'formation_response',call_id,status:response.status,model:value.model,usage:value.usage,
+      finish_reason:value.choices?.[0]?.finish_reason,output_hash:sha(JSON.stringify(value))});
     return response;
   }
   if(!admitted(request)) return Response.json({error:'business_scope_denied'},{status:403});

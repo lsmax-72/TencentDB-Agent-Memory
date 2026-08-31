@@ -11,6 +11,18 @@ from sandbox import PythonSandbox
 
 
 class StudyTests(unittest.TestCase):
+    def test_producer_revision_does_not_change_task_arm_generation(self):
+        from runner_contract import build_config
+        base=Path(__file__).parent
+        producer=json.loads((base/'memory-producer-v2.json').read_text())
+        protocol=json.loads((base/'protocol-transfer-v1.json').read_text())
+        self.assertEqual(producer['source_tasks'],protocol['formation_tasks'])
+        self.assertEqual(producer['response_format']['json_schema']['schema']['type'],'array')
+        config=build_config(protocol,proxy_url='http://127.0.0.1:22696/proxy/business-test/v1',
+            user_key='test-key',identity={'team_id':'t','agent_id':'a','task_id':'j','session_id':'s'})
+        self.assertNotIn('enable_thinking',json.dumps(config))
+        self.assertEqual(config['agents']['defaults']['maxTokens'],4096)
+
     def test_bounded_provider_does_not_retry_transient_errors(self):
         from bounded_provider import BoundedProvider
         from nanobot.providers.base import LLMResponse
