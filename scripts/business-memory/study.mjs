@@ -197,9 +197,14 @@ if(stage==='snapshot'){
   console.log('MEMORY_FROZEN '+rows.total);
 }
 
-if(stage==='transfer'){
+if(stage==='transfer'||stage==='remaining'){
   assert.equal(sha(resolve(root,'memory-snapshot.json')),read('memory-freeze.json').sha256);
-  for(const item of protocol.order){const [id,arm]=item.split(':');await runOne(id+'-'+arm);}
+  for(const item of protocol.order){
+    const [id,arm]=item.split(':'),key=id+'-'+arm;
+    // Resume only missing runs. Partial directories still fail closed in runOne.
+    if(stage==='remaining'&&existsSync(resolve(root,`runs/${key}/result.json`)))continue;
+    await runOne(key);
+  }
 }
 
 if(stage==='probes'){

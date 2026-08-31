@@ -1,4 +1,4 @@
-# 独立表格业务接入（当前为离线 admission）
+# 独立表格业务与 Memory 迁移实验
 
 这组脚本不进入正式启动流程，不修改 Phase 4–6 Evaluation、Candidate 或旧实例。
 
@@ -6,7 +6,7 @@
 
 当前已新增并验证：`nanobot_business.py` + `acceptance.mjs` 的完整 Agent.run、新隔离 Core/Proxy/Hub、真实 LLM smoke 和审计。Attempt 与结果见 `docs/business-xlsx-smoke-report.md`。
 
-当前**未实现/未执行**：Memory 提取/迁移对照。`runner_contract.py` 仍是纯输入/证据校验；不要将离线 `validation.json` 的 PASS 单独当作业务任务完成。
+Memory提取与三对迁移实验、四次Probe已完成；链路/隔离通过，但没有可接受收益，研究主状态INFRA_ERROR。见 `docs/business-memory-transfer-report.md`。不要将离线 `validation.json` 的 PASS 单独当作业务任务完成，也不要把记忆可用当成有收益。
 
 ## 运行
 
@@ -21,7 +21,7 @@ BUSINESS_DOCKER_TESTS=1 /Users/lsmax/Coder/nanobot/.venv/bin/python -m unittest 
 /Users/lsmax/Coder/nanobot/.venv/bin/python scripts/business-memory/validate.py <PREPARED_DIR> <NEW_VALIDATION_DIR>
 ```
 
-`preflight.py` 只接受已记录的 archive SHA-256，并提取任务 `141-20`。初始文件和 golden 分开保存，后者绝不挂载给 Agent 工具。原始文件 `init.xlsx` / `golden.xlsx` 命名与旧上游 evaluation CLI 的 `input.xlsx` / `answer.xlsx` 不同；不要直接调用那个 CLI 的默认三 fixture 循环。
+`preflight.py` 只接受已记录的 archive SHA-256，默认提取任务 `141-20`，可显式传 `--task-id`。初始文件和 golden 分开保存，后者绝不挂载给 Agent 工具。原始文件 `init.xlsx` / `golden.xlsx` 命名与旧上游 evaluation CLI 的 `input.xlsx` / `answer.xlsx` 不同；不要直接调用那个 CLI 的默认三 fixture 循环。
 
 下载来源：固定 revision `49b73a94775fb489063f60ca1865e3a650079a79` 的 [官方 GitHub 数据](https://github.com/RUCKBReasoning/SpreadsheetBench/blob/49b73a94775fb489063f60ca1865e3a650079a79/data/spreadsheetbench_verified_400.tar.gz)。参考 [官方数据卡](https://huggingface.co/datasets/KAKA22/SpreadsheetBench) 的 CC-BY-SA-4.0 条款；原始数据不提交 Git。本项目只做独立开发样例，不宣称官方榜单/held-out 成绩。
 
@@ -37,9 +37,16 @@ BUSINESS_DOCKER_TESTS=1 /Users/lsmax/Coder/nanobot/.venv/bin/python -m unittest 
 
 ## 恢复
 
-先读 `PHASE_CHECKPOINT.md`、`docs/business-memory-execution-plan.md` 和真实 smoke 报告。用户已授权代理自行决定这类独立测试配置，冻结协议是 `protocol-smoke-v1.json`。首次 smoke 已完成，不重复运行；下一步是新的 Memory 收益协议与任务冻结，旧服务、旧评测和全部失败继续保留。
-# Memory transfer continuation
+先读 `PHASE_CHECKPOINT.md`、`docs/business-memory-transfer-report.md` 和执行计划。用户已授权代理自行决定独立测试配置；smoke和迁移实验已完成，不重复运行。旧服务、旧评测和全部失败继续保留。
+
+## Memory transfer continuation
 
 独立研究协议见 `docs/business-memory-transfer-protocol.md`。`study.mjs` 按 `init → formation → snapshot → transfer → probes → audit` 执行；后续 stage 使用 Attempt 内 frozen 副本。`init ROOT producer-v2` 只在新根目录建立新的形成端 revision，复用版本化真实 trace，不覆盖旧结果。`audit_study.mjs hub|post ROOT` 仅采集 API/usage/隔离证据，不运行 Agent 或重写成绩。
 
 `BoundedProvider` 控制 nanobot 外层 retry 与实际模型调用计数，不修改官方源码；容器工具继续保持网络关闭、输入只读。旧 smoke 协议和旧 Skill Evaluation 不改变。
+
+`study.mjs remaining ROOT`仅恢复不存在目录的主run，已完成跳过、partial拒绝覆盖；不得把INFRA自动当成待重跑。`summarize_study.mjs ROOT`只给本次r4生成追加式费用/证据索引，原结果不变。输出存在时所有collector拒绝覆盖，重新审计应使用独立文件名/revision。
+
+新增诊断测试：`node --test scripts/business-memory/*-lib.test.mjs`。真实实验时使用Attempt内冻结runtime；仓库最新只读collector使用独立hash记录，不冒充冻结runner的一部分。
+
+`memory_scope_audit.mjs ROOT`只读Memory快照与召回记录，生成固定列方法/背景缺失的启发式风险清单；零模型调用，不读取Oracle成绩，不改写或过滤Memory，不充当新的适用性Gate。

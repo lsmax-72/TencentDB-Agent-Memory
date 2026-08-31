@@ -1,5 +1,29 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-08-31 业务 Memory 研究已执行与封存（最新恢复入口）
+
+- 分支 `feat/evolution-candidate-refinement`，收口前HEAD `83ab635`；本节随本地收口提交。旧candidate v4仍FAIL，不生成v5、不Promotion、不改旧Suite/Gate。
+- 最后有效实验记录（包含如实失败）：`/Users/lsmax/Coder/phase6-artifacts/outputs/business-xlsx-memory-20260831-r4`，freeze `1fd417412dc56a378124b6a32be17fbc9c93dda3cd1abf94d18bbfcfdeac02a3`；6主run+4Probe完成，没有未运行待续的本协议run。
+- 主研究状态 **INFRA_ERROR**：23-24双INFRA/incomparable；477-45双PASS/unchanged_success；91-34无记忆PASS/有记忆budgetFAIL/newly_broken。0fixed/1broken/1unchanged_success/1incomparable，不追认为PASS。
+- 91-34主+Probe：none3PASS；memory1PASS、1budgetFAIL、1INFRA。所有有记忆workbook值正确，但不能证明可靠完成；额外格式输出、库源码检查、错误自检和单次length截断是观察到的成本路径，尚不能归因为某条Memory稳定触发。
+- 主wire成本 none104,453tokens/16model/12tool；memory158,181/20/17（tokens+51.44%）；四Probe188,096tokens。整个r1–r4研究含失败/提取/诊断759,597tokens/101model，无重复计入复用形成trace。
+- r4完整wire与隔离后审计PASS；三对主+两对Probe初始请求除随机workspace完全一致；Memory7条/hash不变；迁移L0=0、Skill=0、正式存储快照不变、已知高熵凭证日志扫描无命中。所有原INFRA/FAIL和晚到usage分开保存。
+- 报告 `docs/business-memory-transfer-report.md`；证据 `study-report.json`、`supplementary-audit.json`、`evidence-index.json`、`hub-memory-visibility.json`。Hub22725实际L0=13/L1=7/L2=0/L3=0（形成任务）；不要求用户去旧19125空L2。
+- 后续安全工作也已执行：只读Memory来源/scope诊断，2条method有固定列约束、5条召回content-only丢background；`memory-scope-diagnostic.json`，零新增模型，不修改快照/准入/生产。
+- 测试27Python（含真实Docker）+8Node诊断+4Phase6 helper PASS，syntax/diff PASS。用户deployment修改/未跟踪脚本保留。
+- 失败保留：r1计数/隐藏retry，r2抽取截断，r3arm标签泄漏INVALID_FAIRNESS，r4上述主/Probe失败；r1/r2容器和r3旧Proxy停止但可恢复，文件未删除。当前r3Core22920/Hub22725+r4Proxy23696保留。
+- 下一自主研究候选：来源/适用条件保留与跨任务检索选择；若执行必须新revision并在模型前冻结，本次迁移题已见只能作诊断/回归，不再称新held-out。不要自动重跑当前已完成Attempt、追加Probe或为PASS扩预算；不动正式Hub/DB，不push/PR/merge。
+
+## 2026-08-31 r4 主实验完成，Probe 收尾（最新入口）
+
+- branch `feat/evolution-candidate-refinement`；HEAD `83ab635`（待审计收口本地提交）；current Candidate 仍 v4 FAIL，不生成新 Candidate。
+- r4三对主结果已全部保留：23-24双INFRA/incomparable；477-45双PASS/unchanged_success；91-34 none PASS、memory budget FAIL/Oracle PASS/newly_broken。
+- 当前冻结规则触发91-34两次/arm Probe，后台顺序执行。已完成memory-p1 PASS48,203tokens，none-p1 PASS44,319，none-p2 PASS46,506；memory-p2进行中。不要重复已有run或用Probe覆盖主结果。
+- 91-34主Memory第3次扩大格式输出，第4/5次看库源码，第7次错写行数断言，第8次修正后到达预算；当前Probe未稳定复现这个链条，不轻率归因。
+- 下一自主动作：确认最后Probe结果 → frozen study.mjs audit → workspace audit_study.mjs post → 完善 `docs/business-memory-transfer-report.md`，成本/公平性/隔离审计并本地commit。
+- Hub22725鉴权API实查L0=13/L1=7/L2=0/L3=0；形成记忆而非迁移trace。不要让用户再看旧19125空L2。
+- 测试：27Python（含真实Docker）+4独立audit helper+4Phase6 helper PASS；用户deployment三文件不碰。源码只增加只读证据分析，不修改冻结runtime/协议。
+
 ## 2026-08-31 Memory 迁移对照（进行中，优先恢复入口）
 
 - **当前实际运行是 r4（替代下面 r3 进行状态）**：`/Users/lsmax/Coder/phase6-artifacts/outputs/business-xlsx-memory-20260831-r4`；freeze `1fd417412dc56a378124b6a32be17fbc9c93dda3cd1abf94d18bbfcfdeac02a3`，独立 Proxy23696。
@@ -7,6 +31,8 @@
 - r4为 `IMPLEMENTATION_FIX_RETRY`，只修workspace匿名化与完整pre-Proxy请求上下文采集。所有workspace位于`root/workspaces/<random hex>`，不含case/arm标签；真实runner+mock provider回归已验证实际system context不含条件标签。
 - r4复用r3相同冻结7条Memory（hash不变），不重提取、不换题、不改模型/预算；仅新增Proxy接原隔离r3 Core22920/Hub22725。新session/新workspace；逻辑只读Memory、测试Task观测隔离。
 - r4主transfer批次正在运行；完成后执行 frozen study.mjs probes/audit；新版源码 audit_study.mjs post 检查匿名化、晚到usage、非目标区域、泄漏扫描。当前没有可信最终收益结论。
+- r4已完成23-24两arm：均300s，原status INFRA_ERROR；Memory工作簿Oracle PASS，无Memory未生成有效结果。不得将该pair算newly_fixed。477-45双方TASK_PASS，none25,793tokens vs memory26,325，各5model/4tool；最后91-34正在执行。
+- 若运行中断：先检查是否仍有相同root的Python进程，再检查runs目录；只对没有目录的剩余run用新版源码 `study.mjs remaining ROOT` 恢复（内部仍运行冻结的Python/Oracle）。已有完整result跳过，partial目录仍拒绝覆盖。不能把已失败的INFRA当成待自动重试任务。
 
 - **当前正在运行 r3 首次迁移对照**：`/Users/lsmax/Coder/phase6-artifacts/outputs/business-xlsx-memory-20260831-r3`，freeze `f584f655741854e2ff6f5497424f8c183b6c45b64bb9c94957c2fb79d4b1e972`，端口 22920/22696/22725/22924。
 - r2 在修正计数后，343-20 仍 300s 超时，379-36 PASS；两个 L1 输出均4096tokens截断JSON、0条记忆。`attempt-status.json` 保留 INFRA_ERROR；迁移题尚未运行，未调题或扩预算。

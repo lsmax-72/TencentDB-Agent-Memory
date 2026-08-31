@@ -4,6 +4,7 @@ import {readFileSync,writeFileSync,existsSync,readdirSync} from 'node:fs';
 import {resolve,basename} from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {wireAccounting,normalizedInitialContext,toolBehavior} from './audit-lib.mjs';
 
 const [mode,rootArg]=process.argv.slice(2),root=resolve(rootArg);
 assert(root.includes('/outputs/business-xlsx-memory-')&&/^[a-z0-9-]+$/.test(basename(root)));
@@ -43,9 +44,7 @@ if(mode==='post'){
     const recall=events.filter(e=>e.kind==='recall'&&e.session_id===spec.identity.session_id);
     assert(req.every(e=>e.model==='qwen3.8-27b'&&e.temperature===0));
     assert(req.length<=8,'actual upstream budget');
-    const complete=req.length===responses.length&&req.every(q=>responses.some(r=>r.call_id===q.call_id&&r.status===200));
-    const wireUsage=Object.fromEntries(['prompt_tokens','completion_tokens','total_tokens'].map(k=>[k,
-      complete&&responses.every(r=>Number.isInteger(r.usage?.[k]))?responses.reduce((n,r)=>n+r.usage[k],0):null]));
+    const {complete,usage:wireUsage}=wireAccounting(req,responses);
     const injection=result.arm==='FROZEN_HISTORY_MEMORY'?recall.length===1&&req.every(r=>r.injected_memory_hash===recall[0].block_hash):!recall.length&&req.every(r=>r.injected_memory_chars===0);
     const l0=await api('/v3/conversation/query',{...scope,task_id:spec.identity.task_id,session_id:spec.identity.session_id});assert.equal(l0.total,0);
     await api('/meta/task/get',{task_id:spec.identity.task_id},true);
@@ -54,9 +53,18 @@ if(mode==='post'){
       sdk_usage:agent.sdk_usage??agent.usage,late_response_gap:(wireUsage.total_tokens??0)-(agent.usage?.total_tokens??0),
       evidence_complete_after_drain:complete,injection_verified:injection,context_blinding_verified:blinded,recall_hits:recall[0]?.items.length??0,
       output_hash:result.output_hash,tool_outcomes:agent.tool_events.map(e=>e.outcome),
-      tool_code_chars:agent.tool_events.map(e=>e.arguments.code.length),elapsed_ms:agent.elapsed_ms});
+      tool_code_chars:agent.tool_events.map(e=>e.arguments.code.length),tool_behavior:toolBehavior(agent.tool_events),
+      model_steps:agent.provider_responses,elapsed_ms:agent.elapsed_ms});
   }
   const rows=await api('/v3/atomic/query',{...scope,limit:100}),snapshot=read('memory-snapshot.json');
+  const context_pairs=[];
+  for(const id of ['23-24','477-45','91-34']){
+    const left=read(`runs/${id}-none/agent-run.json`),right=read(`runs/${id}-memory/agent-run.json`);
+    const identical=normalizedInitialContext(left)===normalizedInitialContext(right);
+    assert(identical,'unexpected initial context difference: '+id);
+    context_pairs.push({task_id:id,initial_context_equal_except_random_workspace:true,
+      normalized_sha256:createHash('sha256').update(normalizedInitialContext(left)).digest('hex')});
+  }
   const canonical=items=>JSON.stringify(items.map(r=>({id:r.id,type:r.type,content:r.content,version:r.version})).sort((a,b)=>a.id.localeCompare(b.id)));
   assert.equal(canonical(rows.items),canonical(snapshot.items));assert.equal(sha('memory-snapshot.json'),read('memory-freeze.json').sha256);
   const skills=await api('/v3/meta/asset/list',{team_id:scope.team_id,asset_type:'skill'});assert.equal(skills.total,0);
@@ -66,8 +74,10 @@ if(mode==='post'){
     const text=run.stdout+run.stderr;
     for(const key of ['gateway_key','user_key','upstream_key','extraction_key'])if(s[key]?.length>=12&&text.includes(s[key]))leaks.push({container,key_name:key});
   }
-  const record={status:leaks.length?'FAIL':'PASS',details,secret_scan:leaks,skill_assets:0,l1_unchanged:true,
+  const record={status:leaks.length||details.some(r=>!r.injection_verified)?'FAIL':details.some(r=>!r.evidence_complete_after_drain)?'INCOMPLETE':'PASS',
+    details,context_pairs,secret_scan:leaks,skill_assets:0,l1_unchanged:true,
     l0_transfer_records:0,hub_tasks_visible:true,collector_hash:createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex'),
+    collector_lib_hash:createHash('sha256').update(readFileSync(new URL('./audit-lib.mjs',import.meta.url))).digest('hex'),
     warning:'Late response costs supplement accounting; never reinterpret an original INFRA_ERROR as TASK_PASS.'};
   save('supplementary-audit.json',record);console.log(JSON.stringify(record,null,2));
 }
