@@ -114,6 +114,9 @@ class FixtureTests(unittest.TestCase):
             with patch.object(preflight, "ARCHIVE_SHA256", preflight.digest(archive)):
                 result = preflight.prepare(archive, root / "prepared")
                 self.assertEqual([f["role"] for f in result["files"]], ["input", "reference"])
+                self.assertEqual(result['data_role'], 'development_not_heldout')
+                confirmation = preflight.prepare(archive, root / 'confirmation', data_role='reserved_policy_confirmation')
+                self.assertEqual(confirmation['data_role'], 'reserved_policy_confirmation')
                 with self.assertRaises(FileExistsError):
                     preflight.prepare(archive, root / "prepared")
 

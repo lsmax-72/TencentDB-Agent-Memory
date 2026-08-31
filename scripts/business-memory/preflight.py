@@ -17,7 +17,7 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def prepare(archive_path: Path, destination: Path, task_id="141-20"):
+def prepare(archive_path: Path, destination: Path, task_id="141-20", data_role="development_not_heldout"):
     archive_hash = digest(archive_path)
     if archive_hash != ARCHIVE_SHA256:
         raise ValueError(f"unrecognized archive hash: {archive_hash}")
@@ -52,7 +52,7 @@ def prepare(archive_path: Path, destination: Path, task_id="141-20"):
         if not any(f["role"] == "input" for f in files) or not any(f["role"] == "reference" for f in files):
             raise ValueError("unrecognized verified fixture layout")
     result = {"status": "PREPARED_NOT_EXECUTED", "revision": REVISION,
-              "archive_sha256": archive_hash, "data_role": "development_not_heldout",
+              "archive_sha256": archive_hash, "data_role": data_role,
               "task": task, "files": files}
     with (destination / "manifest.json").open("x") as output:
         json.dump(result, output, ensure_ascii=False, indent=2)

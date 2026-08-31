@@ -1,5 +1,19 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-08-31 避开vLLM的离线交付完成（最新入口）
+
+- 用户最新要求：继续离线执行，完成后先总结并讨论；当前不调用/探测vLLM，不启动新的真实实验。
+- branch `feat/evolution-candidate-refinement`；本轮起始HEAD `57c900f`。旧v4 FAIL、旧r4主INFRA/全部Probe保持原样，无Promotion/v5/生产写入。
+- 已实现纯函数 `memory-context-policy.mjs`：NONE、精确legacy CONTENT_ONLY、SOURCE_SCOPED_METHODS_V2。v2只呈现有来源背景的work_method，并限制源任务固定细节；不读当前题/Oracle、不重写源Memory、不改默认Proxy。
+- 当前有效离线设计包：`/Users/lsmax/Coder/phase6-artifacts/outputs/business-memory-scope-design-20260831-r2`；bundle `04a6541bf1ae14f2a5bdcc780bf01b91a6be65c25400170ad9db3a192628c388`；DESIGN_FROZEN_NOT_EXECUTED，model_calls=0。
+- 4 diagnostic：28-7/269-43/177-6/250-20；2 reserved confirmation：109-21/160-6；与旧训练/迁移任务互斥。6组Oracle正负控制通过；原fixture示例不修改；24-23尺寸不支持、66-24有公式，未放宽限制。
+- 冻结三arm顺序/预算/判据；诊断全部可比且有改善/成本合格才运行预留确认；否则停止，不追加选择性Probe。此为新研究层，不修改旧Gate。
+- v1块665字符/5条，v2块1030字符/2条，不能宣称更省tokens或已有效。source Memory hash与r4相同，十个旧result及索引证据hash均核验未变。
+- r1设计包保留（bundle d77845aa...）：preflight默认development标签与reserved角色不一致；r2仅修正元数据角色再freeze，任务/Oracle/预算/policy不变，两版都未跑模型。
+- 测试：31Python（含真实Docker、SDK mock）+17Node PASS；bundle validate、syntax/diff PASS。用户deployment修改和两个未跟踪脚本不碰。
+- 报告 `docs/business-memory-scope-policy-offline.md`；项目回顾/讨论 `docs/project-state-and-discussion.md`。
+- 未完成且不伪装完成：新research Proxy policy dispatch、运行身份/session/runtime物化与admission、真实模型对照。下一次先讨论；若恢复模型分支，先补runtime准入并freeze，再按协议执行，不把当前设计包当成已运行Attempt。
+
 ## 2026-08-31 业务 Memory 研究已执行与封存（最新恢复入口）
 
 - 分支 `feat/evolution-candidate-refinement`，收口前HEAD `83ab635`；本节随本地收口提交。旧candidate v4仍FAIL，不生成v5、不Promotion、不改旧Suite/Gate。

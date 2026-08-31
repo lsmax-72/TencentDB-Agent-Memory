@@ -50,3 +50,9 @@ BUSINESS_DOCKER_TESTS=1 /Users/lsmax/Coder/nanobot/.venv/bin/python -m unittest 
 新增诊断测试：`node --test scripts/business-memory/*-lib.test.mjs`。真实实验时使用Attempt内冻结runtime；仓库最新只读collector使用独立hash记录，不冒充冻结runner的一部分。
 
 `memory_scope_audit.mjs ROOT`只读Memory快照与召回记录，生成固定列方法/背景缺失的启发式风险清单；零模型调用，不读取Oracle成绩，不改写或过滤Memory，不充当新的适用性Gate。
+
+## vLLM不可用时的离线分支
+
+`memory-context-policy.mjs`提供未接入生产的三条件renderer；`prepare_scope_study.py build NEW_ROOT`生成独立数据/协议/预览freeze，`validate ROOT`仅检查hash。当前r2设计见 `docs/business-memory-scope-policy-offline.md`，完整项目回顾见 `docs/project-state-and-discussion.md`。
+
+这是DESIGN_FROZEN_NOT_EXECUTED，不含凭证、服务或真实Agent run。新的Proxy dispatch/runtime admission尚未实现；不要直接用旧`study.mjs transfer`运行新设计包。`node --test scripts/business-memory/memory-context-policy.test.mjs`是零模型的policy测试。
