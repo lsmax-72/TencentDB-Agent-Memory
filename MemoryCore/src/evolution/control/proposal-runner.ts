@@ -35,7 +35,7 @@ export function createProposalRunner(raw: ReviewModelConfig, context: ProposalRu
   }
   function record(key: string, type: string, status: string, payload: Record<string, unknown>) {
     return store.append({ team_id: source.team_id, owner_user_id: source.owner_user_id, agent_id: source.agent_id,
-      kind: "job", title: `${type} · ${source.title}`, status, origin: "runtime", asset_ids: source.asset_ids, parent_id: jobId,
+      kind: "job", title: `${type} · ${source.title}`, status, origin: "runtime", asset_ids: [...new Set([...source.asset_ids, ...job!.asset_ids])], parent_id: jobId,
       payload: { job_type: type, source_id: source.id, ...payload },
     }, key, source.owner_user_id);
   }

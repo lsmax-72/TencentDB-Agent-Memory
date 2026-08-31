@@ -56,10 +56,10 @@ export class EvolutionStore {
   }
 
   /** Internal dispatcher only; callers must reauthorize the source before executing a job. */
-  jobs(statuses: string[]): EvolutionRecord[] {
+  jobs(statuses: string[], jobTypes = ["diagnosis"]): EvolutionRecord[] {
     return this.db.prepare("SELECT document FROM evolution_records WHERE kind='job' ORDER BY rowid").all()
       .map(row => JSON.parse(String(row.document)) as EvolutionRecord)
-      .filter(record => record.origin === "runtime" && record.payload.job_type === "diagnosis" && statuses.includes(record.status));
+      .filter(record => record.origin === "runtime" && jobTypes.includes(String(record.payload.job_type)) && statuses.includes(record.status));
   }
 
   /** A crash cannot leave an acknowledged completion without its durable dispatch receipt. */
@@ -78,6 +78,23 @@ export class EvolutionStore {
       this.event(job.id, "evolution-dispatcher", "JOB_EVIDENCE", evidence);
       return result;
     });
+  }
+
+  completeDiagnosis(job: EvolutionRecord, result: EvolutionRecord, enqueue: () => void): void {
+    this.transaction(() => {
+      this.jobTransition(job, "COMPLETED", { result_id: result.id, result_hash: result.artifact_hash, usage: result.payload.usage });
+      enqueue();
+    });
+  }
+
+  frozenBatch(job: EvolutionRecord): EvolutionRecord[] | null {
+    const events = this.events(job.id);
+    const event = events.find(item => item.action === "CANDIDATE_BATCH_FROZEN" && (item.document as Record<string, unknown>).allocation_id === `${job.id}/candidates`);
+    if (!event) return null;
+    const ids = (event.document as { candidate_ids: string[] }).candidate_ids;
+    const records = ids.map(id => this.get(id));
+    if (records.some(record => !record || record.team_id !== job.team_id || record.agent_id !== job.agent_id || record.kind !== "candidate" || record.origin !== "runtime")) throw new EvolutionError(409, "FROZEN_BATCH_EVIDENCE_MISSING");
+    return records as EvolutionRecord[];
   }
 
   list(teamId: string, kind?: RecordKind): EvolutionRecord[] {
@@ -211,16 +228,18 @@ export class EvolutionStore {
   commitCandidateBatch(allocationId: string, source: EvolutionRecord, entries: Array<{ input: NewRecord; key: string }>): EvolutionRecord[] {
     return this.transaction(() => {
       const limit = this.assertCandidateAllocation(allocationId, source.team_id, source.agent_id, source.owner_user_id);
+      const job = this.get(allocationId.slice(0, -"/candidates".length))!;
       if (entries.length > limit) throw new EvolutionError(429, "CANDIDATE_BATCH_EXCEEDS_RESERVATION");
       if (entries.some(({ input }) => input.kind !== "candidate" || input.origin !== "runtime" || input.team_id !== source.team_id
         || input.agent_id !== source.agent_id || input.owner_user_id !== source.owner_user_id)) throw new EvolutionError(403, "CANDIDATE_ALLOCATION_SCOPE_MISMATCH");
       let created = 0;
       const records = entries.map(({ input, key }) => {
         if (!this.find(input.team_id, "candidate", key)) created++;
-        return this.append(input, key, source.owner_user_id);
+        // A candidate must inherit every source/target ACL used by its generating job.
+        return this.append({ ...input, asset_ids: [...new Set([...input.asset_ids, ...source.asset_ids, ...job.asset_ids])] }, key, source.owner_user_id);
       });
       this.db.prepare("UPDATE evolution_reservations SET candidates=?, settled=1 WHERE id=?").run(created, allocationId);
-      this.event(source.id, source.owner_user_id, "CANDIDATE_BATCH_FROZEN", { allocation_id: allocationId, candidate_ids: records.map(record => record.id), reserved: limit, created });
+      this.event(job.id, source.owner_user_id, "CANDIDATE_BATCH_FROZEN", { allocation_id: allocationId, candidate_ids: records.map(record => record.id), reserved: limit, created });
       return records;
     });
   }

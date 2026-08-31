@@ -111,6 +111,7 @@ import { EvolutionError } from "../evolution/control/types.js";
 import { EvolutionDispatcher } from "../evolution/control/dispatcher.js";
 import { fileReviewBindings } from "../evolution/control/model-bindings.js";
 import { localLegacyMutationGuard } from "../evolution/control/legacy-governance.js";
+import { generateStandaloneProposals } from "../evolution/control/generation.js";
 import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
 import type { OffloadV2Deps } from "../offload_server/router.js";
@@ -463,6 +464,10 @@ export class TdaiGateway {
           admitted: () => admitted,
           resolveModel: fileReviewBindings(process.env.EVOLUTION_REVIEW_MODELS_FILE, instanceId),
           authorize: (source, profile) => service.authorizeDispatch(source, profile),
+          generate: (source, job, profile, binding) => generateStandaloneProposals({
+            store: store.getEvolutionStore(), metadata: store, permissions,
+            getSkillCore: () => this.core.getSkillCore(), authorize: (record, grant) => service.authorizeDispatch(record, grant),
+          }, source, job, profile, binding),
           onError: () => this.logger.error("[evolution] dispatcher failed; durable jobs retained"),
         });
         service = new EvolutionService(store.getEvolutionStore(), store, permissions, admitted, dispatcher);

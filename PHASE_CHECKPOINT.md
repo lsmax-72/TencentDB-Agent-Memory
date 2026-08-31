@@ -1,5 +1,14 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 03:04 续跑：诊断到冻结候选的真实后台接线
+
+- 起点 `993b2ee`，继续执行而非等待确认。明确task-complete→持久诊断→proposal job→真实L1 extractor已自动串起；Skill route接原Skill Review及只读过滤后的正式Skill视图。每次生成前预留candidate slots，每个模型/工具步骤预算与权限复查，批次原子冻结。
+- 实际源/目标均查原MetadataService权限；目标快照变化拒绝继续。候选、生成job、模型/tool evidence继承目标ACL，并沿所有来源/父记录复查；共享任务不能暴露私有目标，绑定共享资产不能解除原私有轨迹限制。
+- 新 `generation/retry` 只对终态失败建立独立receipt，不重跑诊断，不覆盖失败；未知费用/候选slot仍保守占用。重启遇已冻结batch仅恢复COMPLETED，不再调模型；未知在途改为RECONCILE_REQUIRED。
+- Core **133tests/26files PASS**、plugin build PASS；新control严格类型检查零错误（101条既有传递依赖diagnostics）。Panel3tests/build PASS；diff check PASS。测试使用真实SQLite/权限/dispatcher/提取SDK加明确mock响应，不访问vLLM。
+- 首轮私有权限负例误用不可更改owner的updateAsset，改为创建时设置私有owner；真实权限实现无绕过。首轮typecheck发现测试把原生llm_wiki类型误写wiki，已修fixture类型，没有改metadata契约。
+- **仍未全量完成**：运行时Memory L2/L3后续生成、Wiki bridge、内容/效果receipt、三类真实采用、旧写在途并发及8125交付。Wiki job明确BLOCKED_GENERATION，不伪造候选。admission继续关闭、未改主8125或历史实验。
+
 ## 2026-09-01 02:46 续跑：候选额度与整批冻结
 
 - 上一稳定提交 `6ad4e59`：候选独立模型执行器（Core123tests通过）。本节新增真正的候选slot预留：RUNNING proposal job先在SQLite预留daily_candidates剩余额度，runner每次模型/工具前验证allocation仍有效。

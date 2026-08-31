@@ -19,7 +19,7 @@ const profileSchema = scopeSchema.extend({
   auto_memory: z.boolean(), auto_wiki_maintenance: z.boolean(),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "review/decide"] as const;
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "review/decide"] as const;
 
 export class EvolutionService {
   readonly dispatcher: EvolutionDispatcher;
@@ -60,12 +60,32 @@ export class EvolutionService {
     return { id: user.user_id, role: member.role };
   }
 
-  private async mayRead(record: Pick<EvolutionRecord, "asset_ids" | "owner_user_id" | "team_id">, userId: string): Promise<boolean> {
+  private async mayRead(record: Pick<EvolutionRecord, "asset_ids" | "owner_user_id" | "team_id"> & Partial<Pick<EvolutionRecord, "id" | "parent_id" | "payload" | "kind" | "origin">>, userId: string, ancestry = new Set<string>()): Promise<boolean> {
     // Unbound raw evidence is private, including to team administrators.
-    if (!record.asset_ids.length) return record.owner_user_id === userId;
+    if (!record.asset_ids.length && record.owner_user_id !== userId) return false;
     for (const asset_id of record.asset_ids) {
       const asset = await this.metadata.getAssetById(asset_id);
       if (!asset || asset.team_id !== record.team_id || !(await this.permissions.checkAssetPermission({ user_id: userId, asset_id, action: "read" })).allowed) return false;
+    }
+    // Binding a derivative to a shared target cannot declassify an unbound/private source.
+    const refs = new Set<string>(record.parent_id ? [record.parent_id] : []);
+    if (record.origin === "runtime") {
+      for (const ref of (Array.isArray(record.payload?.source_record_ids) ? record.payload.source_record_ids : [])) {
+        if (typeof ref !== "string") return false;
+        refs.add(ref);
+      }
+      if (record.kind === "diagnosis" && Array.isArray(record.payload?.evidence)) {
+        for (const item of record.payload.evidence) {
+          if (!item || typeof item.record_id !== "string") return false;
+          refs.add(item.record_id);
+        }
+      }
+    }
+    const next = new Set(ancestry);
+    if (record.id) { if (next.has(record.id) || next.size >= 64) return false; next.add(record.id); }
+    for (const ref of refs) {
+      const source = this.store.get(ref);
+      if (!source || source.team_id !== record.team_id || !await this.mayRead(source, userId, next)) return false;
     }
     return true;
   }
@@ -158,14 +178,14 @@ export class EvolutionService {
       this.dispatcher.wake();
       return job;
     }
-    if (action === "diagnosis/retry") {
+    if (action === "diagnosis/retry" || action === "generation/retry") {
       const input = recordSchema.extend({ request_id: id }).strict().parse(body);
       const previous = this.store.get(input.id);
       if (!previous || previous.team_id !== team_id || !await this.mayRead(previous, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
       const source = this.store.get(String(previous.payload.source_id));
       if (!source || source.team_id !== team_id || !await this.mayRead(source, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
       if (actor.id !== source.owner_user_id) throw new EvolutionError(403, "TASK_OWNER_REQUIRED");
-      const job = this.dispatcher.enqueue(source, { previous, requestId: input.request_id });
+      const job = action === "generation/retry" ? this.dispatcher.retryProposal(source, previous, input.request_id) : this.dispatcher.enqueue(source, { previous, requestId: input.request_id });
       this.dispatcher.wake();
       return job;
     }

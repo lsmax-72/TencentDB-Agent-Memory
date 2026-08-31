@@ -2,6 +2,14 @@
 
 状态：IMPLEMENTATION_IN_PROGRESS；不能视为完整交付。2026-08-31。
 
+## 最新运行接线（2026-09-01 03:04）
+
+明确任务完成现已自动衔接诊断和持久proposal job；Memory L1用真实提取类在候选区冻结，Skill复用原Review。模型为独立binding，每次HTTP预留，候选数量在生成前预留且整批原子结算。失败通过`generation/retry`独立重试；已冻结的中断job仅核对恢复，不重复生成。
+
+源/目标采用原生Metadata权限，候选、工具及模型evidence继承目标ACL并递归验证来源。新测试覆盖共享任务读取私有目标时不向其他管理员暴露衍生物，以及共享目标不能解除私有原轨迹限制。Core133tests、plugin build、Panel3tests/build通过；control类型检查0错误，传递依赖仍101条，不代表全仓strict通过。
+
+以下旧节中的数字是阶段快照。当前仍待L2/L3运行接线、Wiki完整bridge、校验/采用/并发/8125交付；只有helper已完成不能替代端到端。所有模型响应仍为显式测试double，admission关闭，不调用vLLM。
+
 ## 2026-09-01 后端接线进展
 
 - `task/complete` 在同一 metadata SQLite transaction 写入 trace 和诊断 job，响应后唤醒进程内串行 dispatcher；不新增服务或队列基础设施。重复完成上报不重跑模型。

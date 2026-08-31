@@ -1,5 +1,5 @@
 import { diagnose } from "./diagnosis.js";
-import type { ResolveReviewBinding } from "./model-bindings.js";
+import type { ResolveReviewBinding, ReviewBinding } from "./model-bindings.js";
 import { contentHash, EvolutionStore } from "./store.js";
 import { EvolutionError, type EvolutionProfile, type EvolutionRecord } from "./types.js";
 
@@ -8,6 +8,7 @@ interface DispatcherOptions {
   admitted: () => boolean;
   resolveModel: ResolveReviewBinding;
   authorize: (source: EvolutionRecord, profile: EvolutionProfile) => Promise<boolean>;
+  generate?: (source: EvolutionRecord, job: EvolutionRecord, profile: EvolutionProfile, binding: ReviewBinding) => Promise<EvolutionRecord[]>;
   onError?: () => void;
 }
 
@@ -47,9 +48,12 @@ export class EvolutionDispatcher {
   recover(): void {
     for (const job of this.store.jobs(["RUNNING"])) {
       const result = this.store.find(job.team_id, "diagnosis", job.id);
-      this.store.jobTransition(job, result ? "COMPLETED" : "RECONCILE_REQUIRED", {
-        result_id: result?.id ?? null, reason: result ? "PERSISTED_RESULT_RECOVERED" : "INTERRUPTED_CALL_OUTCOME_UNKNOWN",
-      });
+      if (result) this.store.completeDiagnosis(job, result, () => this.enqueueProposal(result, job));
+      else this.store.jobTransition(job, "RECONCILE_REQUIRED", { reason: "INTERRUPTED_CALL_OUTCOME_UNKNOWN" });
+    }
+    for (const job of this.store.jobs(["RUNNING"], ["proposal", "proposal_model_step"])) {
+      const batch = job.payload.job_type === "proposal" ? this.store.frozenBatch(job) : null;
+      this.store.jobTransition(job, batch ? "COMPLETED" : "RECONCILE_REQUIRED", { result_ids: batch?.map(record => record.id) ?? null, reason: batch ? "FROZEN_BATCH_RECOVERED" : "INTERRUPTED_CALL_OUTCOME_UNKNOWN" });
     }
     this.wake();
   }
@@ -62,9 +66,44 @@ export class EvolutionDispatcher {
   async idle(): Promise<void> { await this.running; }
   async close(): Promise<void> { this.stopping = true; await this.idle(); }
 
+  private enqueueProposal(source: EvolutionRecord, diagnosisJob: EvolutionRecord): void {
+    if (!this.options.generate) return;
+    const stage = ({ skill_defect: "skill", memory_gap: "memory_l1", wiki_gap: "wiki" } as Record<string, string>)[String(source.payload.route)];
+    if (!stage) return;
+    this.store.append({ team_id: source.team_id, owner_user_id: source.owner_user_id, agent_id: source.agent_id,
+      kind: "job", origin: "runtime", title: `候选生成：${source.title}`, status: "QUEUED",
+      // Generation may read private target contents even when the task itself is shared.
+      asset_ids: [...new Set([...source.asset_ids, ...(this.store.profile(source.team_id, source.agent_id)?.asset_ids ?? [])])], parent_id: source.id,
+      payload: { ...diagnosisJob.payload, job_type: "proposal", stage, source_id: source.id, source_hash: source.artifact_hash, retry_of: null },
+    }, `${source.id}/proposal/${stage}`, source.owner_user_id);
+  }
+
+  retryProposal(source: EvolutionRecord, previous: EvolutionRecord, requestId: string): EvolutionRecord {
+    if (source.kind !== "diagnosis" || source.origin !== "runtime" || previous.origin !== "runtime"
+      || previous.kind !== "job" || previous.payload.job_type !== "proposal" || previous.payload.source_id !== source.id
+      || previous.payload.source_hash !== source.artifact_hash || previous.team_id !== source.team_id
+      || previous.agent_id !== source.agent_id || previous.owner_user_id !== source.owner_user_id
+      || !["INFRA_ERROR", "RECONCILE_REQUIRED", "NEEDS_EVIDENCE"].includes(previous.status) && !previous.status.startsWith("BLOCKED_")) throw new EvolutionError(409, "RETRY_REQUIRES_TERMINAL_PROPOSAL");
+    // A recovered frozen batch is complete, not a reason to generate a second batch.
+    if (this.store.frozenBatch(previous)) throw new EvolutionError(409, "FROZEN_BATCH_REQUIRES_RECOVERY");
+    const key = `${source.id}/proposal/retry/${previous.id}/${requestId}`;
+    const existing = this.store.find(source.team_id, "job", key);
+    if (existing) return existing;
+    const profile = this.store.profile(source.team_id, source.agent_id);
+    let binding: ReviewBinding | null = null;
+    try { binding = profile ? this.options.resolveModel(profile) : null; } catch { /* Recorded as configuration blocked. */ }
+    const status = !profile?.enabled ? "BLOCKED_AUTOMATION_DISABLED" : !binding ? "BLOCKED_MODEL_CONFIGURATION" : !this.options.admitted() ? "BLOCKED_AUTOMATION_ADMISSION" : "QUEUED";
+    return this.store.append({ team_id: source.team_id, owner_user_id: source.owner_user_id, agent_id: source.agent_id,
+      kind: "job", origin: "runtime", title: `重试候选生成：${source.title}`, status,
+      asset_ids: [...new Set([...source.asset_ids, ...(profile?.asset_ids ?? [])])], parent_id: source.id,
+      payload: { ...previous.payload, profile_hash: profile ? contentHash(profile) : null, review_binding_id: binding?.id ?? null,
+        review_binding_hash: binding?.fingerprint ?? null, retry_of: previous.id },
+    }, key, source.owner_user_id);
+  }
+
   private async drain(): Promise<void> {
     while (!this.stopping) {
-      const job = this.store.jobs(["QUEUED"])[0];
+      const job = this.store.jobs(["QUEUED"], ["diagnosis", "proposal"])[0];
       if (!job) return;
       try { await this.execute(job); }
       catch (error) {
@@ -93,6 +132,18 @@ export class EvolutionDispatcher {
         block("BLOCKED_MODEL_CONFIGURATION", "REVIEW_BINDING_MISSING_OR_CHANGED"); return;
       }
     } catch { block("BLOCKED_SOURCE_PERMISSION", "ADMISSION_CHECK_FAILED"); return; }
+    if (job.payload.job_type === "proposal") {
+      if (!this.options.generate || !binding.createProposalRunner) { block("BLOCKED_GENERATOR_CONFIGURATION", "PROPOSAL_RUNNER_UNAVAILABLE"); return; }
+      const claimed = this.store.jobTransition(job, "RUNNING", { actual_model: binding.model.modelId });
+      try {
+        const results = await this.options.generate(source, claimed, profile, binding);
+        this.store.jobTransition(claimed, "COMPLETED", { result_ids: results.map(record => record.id), result_hashes: results.map(record => record.artifact_hash), no_change: results.length === 0 });
+      } catch (error) {
+        const known = error instanceof EvolutionError;
+        this.store.jobTransition(claimed, known && error.code === 429 ? "BLOCKED_BUDGET" : known && [403, 409, 501].includes(error.code) ? "BLOCKED_GENERATION" : "INFRA_ERROR", { reason: known ? error.message : "PROPOSAL_GENERATION_FAILED", usage: null });
+      }
+      return;
+    }
     if (source.payload.outcome === "INFRA_ERROR") { block("SCREENED_INFRASTRUCTURE", "HOST_REPORTED_INFRA_ERROR_NOT_SKILL_DEFECT"); return; }
     if (source.payload.outcome === "UNKNOWN" || !source.payload.task_input || !source.payload.final_output) {
       block("NEEDS_EVIDENCE", "TASK_OUTCOME_OR_CONTENT_MISSING"); return;
@@ -111,7 +162,7 @@ export class EvolutionDispatcher {
     const claimed = this.store.jobTransition(job, "RUNNING", { actual_model: binding.model.modelId });
     try {
       const result = await diagnose(this.store, source, related, binding.model, job.id);
-      this.store.jobTransition(claimed, "COMPLETED", { result_id: result.id, result_hash: result.artifact_hash, usage: result.payload.usage });
+      this.store.completeDiagnosis(claimed, result, () => this.enqueueProposal(result, claimed));
     } catch (error) {
       const known = error instanceof EvolutionError;
       this.store.jobTransition(claimed, known && error.code === 429 ? "BLOCKED_BUDGET" : "INFRA_ERROR", {
