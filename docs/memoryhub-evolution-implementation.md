@@ -13,6 +13,14 @@
 - 新隔离 `evolution-hub-20260901-r1`（27920/27725）setup/verify/restart PASS；包括 host完成幂等、持久化blocked job、冲突与任意retry路径拒绝、正式资产不变和历史FAIL保留。测试回执明确未运行模型；未对新端口做浏览器登录。
 - 已识别治理接线风险：metadata配置的instance与standalone默认Memory runner身份不总一致。下一步解决对应关系并覆盖旧入口，不能只检查默认库。
 
+## 2026-09-01 旧入口写屏障与后台生命周期
+
+- 已连接真正的Standalone SkillCore/SkillExtractor和Memory L1/L2/L3 pipeline，以及v2/v3的五类Memory修改入口。治理配置只读查所有本地metadata实例，避免Hub instance与default不一致导致漏拦截；省略owner参数按真实Skill head检查。未知/legacy身份不能绕过已有治理scope。
+- 非治理Agent仍走旧行为；治理Agent旧自动任务被明确拒绝并保留L0/cursor，尚未完成诊断后候选接管，因此不是完整生成闭环。后续启用前仍需串行处理开关变化与在途旧写，不能把调用前check说成完整并发防护。
+- 后台任务连接pin、防LRU关闭、并发open去重、本地启动发现/恢复、HTTP先排空后停止dispatcher已接线。测试包含1连接上限、两个持有者、重复release、活动库purge拒绝和关闭后不可重开。
+- Core **113tests/23files PASS**；control新代码严格检查零错误；新HTTP回归扩大依赖范围，transitive diagnostics=101（不是全仓typecheck通过）。L3 legacy空scope错误已补修。
+- 最新隔离输出 `/Users/lsmax/Coder/phase6-artifacts/outputs/evolution-hub-20260901-r3`：Core29920/Hub29725，setup/verify/governance/restart PASS。governance是操作员测试fixture：无模型配置，admission持续false，临时开启测试profile验证真实HTTP拒绝，随后恢复关闭，正式资产快照不变。没有登录该端口，也没有更新8125。
+
 ## 已锁定边界
 
 - 主交付为现有 8125 Hub；沿用 TencentDB / Tea 界面，不使用 MyUI。
@@ -60,8 +68,8 @@
 
 ## 尚未完成
 
-1. 任务完成到诊断已接线；仍需诊断到三类候选的持久化续接、完整实例启动恢复、受限本地 evaluation executor，以及每个真实 provider/tool step、重试和 Wiki merge 的预算准入。
-2. 全部旧 Skill / Memory L1/L2/L3 自动写入口治理接线（含后台和 standalone pipeline）；开关尚不能启用，失败不退回直接写是强制准入条件。
+1. 任务完成到诊断和本地实例启动恢复已接线；仍需诊断到三类候选的持久化续接、受限本地 evaluation executor，以及每个真实 provider/tool step、重试和 Wiki merge 的预算准入。
+2. 旧 Skill / Memory L1/L2/L3 写屏障已接线，仍需候选接管及开关切换/在途写并发控制；开关尚不能启用，失败不退回直接写是强制准入条件。
 3. 三类正式 writer、原生全局并发锁、scope/grant/base-version/source 权限再核验、登记与索引确认、完整重启恢复。现有采用 coordinator 不能代替这些接口验收。
 4. Skill 评测任务与现有 nanobot bridge 的固定任务适配；服务端 validation/evaluation receipt 和风险授权封口。旧 Oracle/Pair/Gate 不改。
 5. 完整配置和采用 UI（当前预算草案只保存关闭状态），更多历史 trace/diagnosis/Playbook 的受控关联导入；不能伪造记录填空页面。

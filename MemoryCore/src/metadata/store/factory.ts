@@ -2,7 +2,8 @@
  * 元数据存储工厂 + 配置解析 + MetadataStorePool（v3.0 按实例分库）。
  */
 
-import { rm } from "node:fs/promises";
+import { rm, readdir, lstat } from "node:fs/promises";
+import { join } from "node:path";
 import type { IMetadataStore, MetadataBackend } from "./interface.js";
 import { SqliteMetadataStore } from "./sqlite-adapter.js";
 import {
@@ -180,6 +181,9 @@ interface CachedStore {
  */
 export class MetadataStorePool {
   private readonly cache = new Map<string, CachedStore>();
+  private readonly opening = new Map<string, Promise<IMetadataStore>>();
+  private readonly pins = new Map<string, number>();
+  private closing = false;
   private readonly config: MetadataStoreConfig;
   private sharedMongoClient: import("mongodb").MongoClient | null = null;
   private sharedMongoClientPromise: Promise<import("mongodb").MongoClient> | null = null;
@@ -214,13 +218,13 @@ export class MetadataStorePool {
   private touchLru(instanceId: string, entry: CachedStore): void {
     this.cache.delete(instanceId);
     this.cache.set(instanceId, entry);
-    this.evictIfNeeded();
+    this.evictIfNeeded(instanceId);
   }
 
-  private evictIfNeeded(): void {
+  private evictIfNeeded(protectedId?: string): void {
     const max = this.config.storeCacheMaxInstances ?? DEFAULT_STORE_CACHE_MAX;
     while (this.cache.size > max) {
-      const oldestKey = this.cache.keys().next().value as string | undefined;
+      const oldestKey = [...this.cache.keys()].find(key => key !== protectedId && !this.pins.has(key));
       if (!oldestKey) break;
       const oldest = this.cache.get(oldestKey);
       this.cache.delete(oldestKey);
@@ -231,11 +235,62 @@ export class MetadataStorePool {
   }
 
   async getStore(instanceId: string): Promise<IMetadataStore> {
+    if (this.closing) throw new Error("METADATA_POOL_CLOSING");
     const existing = this.cache.get(instanceId);
     if (existing) {
       this.touchLru(instanceId, existing);
       return existing.store;
     }
+
+    let pending = this.opening.get(instanceId);
+    if (!pending) {
+      pending = this.openStore(instanceId).finally(() => this.opening.delete(instanceId));
+      this.opening.set(instanceId, pending);
+    }
+    return pending;
+  }
+
+  /** Long-lived local executors must not retain a connection that LRU can close. */
+  async pinStore(instanceId: string): Promise<{ store: IMetadataStore; release: () => void }> {
+    if (this.closing) throw new Error("METADATA_POOL_CLOSING");
+    this.pins.set(instanceId, (this.pins.get(instanceId) ?? 0) + 1);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      const count = this.pins.get(instanceId) ?? 0;
+      if (count > 1) this.pins.set(instanceId, count - 1); else this.pins.delete(instanceId);
+      this.evictIfNeeded();
+    };
+    try { return { store: await this.getStore(instanceId), release }; }
+    catch (error) { release(); throw error; }
+  }
+
+  /** Startup discovery stays within the operator's local metadata directory. No cloud scan. */
+  async localInstanceIds(): Promise<string[]> {
+    if (this.config.backend !== "sqlite") return [];
+    const base = this.config.sqliteBaseDir ?? DEFAULT_SQLITE_BASE;
+    let entries;
+    try { entries = await readdir(base, { withFileTypes: true }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    const prefix = `${this.dbPrefix}_`;
+    const result: string[] = [];
+    for (const entry of entries) {
+      if (!entry.name.startsWith(prefix)) continue;
+      if (entry.isSymbolicLink()) throw new Error("METADATA_DISCOVERY_LINK_REJECTED");
+      if (!entry.isDirectory()) continue;
+      const instanceId = entry.name.slice(prefix.length);
+      if (!instanceId || resolveMetadataDbName(instanceId, this.dbPrefix) !== entry.name) continue;
+      let stat;
+      try { stat = await lstat(join(base, entry.name, "metadata.db")); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("METADATA_DISCOVERY_FILE_REJECTED");
+      result.push(instanceId);
+    }
+    return result.sort();
+  }
+
+  private async openStore(instanceId: string): Promise<IMetadataStore> {
 
     if (this.config.backend === "mongodb") {
       const client = await this.getSharedMongoClient();
@@ -248,18 +303,19 @@ export class MetadataStorePool {
       await store.init();
       const entry: CachedStore = { instanceId, store, mongoClient: client };
       this.cache.set(instanceId, entry);
-      this.evictIfNeeded();
+      this.evictIfNeeded(instanceId);
       return store;
     }
 
     const store = await createMetadataStore(this.config, instanceId);
     const entry: CachedStore = { instanceId, store };
     this.cache.set(instanceId, entry);
-    this.evictIfNeeded();
+    this.evictIfNeeded(instanceId);
     return store;
   }
 
   async purgeInstance(instanceId: string): Promise<PurgeMetadataResult> {
+    if (this.pins.has(instanceId) || this.opening.has(instanceId)) throw new Error("METADATA_INSTANCE_IN_USE");
     const dbName = resolveMetadataDbName(instanceId, this.dbPrefix);
     const cached = this.cache.get(instanceId);
     if (cached) {
@@ -280,6 +336,8 @@ export class MetadataStorePool {
   }
 
   async closeAll(): Promise<void> {
+    this.closing = true;
+    await Promise.allSettled(this.opening.values());
     for (const [key, entry] of this.cache) {
       await Promise.resolve(entry.store.close()).catch(() => {});
       this.cache.delete(key);

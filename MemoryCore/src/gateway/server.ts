@@ -110,6 +110,7 @@ import { EvolutionService } from "../evolution/control/service.js";
 import { EvolutionError } from "../evolution/control/types.js";
 import { EvolutionDispatcher } from "../evolution/control/dispatcher.js";
 import { fileReviewBindings } from "../evolution/control/model-bindings.js";
+import { localLegacyMutationGuard } from "../evolution/control/legacy-governance.js";
 import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
 import type { OffloadV2Deps } from "../offload_server/router.js";
@@ -317,6 +318,8 @@ export class TdaiGateway {
   private memorySystemUserConfig: MemorySystemUserConfig | undefined;
   private readonly metadataServiceByInstance = new Map<string, MetadataService>();
   private readonly evolutionServiceByInstance = new Map<string, Promise<EvolutionService>>();
+  private readonly evolutionStoreReleases = new Map<string, () => void>();
+  private readonly legacyMutationGuard?: import("../core/legacy-mutation-guard.js").LegacyMutationGuard;
 
   // ── Skill conversation-add (§21): per-instance handler cache ──
   //
@@ -367,7 +370,12 @@ export class TdaiGateway {
     // 不再使用信号量做并发上限。
     this.workerPermitPool = new WorkerPermitPool(this.config.worker.concurrency);
 
+    const localMetadata = this.config.deployMode === "standalone"
+      ? validateMetadataStartupConfig("standalone", process.env, join(this.config.data.baseDir, "metadata")) : undefined;
+    this.legacyMutationGuard = localMetadata?.backend === "sqlite" ? localLegacyMutationGuard(localMetadata) : undefined;
+
     this.core = new TdaiCore({
+      legacyMutationGuard: this.legacyMutationGuard,
       hostAdapter: adapter,
       config: this.config.memory,
       sessionFilter: new SessionFilter(this.config.memory.capture.excludeAgents),
@@ -438,11 +446,15 @@ export class TdaiGateway {
   }
 
   private ensureEvolutionService(instanceId: string): Promise<EvolutionService> {
+    if (this.stopPromise) return Promise.reject(new EvolutionError(503, "EVOLUTION_STOPPING"));
     let pending = this.evolutionServiceByInstance.get(instanceId);
     if (!pending) {
       pending = (async () => {
-        const store = await this.ensureMetadataStore(instanceId);
-        if (!(store instanceof SqliteMetadataStore) || this.config.deployMode !== "standalone") throw new EvolutionError(503, "EVOLUTION_STANDALONE_ONLY");
+        const pool = await this.ensureMetadataStorePool();
+        if (pool.backend !== "sqlite" || this.config.deployMode !== "standalone") throw new EvolutionError(503, "EVOLUTION_STANDALONE_ONLY");
+        const lease = await pool.pinStore(instanceId);
+        this.evolutionStoreReleases.set(instanceId, lease.release);
+        const store = lease.store as SqliteMetadataStore;
         const permissions = await this.ensureMetadataService(instanceId);
         // Do not admit automation before legacy writer governance and adoption are fully connected.
         const admitted = false;
@@ -456,7 +468,12 @@ export class TdaiGateway {
         service = new EvolutionService(store.getEvolutionStore(), store, permissions, admitted, dispatcher);
         dispatcher.recover();
         return service;
-      })().catch(error => { this.evolutionServiceByInstance.delete(instanceId); throw error; });
+      })().catch(error => {
+        this.evolutionStoreReleases.get(instanceId)?.();
+        this.evolutionStoreReleases.delete(instanceId);
+        this.evolutionServiceByInstance.delete(instanceId);
+        throw error;
+      });
       this.evolutionServiceByInstance.set(instanceId, pending);
     }
     return pending;
@@ -670,6 +687,12 @@ export class TdaiGateway {
       this.logger.warn(`${TAG} ensureSkillModuleWired failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
+    // Recover persisted work even if no one opens the Evolution page after restart.
+    if (this.config.deployMode === "standalone") {
+      const pool = await this.ensureMetadataStorePool();
+      for (const instanceId of await pool.localInstanceIds()) await this.ensureEvolutionService(instanceId);
+    }
+
     // Create HTTP server (with Trace middleware wrapping)
     //
     // [skill-perf 2026-07-21] Skill 接口可观测性埋点（issue：/v3/skill/extract
@@ -800,10 +823,15 @@ export class TdaiGateway {
   private async doStop(): Promise<void> {
     this.logger.info("Shutting down gateway...");
 
+    // Drain HTTP first: no new completion receipt may enter a dispatcher being closed.
+    if (this.server) await new Promise<void>(resolve => this.server!.close(() => resolve()));
+
     await Promise.all([...this.evolutionServiceByInstance.values()].map(async service => {
       try { await (await service).dispatcher.close(); } catch { /* Failed initialization has no active worker. */ }
     }));
     this.evolutionServiceByInstance.clear();
+    for (const release of this.evolutionStoreReleases.values()) release();
+    this.evolutionStoreReleases.clear();
 
     // 优雅关闭 OTel SDK（flush 剩余 Span/Log）
     try {
@@ -848,11 +876,6 @@ export class TdaiGateway {
       this.logger.info("Metadata Store Pool closed");
     }
 
-    if (this.server) {
-      await new Promise<void>((resolve) => {
-        this.server!.close(() => resolve());
-      });
-    }
 
     await this.core.destroy();
     this.logger.info("Gateway stopped");
@@ -938,6 +961,7 @@ export class TdaiGateway {
       }
 
       const v2Deps: V2RouterDeps = {
+        legacyMutationGuard: this.legacyMutationGuard,
         getStore: () => this.core.getVectorStore(),
         getEmbedding: () => this.core.getEmbeddingService(),
         getStorage: () => this.core.getStorage(),

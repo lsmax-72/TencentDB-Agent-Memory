@@ -94,6 +94,7 @@ function toCoreError(e: unknown): never {
 // ═════════════════════════════════════════════════════════════════════
 
 export interface SkillCoreOptions {
+  legacyMutationGuard?: import("../legacy-mutation-guard.js").LegacyMutationGuard;
   store: ISkillStore;
   resources: SkillResourceStore;
   versioning: SkillVersioning;
@@ -216,6 +217,7 @@ export interface ListVersionsInput extends IdFields {
 // ═════════════════════════════════════════════════════════════════════
 
 export class SkillCore {
+  private readonly legacyMutationGuard?: SkillCoreOptions["legacyMutationGuard"];
   private readonly store: ISkillStore;
   private readonly resources: SkillResourceStore;
   private readonly versioning: SkillVersioning;
@@ -226,6 +228,7 @@ export class SkillCore {
   private readonly onSkillAccessed?: SkillCoreOptions["onSkillAccessed"];
 
   constructor(opts: SkillCoreOptions) {
+    this.legacyMutationGuard = opts.legacyMutationGuard;
     this.store = opts.store;
     this.resources = opts.resources;
     this.versioning = opts.versioning;
@@ -239,9 +242,19 @@ export class SkillCore {
     this.onSkillAccessed = opts.onSkillAccessed;
   }
 
+  private async guardHeadMutation(head: Skill): Promise<void> {
+    // The stored owner, not optional caller-supplied IDs, determines governance.
+    await this.legacyMutationGuard?.({ teamId: head.team_id, agentId: head.owner_agent_id, userId: head.user_id, layer: "skill" });
+  }
+
   /** 读路径读到具体 skill 后 fire。异常吞掉，不阻塞读。 */
   private notifyAccessed(skill: Skill): void {
     if (!this.onSkillAccessed) return;
+    if (this.legacyMutationGuard) {
+      // A read may not recreate official asset registration for a governed Agent.
+      void this.guardHeadMutation(skill).then(() => this.onSkillAccessed?.(skill)).catch(() => {});
+      return;
+    }
     try { this.onSkillAccessed(skill); } catch { /* swallow */ }
   }
 
@@ -250,6 +263,7 @@ export class SkillCore {
   // ───────────────────────────────────────────────────────────────────
 
   async create(input: CreateInput): Promise<Skill> {
+    await this.legacyMutationGuard?.({ teamId: input.team_id, agentId: input.agent_id, userId: input.user_id, layer: "skill" });
     // 1) parse + validate
     const file = this.parseAndValidate(input.content);
     if (file.frontmatter.name !== input.name) {
@@ -311,6 +325,7 @@ export class SkillCore {
     const head = await this.requireHead(input.skill_id, input.team_id);
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
+    await this.guardHeadMutation(head);
 
     const file = this.parseAndValidate(input.content);
     if (file.frontmatter.name !== head.name) {
@@ -336,6 +351,7 @@ export class SkillCore {
     const head = await this.requireHead(input.skill_id, input.team_id);
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
+    await this.guardHeadMutation(head);
 
     // count occurrences
     const occ = countOccurrences(head.content, input.old_string);
@@ -382,6 +398,7 @@ export class SkillCore {
     if (!head) throw new SkillCoreError("SKILL_NOT_FOUND");
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
+    await this.guardHeadMutation(head);
 
     // 物理删除所有版本 + 清 storage + 汇总上报 shark(-N)
     const deleted = await this.versioning.deleteSkill(input.skill_id, input.team_id);
@@ -401,6 +418,7 @@ export class SkillCore {
     const head = await this.requireHead(input.skill_id, input.team_id);
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
+    await this.guardHeadMutation(head);
 
     try {
       const result = await this.versioning.appendNextVersion(head, this.ctxOf(input), {
@@ -422,6 +440,7 @@ export class SkillCore {
     const head = await this.requireHead(input.skill_id, input.team_id);
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
+    await this.guardHeadMutation(head);
 
     // 过滤出真实存在于 head manifest 中的 path（避免无效的资源变更触发空 v+1）
     const manifestPaths = new Set(head.manifest.map((m) => m.path));

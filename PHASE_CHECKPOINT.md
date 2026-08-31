@@ -1,5 +1,17 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 02:32 续跑：旧入口写屏障与生命周期
+
+- 从 `e209649` 接续，仍未完成全量目标，未更新主8125。用户三个deployment改动保持原样。
+- standalone 旧入口读取真实本地 metadata 实例目录中的治理配置（只读SQLite/WAL），不再仅查询default库；缺少身份/legacy placeholder无法绕过已开启scope，损坏或链接目录fail-closed。此目录只用于阻止旧写，不跨instance选择授权或搬运证据。
+- Skill Review 在预检索/模型调用前被阻止；SkillCore create/update/patch/delete/writeFiles/removeFiles 按真实head owner阻止写入，读时资产自愈也受屏障约束。Memory L1/L2/L3 pipeline 在生成/缓存写前检查；v2/v3 Atomic update/delete、Scenario write/rm、Core write 同样检查。旧任务失败保留L0和游标，不退回直接写。**目前是拒绝旧直接写，候选生成接管尚未完成，不能宣称已完整转入候选。**
+- L3 legacy默认scope原本可能undefined，新增负例暴露后做最小空scope修复。关闭治理的Skill Review走旧backend测试通过。
+- metadata pool新增长期任务pin与并发open去重；活动任务库不可purge，LRU不关闭持有中的库。Gateway启动发现已有本地库并恢复任务，关闭先排空HTTP再停止dispatcher。无结果RUNNING仍不盲重放。
+- Core全量 **113 tests / 23 files PASS**；plugin build PASS；control严格检查零错误。新HTTP回归引入更多旧路由依赖，当前transitive diagnostics=101，未声称全仓strict typecheck PASS。git diff --check PASS。
+- 新独立 `evolution-hub-20260901-r2`（28920/28725）setup/verify/restart PASS，保留其冻结版本。最新 `evolution-hub-20260901-r3`（29920/29725）setup/verify/governance/restart PASS；隔离操作员种子临时打开测试profile以验证真实HTTP写屏障，始终无模型配置且admission=false，验后恢复disabled，审计历史保留；不是生产开关/真实模型运行。旧FAIL和正式资产快照不变。
+- 当前仍不开放准入：需完成诊断→三类候选持久化接管、每步模型预算、配置切换与在途旧写的串行屏障、采用writer/权限/CAS/索引恢复、Wiki实际服务接线、评测执行器及完整UI交付。
+- 下一步：接独立reviewer的受预算工具执行（仅候选/影子Storage工具），再续接诊断后的候选任务；不可用聊天模型runner或直接正式工具作fallback。继续避开vLLM，不重复定时任务。
+
 ## 2026-09-01 02:00 续跑：任务派发已接线，完整目标未完成
 
 - 凌晨一次性 heartbeat 已触发并接续；未重复创建定时任务。Goal 最近宿主查询显示 `usageLimited`，本轮不兑换额度、不修改 Goal 状态，按已授权任务继续实际工程。

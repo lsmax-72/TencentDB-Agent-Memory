@@ -54,6 +54,8 @@ export interface ExtractorRunner {
 }
 
 export interface ExtractorOptions {
+  /** Legacy review must be stopped before prefix search/query-generation calls. */
+  legacyMutationGuard?: import("../legacy-mutation-guard.js").LegacyMutationGuard;
   core: SkillCore;
   /** Opt-in review-tool backend. Omitted preserves direct SkillCore behavior. */
   toolBackend?: SkillToolsBackend;
@@ -102,6 +104,7 @@ export interface ExtractResult {
 }
 
 export class SkillExtractor {
+  private readonly legacyMutationGuard?: ExtractorOptions["legacyMutationGuard"];
   private readonly core: SkillCore;
   private readonly toolBackend: SkillToolsBackend;
   private readonly runner?: ExtractorRunner;
@@ -114,6 +117,7 @@ export class SkillExtractor {
   private readonly logger?: ExtractorOptions["logger"];
 
   constructor(opts: ExtractorOptions) {
+    this.legacyMutationGuard = opts.legacyMutationGuard;
     this.core = opts.core;
     this.toolBackend = opts.toolBackend ?? opts.core;
     this.runner = opts.runner;
@@ -134,6 +138,7 @@ export class SkillExtractor {
   }
 
   async extract(input: ExtractInput): Promise<ExtractResult> {
+    await this.legacyMutationGuard?.({ teamId: input.team_id, agentId: input.agent_id, userId: input.user_id, layer: "skill_review" });
     const { messages } = input;
     if (!Array.isArray(messages) || messages.length === 0) {
       throw new Error("ExtractV2: messages must be a non-empty array of ExtractMessage");

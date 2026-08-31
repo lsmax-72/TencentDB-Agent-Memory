@@ -20,6 +20,7 @@
 
 import { randomUUID } from "node:crypto";
 import { RecallFailure } from "../core/hooks/recall-errors.js";
+import { GovernedMutationError } from "../core/legacy-mutation-guard.js";
 
 export interface ClientFacingError {
   /** Stable business code: HTTP status (4xx/5xx) for unknown errors, RecallError.code for recall failures. */
@@ -52,6 +53,10 @@ export interface ClassifiedError {
  *   - Anything else — 500 Internal server error
  */
 export function classifyError(err: unknown): ClassifiedError {
+  if (err instanceof GovernedMutationError) {
+    const trace_id = randomUUID();
+    return { status: 409, client: { code: 409, message: err.message, trace_id, retryable: false }, logLine: `[${trace_id}] ${err.code}` };
+  }
   const trace_id = randomUUID();
 
   // 1. PayloadTooLargeError (CR-7) — duck-typed to avoid circular import on gateway/server.ts.

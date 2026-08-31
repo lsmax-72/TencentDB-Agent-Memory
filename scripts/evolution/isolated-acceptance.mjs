@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const [stage, rootArg] = process.argv.slice(2);
-assert(['setup', 'verify', 'restart'].includes(stage) && rootArg, 'Usage: node scripts/evolution/isolated-acceptance.mjs setup|verify|restart <NEW absolute output directory>');
+assert(['setup', 'verify', 'restart', 'governance'].includes(stage) && rootArg, 'Usage: node scripts/evolution/isolated-acceptance.mjs setup|verify|restart|governance <NEW absolute output directory>');
 const root = resolve(rootArg);
 assert(rootArg === root && basename(root).startsWith('evolution-') && root !== repo, 'Dedicated absolute evolution-* path required');
 const tag = basename(root); assert(/^[a-z0-9-]+$/.test(tag));
@@ -141,4 +141,44 @@ if (stage === 'verify' || stage === 'restart') {
   save(`${stage}-${Date.now()}.json`, { status: 'PASS', model_calls: 0, historical_gate: record.record.payload.gate, cross_team_denied: true, wrong_key_denied: true, history_immutable: true, automation_disabled: true, runtime_unchanged: true,
     explicit_host_receipt: trace.id, duplicate_completion_same_receipt: true, persisted_job: job.id, job_status: job.status, conflicting_replay_denied: true, arbitrary_retry_path_denied: true, formal_assets_unchanged: true });
   console.log(`${stage.toUpperCase()}_PASS; history FAIL preserved; no model call; no formal writes`);
+}
+if (stage === 'governance') {
+  // This operator-only fixture is never an HTTP admission bypass. The isolated
+  // Core has no model configuration and keeps automation admission disabled.
+  const preflight = read('preflight.json');
+  assert.equal(preflight.production_mounts, false);
+  const config = read('private/core.yaml');
+  assert.equal(config.llm.baseUrl, ''); assert.equal(config.llm.apiKey, '');
+  const identity = read('identity.json');
+  const scope = { team_id: identity.team_id, agent_id: identity.agent_id, user_id: identity.owner_user_id, session_id: 'offline-guard-check' };
+  const original = (await api('/evolution/profiles/list', scope)).items[0];
+  assert(original && original.enabled === false, 'Run verify first; require disabled original profile');
+  const before = await api('/meta/asset/list', scope, { core: true });
+  const seed = enabled => execFileSync('docker', ['exec', '-i', settings.core, 'node', '--import', 'tsx', '--input-type=module', '-e', `
+    import { readFileSync } from 'node:fs';
+    import { DatabaseSync } from 'node:sqlite';
+    import { EvolutionStore } from '/app/src/evolution/control/store.ts';
+    import { resolveSqliteDbPath } from '/app/src/metadata/store/db-name.ts';
+    const input = JSON.parse(readFileSync(0, 'utf8'));
+    const db = new DatabaseSync(resolveSqliteDbPath('/data/tdai-memory/metadata', input.instance));
+    try { const store = new EvolutionStore(db); const profile = store.profile(input.team_id, input.agent_id);
+      if (!profile) throw new Error('Test profile missing');
+      const {revision, updated_at, ...fields} = profile;
+      store.saveProfile({...fields, enabled: input.enabled}, revision);
+    } finally { db.close(); }
+  `], { input: JSON.stringify({ instance: settings.instance, team_id: scope.team_id, agent_id: scope.agent_id, enabled }), encoding: 'utf8' });
+  const denied = [];
+  try {
+    seed(true);
+    for (const [path, body] of [['/scenario/write', { path: 'offline.md', content: 'must not be written' }], ['/scenario/rm', { path: 'offline.md' }], ['/core/write', { content: 'must not be written' }]]) {
+      const result = await api(path, { ...scope, ...body }, { core: true, error: 409 });
+      assert.match(result.message, /EVOLUTION_TASK_COMPLETE_REQUIRED/); denied.push(path);
+    }
+    assert.equal((await api('/evolution/overview', scope)).automation_ready, false);
+  } finally { seed(false); }
+  assert.equal((await api('/evolution/profiles/list', scope)).items[0].enabled, false);
+  assert.deepEqual(await api('/meta/asset/list', scope, { core: true }), before);
+  assert.deepEqual(snapshotFiles(join(root, 'runtime')), read('runtime-hashes.json'));
+  save(`governance-${Date.now()}.json`, { status: 'PASS', origin: 'OFFLINE_OPERATOR_PROFILE_FIXTURE', model_calls: 0, denied, profile_restored_disabled: true, official_assets_unchanged: true, automation_admission_disabled: true });
+  console.log('GOVERNANCE_PASS; cross-instance legacy routes blocked; profile restored disabled; no model calls');
 }

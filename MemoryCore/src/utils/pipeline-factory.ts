@@ -369,6 +369,7 @@ async function _doInitStores(
  * runs extractL1Memories for each group, and updates the checkpoint cursor.
  */
 export function createL1Runner(opts: {
+  legacyMutationGuard?: import("../core/legacy-mutation-guard.js").LegacyMutationGuard;
   pluginDataDir: string;
   cfg: MemoryTdaiConfig;
   openclawConfig: unknown;
@@ -587,6 +588,8 @@ export function createL1Runner(opts: {
       const l1Prompts = await resolveMemoryPrompts(vectorStore, l1PromptTargets);
 
       for (const group of groups) {
+        // Idle/session extraction is not an authorized business-completion signal.
+        await opts.legacyMutationGuard?.({ ...group, layer: "L1" });
         logger.debug?.(
           `${TAG} [l1] Group sessionId=${group.sessionId || "(empty)"}: ${group.messages.length} messages`,
         );
@@ -691,6 +694,7 @@ export function createPersister(
  * Used by both `index.ts` (live runtime) and `seed-runtime.ts` (seed CLI).
  */
 export function createL2Runner(opts: {
+  legacyMutationGuard?: import("../core/legacy-mutation-guard.js").LegacyMutationGuard;
   pluginDataDir: string;
   cfg: MemoryTdaiConfig;
   openclawConfig: unknown;
@@ -785,6 +789,7 @@ export function createL2Runner(opts: {
     const l2Prompts = await resolveMemoryPrompts(vectorStore, l2PromptTargets);
     for (const groupRecords of grouped.values()) {
       const ctx = groupRecords[0];
+      await opts.legacyMutationGuard?.({ ...ctx, layer: "L2" });
       const groupStorage = scopedStorage(storage, ctx);
       const groupDataDir = scopedDataDir(pluginDataDir, ctx);
       const groupScope = buildIsolationScope(ctx);
@@ -937,6 +942,7 @@ export function createL2Runner(opts: {
  * PersonaGenerator. Used by both `index.ts` and `seed-runtime.ts`.
  */
 export function createL3Runner(opts: {
+  legacyMutationGuard?: import("../core/legacy-mutation-guard.js").LegacyMutationGuard;
   pluginDataDir: string;
   cfg: MemoryTdaiConfig;
   openclawConfig: unknown;
@@ -956,11 +962,12 @@ export function createL3Runner(opts: {
     let generatedAny = false;
     const l3PromptTargets = executionScopes.map((scope) => {
       const isolation = parseProfileIsolationScope(scope);
-      return { teamId: isolation.teamId, agentId: isolation.agentId, layer: "l3" as const };
+      return { teamId: isolation?.teamId, agentId: isolation?.agentId, layer: "l3" as const };
     });
     const l3Prompts = await resolveMemoryPrompts(vectorStore, l3PromptTargets);
 
     for (const scope of executionScopes) {
+      await opts.legacyMutationGuard?.({ ...parseProfileIsolationScope(scope), layer: "L3" });
       const scopedDir = scopedDataDirForScope(pluginDataDir, scope);
       const scopedStore = scopedStorageForScope(storage, scope);
       const profileOptions = profileOptionsForScope(scope);
@@ -1002,11 +1009,11 @@ export function createL3Runner(opts: {
 
       logger.info(`${TAG} [L3] Starting persona generation: ${reason} (scope=${scope})`);
       // 反解 scope 拿回 teamId/userId/agentId/sessionId 给 langfuse trace 用
-      const scopeIsolation = parseProfileIsolationScope(scope);
+      const scopeIsolation = parseProfileIsolationScope(scope) ?? {};
       const l3StartMs = Date.now();
       const resolvedL3Prompt = l3Prompts.get(memoryPromptResolveKey({
-        teamId: scopeIsolation.teamId,
-        agentId: scopeIsolation.agentId,
+        teamId: scopeIsolation?.teamId,
+        agentId: scopeIsolation?.agentId,
         layer: "l3",
       }));
       const generator = new PersonaGenerator({

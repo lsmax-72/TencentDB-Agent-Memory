@@ -23,6 +23,7 @@
 import { randomUUID } from "node:crypto";
 
 import { ZodError } from "zod";
+import { GovernedMutationError } from "../core/legacy-mutation-guard.js";
 
 import { errorEnvelope, successEnvelope } from "./v2-router.js";
 import {
@@ -147,6 +148,7 @@ const ERROR_CODE_MAP: Record<string, number> = {
 };
 
 function mapCoreError(e: unknown, requestId: string, deps?: SkillRouterDeps, meta?: Record<string, unknown>): ApiResponseEnvelope {
+  if (e instanceof GovernedMutationError) return errorEnvelope(40902, e.message, requestId);
   if (e instanceof SkillCoreError) {
     const code = ERROR_CODE_MAP[e.code] ?? 50001;
 

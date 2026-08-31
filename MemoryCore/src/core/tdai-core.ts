@@ -116,6 +116,8 @@ export interface SkillAssetHooks {
 // ============================
 
 export interface TdaiCoreOptions {
+  /** Standalone host enforcement; absent preserves non-Hub integrations. */
+  legacyMutationGuard?: import("./legacy-mutation-guard.js").LegacyMutationGuard;
   /** Host adapter providing runtime context, logger, and LLM runner factory. */
   hostAdapter: HostAdapter;
   /** Parsed TDAI memory configuration. */
@@ -144,6 +146,7 @@ export interface TdaiCoreOptions {
 // ============================
 
 export class TdaiCore {
+  private readonly legacyMutationGuard?: TdaiCoreOptions["legacyMutationGuard"];
   private hostAdapter: HostAdapter;
   private cfg: MemoryTdaiConfig;
   private logger: Logger;
@@ -222,6 +225,7 @@ export class TdaiCore {
   private readonly bgTasks = new Set<Promise<void>>();
 
   constructor(opts: TdaiCoreOptions) {
+    this.legacyMutationGuard = opts.legacyMutationGuard;
     this.hostAdapter = opts.hostAdapter;
     this.cfg = opts.config;
     this.logger = opts.hostAdapter.getLogger();
@@ -728,6 +732,7 @@ export class TdaiCore {
 
     // L1 runner
     this.scheduler.setL1Runner(createL1Runner({
+      legacyMutationGuard: this.legacyMutationGuard,
       pluginDataDir: this.dataDir,
       cfg: this.cfg,
       openclawConfig,
@@ -745,6 +750,7 @@ export class TdaiCore {
     // L2 runner
     this.scheduler.setL2Runner(async (sessionKey: string, cursor?: string) => {
       const l2Runner = createL2Runner({
+        legacyMutationGuard: this.legacyMutationGuard,
         pluginDataDir: this.dataDir,
         cfg: this.cfg,
         openclawConfig,
@@ -760,6 +766,7 @@ export class TdaiCore {
     // L3 runner
     this.scheduler.setL3Runner(async () => {
       const l3Runner = createL3Runner({
+        legacyMutationGuard: this.legacyMutationGuard,
         pluginDataDir: this.dataDir,
         cfg: this.cfg,
         openclawConfig,
@@ -902,6 +909,7 @@ export class TdaiCore {
       });
 
       this.skillCore = new SkillCore({
+        legacyMutationGuard: this.legacyMutationGuard,
         store: skillStore,
         resources: skillResources,
         versioning: skillVersioning,
@@ -943,6 +951,7 @@ export class TdaiCore {
         }
         if (llmRunner) {
           this.skillExtractor = new SkillExtractor({
+            legacyMutationGuard: this.legacyMutationGuard,
             core: this.skillCore,
             runner: llmRunner,
             systemPrompt: SKILL_REVIEW_PROMPT,
@@ -1076,6 +1085,7 @@ export class TdaiCore {
       : undefined;
 
     const runner = createL1Runner({
+      legacyMutationGuard: this.legacyMutationGuard,
       pluginDataDir: this.dataDir,
       cfg: this.cfg,
       openclawConfig,
@@ -1126,6 +1136,7 @@ export class TdaiCore {
       : undefined;
 
     const runner = createL2Runner({
+      legacyMutationGuard: this.legacyMutationGuard,
       pluginDataDir: this.dataDir,
       cfg: this.cfg,
       openclawConfig,
@@ -1170,6 +1181,7 @@ export class TdaiCore {
       : undefined;
 
     const runner = createL3Runner({
+      legacyMutationGuard: this.legacyMutationGuard,
       pluginDataDir: this.dataDir,
       cfg: this.cfg,
       openclawConfig,

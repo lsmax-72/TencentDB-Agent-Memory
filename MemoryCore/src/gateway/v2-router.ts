@@ -220,6 +220,7 @@ async function recordAudit(
 // ============================
 
 export interface V2RouterDeps {
+  legacyMutationGuard?: import("../core/legacy-mutation-guard.js").LegacyMutationGuard;
   /** Get the default IMemoryStore (standalone fallback). */
   getStore: () => IMemoryStore | undefined;
   /** Get the default EmbeddingService (standalone fallback). */
@@ -1071,6 +1072,7 @@ async function handleAtomicUpdate(body: unknown, _auth: V2AuthContext, requestId
     return errorEnvelope(403, `Atomic note ${id} belongs to a different agent`, requestId);
   }
   const updatedVersion = (record.version ?? 0) + 1;
+  await deps.legacyMutationGuard?.({ teamId: record.team_id, agentId: record.agent_id, userId: record.user_id, layer: "L1" });
   const updated: MemoryRecord = {
     id,
     content,
@@ -1286,6 +1288,14 @@ async function handleAtomicDelete(body: unknown, auth: V2AuthContext, requestId:
 
   const store = deps.getStore();
   if (!store) return errorEnvelope(503, "Store not available", requestId);
+
+  if (deps.legacyMutationGuard) {
+    // Validate all stored owners before the first deletion; omitted request IDs
+    // must not bypass governance, and mixed batches may not partially delete.
+    for (const record of await store.queryL1Records({ recordIds: ids })) {
+      await deps.legacyMutationGuard({ teamId: record.team_id, agentId: record.agent_id, userId: record.user_id, layer: "L1" });
+    }
+  }
 
   // deleteL1Batch returns bool, but we need actual count
   // Fall back to per-id deletion for accurate counting
@@ -1908,6 +1918,7 @@ async function handleScenarioWrite(body: unknown, _auth: V2AuthContext, requestI
   const parsed = scenarioWriteRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { path, content, summary } = parsed.data;
+  await deps.legacyMutationGuard?.({ ...deps.requestIsolation, layer: "L2" });
 
   const baseStorage = deps.getStorage();
   if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
@@ -1980,6 +1991,7 @@ async function handleScenarioRm(body: unknown, _auth: V2AuthContext, requestId: 
   const parsed = scenarioRmRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { path } = parsed.data;
+  await deps.legacyMutationGuard?.({ ...deps.requestIsolation, layer: "L2" });
 
   const baseStorage = deps.getStorage();
   if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
@@ -2080,6 +2092,7 @@ async function handleCoreWrite(body: unknown, _auth: V2AuthContext, requestId: s
   const parsed = coreWriteRequestSchema.safeParse(body);
   if (!parsed.success) return errorEnvelope(400, formatZodError(parsed.error), requestId);
   const { content } = parsed.data;
+  await deps.legacyMutationGuard?.({ ...deps.requestIsolation, layer: "L3" });
 
   const baseStorage = deps.getStorage();
   if (!baseStorage) return errorEnvelope(503, "Storage not available", requestId);
