@@ -47,7 +47,9 @@ if(stage==='init'){
     assert(m.files.every(f=>!f.inspection.requires_recalculation));
   }
   const opts=root+'-prepared/setup.json';
-  writeFileSync(opts,JSON.stringify({ports:{corePort:20920,proxyPort:20696,hubPort:20725,knowledgePort:20924}}),{flag:'wx',mode:0o600});
+  const revision=Number(basename(root).match(/-r([1-9][0-9]*)$/)?.[1]);assert(revision>=1&&revision<10);
+  const base=19000+revision*1000;
+  writeFileSync(opts,JSON.stringify({ports:{corePort:base+920,proxyPort:base+696,hubPort:base+725,knowledgePort:base+924}}),{flag:'wx',mode:0o600});
   execFileSync('node',[resolve(here,'acceptance.mjs'),'setup',root,root+'-prepared/'+protocol.formation_tasks[0],opts],{stdio:'pipe'});
   settings=read('private/settings.json');
   cpSync(root+'-prepared',resolve(root,'prepared'),{recursive:true,errorOnExist:true,force:false});
@@ -99,7 +101,7 @@ async function runOne(key){
     assert(res.every(e=>e.status===200&&e.model===protocol.model));
     for(const k of ['prompt_tokens','completion_tokens','total_tokens'])assert(res.every(e=>Number.isInteger(e.usage?.[k]))&&res.reduce((s,e)=>s+e.usage[k],0)===agent.usage[k],k);
     assert.equal(agent.input_hash_before,agent.input_hash_after);assert(!agent.telemetry_error);
-    if(agent.status!=='COMPLETED'){
+    if(agent.status!=='COMPLETED'||agent.stop_reason==='max_iterations'){
       if(/BUDGET_EXHAUSTED|max.iteration/i.test(JSON.stringify(agent.agent_error)+agent.stop_reason))status='TASK_FAIL';
       else {status='INFRA_ERROR';error=agent.agent_error??agent.stop_reason;}
     }

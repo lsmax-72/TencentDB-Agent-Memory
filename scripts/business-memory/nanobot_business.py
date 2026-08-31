@@ -90,7 +90,14 @@ async def run(root: Path, run_key=None):
     packages = root / "runtime/packages" if run_key else Path(et_xmlfile.__file__).parent.parent
     sandbox = PythonSandbox(inputs, outputs, packages,
                             protocol["sandbox_image"])
-    bot = Nanobot.from_config(config_path=config_path, workspace=workspace)
+    provider = None
+    if run_key:
+        from bounded_provider import create_bounded_bot
+        # Let the already-frozen whole-run deadline govern; no hidden 120s retry.
+        os.environ['NANOBOT_OPENAI_COMPAT_TIMEOUT_S'] = str(protocol['timeout_seconds'])
+        bot, provider = create_bounded_bot(config_path, workspace, protocol)
+    else:
+        bot = Nanobot.from_config(config_path=config_path, workspace=workspace)
     register_spreadsheet_only(bot, sandbox)
     evidence = Evidence(protocol)
     task = manifest["task"]["instruction"] + (
@@ -114,6 +121,8 @@ async def run(root: Path, run_key=None):
     actual_model = bot.runtime.model
     raw = {"actual_model": actual_model, "model_calls": evidence.model_calls,
            "usage": (result.usage if result else evidence.usage)}
+    if provider:
+        raw.update(model_calls=provider.calls, usage=provider.observed_usage)
     telemetry_error = None
     try:
         usage = usage_summary(raw, evidence.events, protocol["model"])
@@ -125,6 +134,8 @@ async def run(root: Path, run_key=None):
               "usage": usage, "telemetry_error": telemetry_error, "tool_events": evidence.events,
               "elapsed_ms": round((time.monotonic() - started) * 1000),
               "session_id": identity["session_id"], "input_hash_before": entry["sha256"],
+              "sdk_usage": result.usage if result else evidence.usage,
+              "provider_responses": provider.responses if provider else None,
               "input_hash_after": __import__("hashlib").sha256((inputs / "input.xlsx").read_bytes()).hexdigest()}
     with (run_dir / "agent-run.json").open("x") as stream:
         json.dump(record, stream, ensure_ascii=False, indent=2)

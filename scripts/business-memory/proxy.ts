@@ -55,12 +55,18 @@ async function memoryBlock(session:string){
   recalls.set(session,block);return block;
 }
 let sequence=0;
+const upstreamCounts = new Map<string,number>();
 globalThis.fetch=async(input:any,init?:RequestInit)=>{
   const url=new URL(typeof input==='string'?input:input.url??input.toString());
   if(![new URL(settings.upstream).origin,config.auth.url].includes(url.origin))
     throw new Error('Business smoke egress denied');
   if(url.pathname.endsWith('/chat/completions')){
     const body=JSON.parse(String(init?.body)),call_id=++sequence,session=sessions.getStore()!;
+    if(settings.study){
+      const count=upstreamCounts.get(session)??0;
+      if(count>=8)throw Error('BUDGET_EXHAUSTED: upstream admission');
+      upstreamCounts.set(session,count+1);
+    }
     const block=settings.study&&bySession.get(session)?.arm==='FROZEN_HISTORY_MEMORY'?await memoryBlock(session):'';
     if(block){
       const user=body.messages.find((m:any)=>m.role==='user');
