@@ -5,37 +5,46 @@ import { contentHash, EvolutionStore } from "./store.js";
 import { EvolutionError, type CandidatePayload, type EvolutionRecord } from "./types.js";
 
 /** Caller must reserve quota and validate source ACL before invoking a model. */
-export async function generateSkillProposals(options: ExtractorOptions, input: ExtractInput, source: EvolutionRecord, store: EvolutionStore): Promise<EvolutionRecord[]> {
+export async function generateSkillProposals(options: ExtractorOptions, input: ExtractInput, source: EvolutionRecord, store: EvolutionStore, allocationId: string): Promise<EvolutionRecord[]> {
+  store.assertCandidateAllocation(allocationId, source.team_id, source.agent_id);
   if (!options.runner) throw new EvolutionError(503, "REVIEW_MODEL_UNAVAILABLE");
   if (source.origin !== "runtime" || source.kind !== "diagnosis" || source.payload.route !== "skill_defect") throw new EvolutionError(409, "SKILL_DIAGNOSIS_REQUIRED");
   if (source.team_id !== input.team_id || source.agent_id !== input.agent_id || source.owner_user_id !== input.user_id) throw new EvolutionError(403, "SOURCE_SCOPE_MISMATCH");
   const workspace = new CandidateSkillWorkspace({ official: options.core });
   await new SkillExtractor({ ...options, toolBackend: workspace, systemPrompt: options.systemPrompt ?? SKILL_REVIEW_PROMPT }).extract(input);
-  const records: EvolutionRecord[] = [];
+  const payloads: CandidatePayload[] = [];
   for (const skillId of workspace.listCandidateSkillIds()) {
     const artifact = workspace.exportCandidate(skillId);
     const before = artifact.operation === "CREATE" ? "" : (await workspace.get({ skill_id: skillId, version: artifact.base_version, team_id: input.team_id, user_id: input.user_id })).content;
     // Merely viewing an existing Skill must not manufacture a candidate.
     if (before === artifact.content) continue;
-    records.push(freezeCandidate(store, source, {
+    payloads.push({
       asset_kind: "skill", target_id: artifact.skill_id, base_hash: contentHash(before), base_version: artifact.base_version,
       before, after: artifact.content, source_record_ids: [source.id], operation: artifact.operation === "CREATE" ? "create" : "update",
       skill_artifact: artifact,
-    }));
+    });
   }
-  return records;
+  return freezeCandidates(store, source, payloads, allocationId);
 }
 
-export function freezeCandidate(store: EvolutionStore, source: EvolutionRecord, payload: CandidatePayload): EvolutionRecord {
+export function freezeCandidate(store: EvolutionStore, source: EvolutionRecord, payload: CandidatePayload, allocationId: string): EvolutionRecord {
+  return freezeCandidates(store, source, [payload], allocationId)[0];
+}
+
+export function freezeCandidates(store: EvolutionStore, source: EvolutionRecord, payloads: CandidatePayload[], allocationId: string): EvolutionRecord[] {
   if (source.origin !== "runtime") throw new EvolutionError(409, "HISTORICAL_SOURCE_NOT_EXECUTABLE");
-  if (!payload.source_record_ids.length || !payload.source_record_ids.includes(source.id)) throw new EvolutionError(400, "PROVENANCE_REQUIRED");
-  if (payload.before === payload.after) throw new EvolutionError(409, "NO_CONTENT_CHANGE");
-  if (contentHash(payload.before) !== payload.base_hash) throw new EvolutionError(409, "BASE_HASH_MISMATCH");
-  return store.append({
-    team_id: source.team_id, owner_user_id: source.owner_user_id, agent_id: source.agent_id,
-    kind: "candidate", title: `${payload.asset_kind} · ${payload.target_id}`, status: "FROZEN", origin: "runtime",
-    asset_ids: source.asset_ids, parent_id: source.id, payload,
-  }, `${source.id}/${payload.asset_kind}/${payload.target_id}/${contentHash(payload)}`, source.owner_user_id);
+  if (store.get(source.id)?.artifact_hash !== source.artifact_hash) throw new EvolutionError(409, "SOURCE_SNAPSHOT_CHANGED");
+  const entries = payloads.map(payload => {
+    if (!payload.source_record_ids.length || !payload.source_record_ids.includes(source.id)) throw new EvolutionError(400, "PROVENANCE_REQUIRED");
+    if (payload.before === payload.after) throw new EvolutionError(409, "NO_CONTENT_CHANGE");
+    if (contentHash(payload.before) !== payload.base_hash) throw new EvolutionError(409, "BASE_HASH_MISMATCH");
+    return { input: {
+      team_id: source.team_id, owner_user_id: source.owner_user_id, agent_id: source.agent_id,
+      kind: "candidate" as const, title: `${payload.asset_kind} · ${payload.target_id}`, status: "FROZEN", origin: "runtime" as const,
+      asset_ids: source.asset_ids, parent_id: source.id, payload,
+    }, key: `${source.id}/${payload.asset_kind}/${payload.target_id}/${contentHash(payload)}` };
+  });
+  return store.commitCandidateBatch(allocationId, source, entries);
 }
 
 export interface ContentValidation {

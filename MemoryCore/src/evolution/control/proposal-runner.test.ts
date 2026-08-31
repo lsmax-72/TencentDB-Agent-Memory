@@ -26,7 +26,7 @@ function setup(calls = 5) {
     daily_tokens: 500000, daily_model_calls: calls, daily_candidates: 10, evaluation_profile_id: null, auto_memory: false, auto_wiki_maintenance: false, authorized_by: "owner" }, 0);
   const source = store.append({ team_id: "team", agent_id: "agent", owner_user_id: "owner", kind: "diagnosis", origin: "runtime", status: "DIAGNOSED", title: "Offline evidence", asset_ids: [], payload: { route: "skill_defect" } }, "source", "owner");
   const job = store.append({ ...source, kind: "job", status: "RUNNING", payload: { job_type: "proposal" } }, "job", "owner");
-  return { metadata, store, source, jobId: job.id, authorize: async () => true, profile };
+  return { metadata, store, source, jobId: job.id, allocationId: store.allocateCandidateSlots(job.id, 10), authorize: async () => true, profile };
 }
 
 describe("independent proposal runner with real SDK and offline HTTP responses", () => {
@@ -52,7 +52,7 @@ describe("independent proposal runner with real SDK and offline HTTP responses",
     const officialWrite = vi.fn();
     const core = { create: officialWrite, update: officialWrite, list: async () => ({ items: [], total: 0 }) };
     const records = await generateSkillProposals({ core: core as never, runner: createProposalRunner(config, input, request) },
-      { team_id: "team", agent_id: "agent", user_id: "owner", messages: [{ role: "user", content: "Repeated evidence shows missing verification." }] }, input.source, input.store);
+      { team_id: "team", agent_id: "agent", user_id: "owner", messages: [{ role: "user", content: "Repeated evidence shows missing verification." }] }, input.source, input.store, input.allocationId);
     expect(records).toHaveLength(1); expect(records[0].status).toBe("FROZEN"); expect(officialWrite).not.toHaveBeenCalled();
     expect(input.store.list("team", "job").filter(job => job.payload.job_type === "proposal_model_step")).toHaveLength(2);
     expect(input.store.list("team", "job").filter(job => job.payload.job_type === "proposal_tool_event")).toHaveLength(1);

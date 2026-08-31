@@ -10,6 +10,7 @@ import { redactEvidence } from "./evidence.js";
 
 const SKILL_TOOLS = new Set(["skill_list", "skill_view", "skill_create", "skill_update", "skill_patch", "skill_files_write", "skill_files_read", "skill_files_remove"]);
 export interface ProposalRunnerContext {
+  allocationId: string;
   store: EvolutionStore;
   source: EvolutionRecord;
   /** A durable, unique generation job ID; never reused for retries. */
@@ -29,6 +30,8 @@ export function createProposalRunner(raw: ReviewModelConfig, context: ProposalRu
   const initialProfileHash = contentHash(store.profile(source.team_id, source.agent_id));
   async function authorize() {
     if (!await context.authorize() || contentHash(store.profile(source.team_id, source.agent_id)) !== initialProfileHash) throw new EvolutionError(403, "PROPOSAL_AUTHORIZATION_CHANGED");
+    if (context.allocationId !== `${jobId}/candidates`) throw new EvolutionError(409, "CANDIDATE_ALLOCATION_JOB_MISMATCH");
+    store.assertCandidateAllocation(context.allocationId, source.team_id, source.agent_id, source.owner_user_id);
   }
   function record(key: string, type: string, status: string, payload: Record<string, unknown>) {
     return store.append({ team_id: source.team_id, owner_user_id: source.owner_user_id, agent_id: source.agent_id,

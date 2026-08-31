@@ -1,5 +1,12 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 02:46 续跑：候选额度与整批冻结
+
+- 上一稳定提交 `6ad4e59`：候选独立模型执行器（Core123tests通过）。本节新增真正的候选slot预留：RUNNING proposal job先在SQLite预留daily_candidates剩余额度，runner每次模型/工具前验证allocation仍有效。
+- Skill/L1/L2/L3生成封装现在必须持有效allocation；整批candidate和quota结算同一transaction，超额/内容不合法/中途SQL失败不留半批候选。已结算allocation不能重用；未知/中断保留预留，不假定免费，成功仅归还未使用slot。
+- Core全量 **127tests/25files PASS**；control严格检查零错误（仍101条transitive依赖diagnostics）；diff check PASS。测试基于隔离SQLite、真实提取类和mock HTTP，没有vLLM调用。
+- 尚未完成诊断→generation jobs自动续接、实际源资产ACL快照、Wiki接线和采用/完整Hub交付。下一步接generation dispatcher及目标解析；保持admission关闭，不能把封装测试当全链路。
+
 ## 2026-09-01 02:40 续跑：候选专用受预算执行器
 
 - 前一稳定提交 `b2f6871`：旧入口写屏障+后台生命周期；本节继续实现，没有等待用户下一步。

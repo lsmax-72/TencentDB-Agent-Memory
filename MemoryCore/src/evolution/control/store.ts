@@ -179,6 +179,52 @@ export class EvolutionStore {
     return this.db.prepare("SELECT document FROM evolution_profiles WHERE team_id=?").all(teamId).map(row => JSON.parse(String(row.document)));
   }
 
+  /** Reserve output slots before generation; unknown/interrupted outcomes keep them charged. */
+  allocateCandidateSlots(jobId: string, limit = 20): string {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new EvolutionError(400, "INVALID_CANDIDATE_LIMIT");
+    return this.transaction(() => {
+      const job = this.get(jobId);
+      if (!job || job.kind !== "job" || job.origin !== "runtime" || job.payload.job_type !== "proposal" || job.status !== "RUNNING") throw new EvolutionError(409, "LIVE_PROPOSAL_JOB_REQUIRED");
+      const profile = this.profile(job.team_id, job.agent_id);
+      if (!profile?.enabled || !profile.daily_candidates) throw new EvolutionError(409, "AUTOMATION_NOT_ENABLED");
+      const used = this.db.prepare("SELECT COALESCE(SUM(candidates),0) n FROM evolution_reservations WHERE team_id=? AND agent_id=? AND day=?")
+        .get(job.team_id, job.agent_id, new Date().toISOString().slice(0, 10))!;
+      const count = Math.min(limit, profile.daily_candidates - Number(used.n));
+      if (count < 1) throw new EvolutionError(429, "EVOLUTION_CANDIDATE_BUDGET_EXHAUSTED");
+      const id = `${jobId}/candidates`;
+      this.reserve(id, job.team_id, job.agent_id, 0, 0, count);
+      return id;
+    });
+  }
+
+  assertCandidateAllocation(id: string, teamId: string, agentId: string, ownerId?: string): number {
+    const job = id.endsWith("/candidates") ? this.get(id.slice(0, -"/candidates".length)) : null;
+    if (!job || job.kind !== "job" || job.origin !== "runtime" || job.payload.job_type !== "proposal" || job.status !== "RUNNING"
+      || job.team_id !== teamId || job.agent_id !== agentId || ownerId && job.owner_user_id !== ownerId) throw new EvolutionError(409, "LIVE_PROPOSAL_JOB_REQUIRED");
+    const row = this.db.prepare("SELECT * FROM evolution_reservations WHERE id=?").get(id);
+    if (!row || row.team_id !== teamId || row.agent_id !== agentId || row.tokens !== 0 || row.calls !== 0 || row.settled || Number(row.candidates) < 1) throw new EvolutionError(409, "CANDIDATE_ALLOCATION_NOT_OPEN");
+    if (!this.profile(teamId, agentId)?.enabled) throw new EvolutionError(409, "AUTOMATION_NOT_ENABLED");
+    return Number(row.candidates);
+  }
+
+  /** Freeze the complete batch and settle its output quota in one SQLite transaction. */
+  commitCandidateBatch(allocationId: string, source: EvolutionRecord, entries: Array<{ input: NewRecord; key: string }>): EvolutionRecord[] {
+    return this.transaction(() => {
+      const limit = this.assertCandidateAllocation(allocationId, source.team_id, source.agent_id, source.owner_user_id);
+      if (entries.length > limit) throw new EvolutionError(429, "CANDIDATE_BATCH_EXCEEDS_RESERVATION");
+      if (entries.some(({ input }) => input.kind !== "candidate" || input.origin !== "runtime" || input.team_id !== source.team_id
+        || input.agent_id !== source.agent_id || input.owner_user_id !== source.owner_user_id)) throw new EvolutionError(403, "CANDIDATE_ALLOCATION_SCOPE_MISMATCH");
+      let created = 0;
+      const records = entries.map(({ input, key }) => {
+        if (!this.find(input.team_id, "candidate", key)) created++;
+        return this.append(input, key, source.owner_user_id);
+      });
+      this.db.prepare("UPDATE evolution_reservations SET candidates=?, settled=1 WHERE id=?").run(created, allocationId);
+      this.event(source.id, source.owner_user_id, "CANDIDATE_BATCH_FROZEN", { allocation_id: allocationId, candidate_ids: records.map(record => record.id), reserved: limit, created });
+      return records;
+    });
+  }
+
   saveProfile(input: Omit<EvolutionProfile, "revision" | "updated_at">, expectedRevision: number): EvolutionProfile {
     return this.transaction(() => {
       const previous = this.profile(input.team_id, input.agent_id);

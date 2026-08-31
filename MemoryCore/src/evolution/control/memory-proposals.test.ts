@@ -8,8 +8,10 @@ afterEach(() => stores.splice(0).forEach(store => store.close()));
 function setup() {
   const metadata = new SqliteMetadataStore(":memory:"); metadata.init(); stores.push(metadata);
   const store = metadata.getEvolutionStore();
+  store.saveProfile({ team_id: "t", agent_id: "a", enabled: true, asset_kinds: ["memory"], asset_ids: [], daily_tokens: 100000, daily_model_calls: 10, daily_candidates: 10, evaluation_profile_id: null, auto_memory: false, auto_wiki_maintenance: false, authorized_by: "u" }, 0);
   const source = store.append({ team_id: "t", agent_id: "a", owner_user_id: "u", kind: "trace", title: "offline source", status: "RECORDED", origin: "runtime", asset_ids: [], payload: {} }, "source", "u");
-  return { store, source, metadata, targetId: "memory-asset", snapshot: new Map<string, Buffer>() };
+  const job = store.append({ ...source, kind: "job", status: "RUNNING", payload: { job_type: "proposal" } }, "job", "u");
+  return { store, source, metadata, targetId: "memory-asset", allocationId: store.allocateCandidateSlots(job.id), snapshot: new Map<string, Buffer>() };
 }
 describe("native Memory pipelines use isolated proposals", () => {
   it("L1 preserves extracted provenance without registering official Memory", async () => {

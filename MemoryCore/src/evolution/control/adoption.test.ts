@@ -8,8 +8,10 @@ afterEach(() => stores.splice(0).forEach(store => store.close()));
 function setup() {
   const metadata = new SqliteMetadataStore(":memory:"); metadata.init(); stores.push(metadata);
   const store = metadata.getEvolutionStore();
+  store.saveProfile({ team_id: "test", agent_id: "agent", enabled: true, asset_kinds: ["memory"], asset_ids: [], daily_tokens: 100000, daily_model_calls: 10, daily_candidates: 10, evaluation_profile_id: null, auto_memory: false, auto_wiki_maintenance: false, authorized_by: "owner" }, 0);
   const source = store.append({ team_id: "test", owner_user_id: "owner", agent_id: "agent", kind: "trace", title: "offline test source", status: "RECORDED", origin: "runtime", asset_ids: [], payload: {} }, "source", "owner");
-  const candidate = freezeCandidate(store, source, { asset_kind: "memory", layer: "L1", target_id: "target", base_hash: contentHash(""), base_version: null, before: "", after: "frozen fact", operation: "create", source_record_ids: [source.id] });
+  const job = store.append({ ...source, kind: "job", status: "RUNNING", payload: { job_type: "proposal" } }, "job", "owner");
+  const candidate = freezeCandidate(store, source, { asset_kind: "memory", layer: "L1", target_id: "target", base_hash: contentHash(""), base_version: null, before: "", after: "frozen fact", operation: "create", source_record_ids: [source.id] }, store.allocateCandidateSlots(job.id));
   store.transition(candidate.id, 1, ["FROZEN"], "VALIDATED", "validator");
   store.review(candidate.id, 2, "REVIEW_APPROVED", "test approval", "owner");
   let tail: Promise<unknown> = Promise.resolve();
