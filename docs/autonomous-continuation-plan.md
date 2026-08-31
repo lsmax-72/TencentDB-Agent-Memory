@@ -2,6 +2,8 @@
 
 创建：2026-08-31，北京时间。目的：减少逐步人工确认，按真实证据推进 Phase 6 收尾，而非自动扩展研究范围。
 
+> 后续入口更新（2026-08-31）：用户已自行登录测试 Hub 并验证基础记忆功能，不再要求重复登录/学校信息演示。后续业务任务使用 [业务 Memory 连续实施计划](business-memory-execution-plan.md)；本文保留 Phase 6 原计划与执行历史。新的业务协议仍须遵守既有 Critical Review Gate，不能仅凭计划视为已批准。
+
 ## 1. 当前基线与完成边界
 
 - 仓库：`/Users/lsmax/Coder/TencentDB-Agent-Memory`；规划时分支 `feat/evolution-candidate-refinement`，HEAD `ea1080392cddca44bf4bb16b1ca6c75f7c3af8fc`。续跑必须重新检查 Git，不假定 HEAD 不变。
