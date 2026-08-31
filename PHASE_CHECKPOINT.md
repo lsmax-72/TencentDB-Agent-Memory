@@ -1,5 +1,16 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 02:00 续跑：任务派发已接线，完整目标未完成
+
+- 凌晨一次性 heartbeat 已触发并接续；未重复创建定时任务。Goal 最近宿主查询显示 `usageLimited`，本轮不兑换额度、不修改 Goal 状态，按已授权任务继续实际工程。
+- 从 `395194d` 开始，接通 `task/complete → 原子 trace + job → 进程内 dispatcher → 独立 reviewer binding → diagnosis`；`diagnosis/retry` 明确生成独立、幂等的新任务，原失败保留。并非只新增 helper：Core HTTP/Gateway 生命周期已接线。
+- 复盘配置从操作员指定的私有文件 `EVOLUTION_REVIEW_MODELS_FILE` 解析，绑定 instance/team/agent，独立于聊天模型；HTTP 不接受 endpoint/API Key。缺配置/关闭/准入不足不调用模型，预算调用前预留，权限与配置在执行前复查。
+- SQLite reopen 测试证明 QUEUED 可继续、已有结果可恢复，RUNNING 无结果则 `RECONCILE_REQUIRED`，不盲重放、未知 usage 保留预留。当前 Gateway lazy instance 初始化时恢复；开机发现所有已有 instance、连接池驱逐/停止调度竞态仍需完善后才能开放准入。
+- Core **100 tests/21 files PASS**，新增控制模块 strict typecheck 零错误（35既有依赖 diagnostics）；Core plugin build、Panel build/3tests、web build PASS。首次新增测试因种子用户省略底层要求的 auth_provider/external_id 失败，补全真实存储输入后通过；未改用户存储实现来迁就测试。
+- 独立证据 `/Users/lsmax/Coder/phase6-artifacts/outputs/evolution-hub-20260901-r1`，Core27920/Hub27725，setup/verify/restart PASS；验证正式资产快照不变、历史v4 FAIL不变、显式host回执重复幂等/冲突拒绝、关闭状态持久化job、任意retry路径拒绝。测试回执明确 `NOT_RUN_OFFLINE_ACCEPTANCE`，不是模型运行。没有登录新端口。
+- 准入仍关闭：三类候选生成续接、全部旧入口治理、正式writer与采用恢复、完整浏览器业务流程及8125交付仍未完成。不要将本节接通诊断称为完整自进化。
+- 下一步已发现：Hub metadata 按 instance 分库，但 standalone Memory 部分调用仅持 default instance；治理必须能正确解析 Agent 的真实配置作用域，缺身份时 fail-closed，不能只在默认库查开关。继续核查 pipeline-factory/TdaiCore/SkillExtractor 与 metadata pool，再接治理。
+
 ## 2026-08-31 持续目标已启用（优先执行约定）
 
 - 用户明确要求创建持续 Goal，把已批准的 MemoryHub Skill/Memory/Wiki 统一方案全部实现，不再每完成小步骤就停止等待“继续”。已通过应用 Goal 工具创建，状态 active；未设置额外 token budget。目标以应用当前 Goal 和最新用户指令为准。

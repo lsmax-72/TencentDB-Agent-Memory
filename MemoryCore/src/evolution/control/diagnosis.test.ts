@@ -38,6 +38,15 @@ describe("read-only evidence-driven diagnosis", () => {
     profile(store);
     await expect(diagnose(store, source, [], model, "attempt")).rejects.toThrow("DIAGNOSIS_SOURCE_FABRICATED");
   });
+  it("does not count successful runs as corroborating Skill failures", async () => {
+    const { store } = setup(); profile(store); const source = trace(store);
+    const success = store.append({ team_id: "team", owner_user_id: "owner", agent_id: "agent", kind: "trace", title: "success", status: "RECORDED", origin: "runtime", asset_ids: [], payload: { outcome: "PASS" } }, "success", "owner");
+    const model: DiagnosisModel = { modelId: "offline-test", tokenCeiling: 50, complete: async () => ({
+      text: JSON.stringify({ route: "skill_defect", explanation: "two citations are not two failures", evidence: [source, success].map(record => ({ record_id: record.id, observation: "cited" })) }),
+      input_tokens: 5, output_tokens: 5,
+    }) };
+    expect((await diagnose(store, source, [success], model, "attempt")).payload.route).toBe("unknown");
+  });
 });
 describe("history and restart", () => {
   it("persists records across metadata-store close/reopen", () => {

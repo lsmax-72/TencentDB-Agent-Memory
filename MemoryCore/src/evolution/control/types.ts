@@ -29,6 +29,8 @@ export interface EvolutionProfile {
   daily_model_calls: number | null;
   daily_candidates: number | null;
   evaluation_profile_id: string | null;
+  /** Server-side reviewer binding, independent of the task/chat model. */
+  review_model_id?: string | null;
   auto_memory: boolean;
   auto_wiki_maintenance: boolean;
   authorized_by: string;

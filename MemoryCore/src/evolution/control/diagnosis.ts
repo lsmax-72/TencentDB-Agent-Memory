@@ -39,7 +39,8 @@ export async function diagnose(store: EvolutionStore, trace: EvolutionRecord, re
   if (parsed.evidence.some(item => !ids.has(item.record_id))) throw new EvolutionError(400, "DIAGNOSIS_SOURCE_FABRICATED");
   // Route downgrade is explicit evidence, not a silently forced Skill refinement.
   const cited = new Set(parsed.evidence.map(item => item.record_id));
-  const route = parsed.route === "skill_defect" && cited.size < 2 ? "unknown" : parsed.evidence.length ? parsed.route : "unknown";
+  const failedCitations = records.filter(record => cited.has(record.id) && record.payload.outcome === "FAIL");
+  const route = parsed.route === "skill_defect" && new Set(failedCitations.map(record => record.id)).size < 2 ? "unknown" : parsed.evidence.length ? parsed.route : "unknown";
   return store.append({ team_id: trace.team_id, owner_user_id: trace.owner_user_id, agent_id: trace.agent_id,
     kind: "diagnosis", title: `诊断：${trace.title}`, status: route === "unknown" ? "NEEDS_EVIDENCE" : "DIAGNOSED", origin: "runtime",
     asset_ids: [...new Set(records.flatMap(record => record.asset_ids))], parent_id: trace.id,

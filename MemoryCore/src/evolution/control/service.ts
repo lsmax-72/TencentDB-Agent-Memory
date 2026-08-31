@@ -2,8 +2,9 @@ import { z } from "zod";
 import type { IMetadataStore } from "../../metadata/store/interface.js";
 import type { MetadataService } from "../../metadata/service/metadata-service.js";
 import { EvolutionStore } from "./store.js";
-import { EvolutionError, type EvolutionRecord } from "./types.js";
+import { EvolutionError, type EvolutionRecord, type EvolutionProfile } from "./types.js";
 import { redactEvidence } from "./evidence.js";
+import { EvolutionDispatcher } from "./dispatcher.js";
 
 const id = z.string().min(1).max(180).regex(/^[\w.:-]+$/);
 const scopeSchema = z.object({ team_id: id });
@@ -14,19 +15,42 @@ const profileSchema = scopeSchema.extend({
   asset_kinds: z.array(z.enum(["skill", "memory", "wiki"])).max(3), asset_ids: z.array(id).max(50),
   daily_tokens: z.number().int().positive().nullable(), daily_model_calls: z.number().int().positive().nullable(),
   daily_candidates: z.number().int().positive().nullable(), evaluation_profile_id: id.nullable(),
+  review_model_id: id.nullable().optional(),
   auto_memory: z.boolean(), auto_wiki_maintenance: z.boolean(),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "review/decide"] as const;
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "review/decide"] as const;
 
 export class EvolutionService {
+  readonly dispatcher: EvolutionDispatcher;
   constructor(
     readonly store: EvolutionStore,
     private readonly metadata: IMetadataStore,
     private readonly permissions: Pick<MetadataService, "checkAssetPermission">,
     /** Set only after governed legacy writers, executor and adoption admission pass. */
     private readonly automationReady = false,
-  ) {}
+    dispatcher?: EvolutionDispatcher,
+  ) {
+    this.dispatcher = dispatcher ?? new EvolutionDispatcher(store, {
+      admitted: () => this.automationReady, resolveModel: () => null,
+      authorize: (source, profile) => this.authorizeDispatch(source, profile),
+    });
+  }
+
+  /** Background jobs have no user-key inheritance; recheck the persisted owner and grant. */
+  async authorizeDispatch(source: EvolutionRecord, profile: EvolutionProfile): Promise<boolean> {
+    if (source.team_id !== profile.team_id || source.agent_id !== profile.agent_id) return false;
+    const owner = await this.metadata.getUserById(source.owner_user_id);
+    const grantor = await this.metadata.getUserById(profile.authorized_by);
+    const ownerMember = await this.metadata.getTeamMember(source.team_id, source.owner_user_id);
+    const grantMember = await this.metadata.getTeamMember(source.team_id, profile.authorized_by);
+    const team = await this.metadata.getTeamById(source.team_id);
+    const agent = await this.metadata.getAgentById(source.agent_id);
+    if (team?.status !== "active" || owner?.status !== "active" || grantor?.status !== "active" || ownerMember?.status !== "active"
+      || grantMember?.status !== "active" || grantMember.role !== "admin" || agent?.status !== "active"
+      || agent.team_id !== source.team_id || agent.owner_user_id !== source.owner_user_id) return false;
+    return await this.mayRead(source, source.owner_user_id) && await this.mayRead(source, profile.authorized_by);
+  }
 
   private async actor(userKey: string, teamId: string) {
     const user = await this.metadata.getUserByKey(userKey);
@@ -121,16 +145,29 @@ export class EvolutionService {
       if (!await this.mayRead(draft, actor.id)) throw new EvolutionError(403, "SOURCE_READ_DENIED");
       if (Object.keys(input.used_asset_versions).some(assetId => !input.asset_ids.includes(assetId))) throw new EvolutionError(400, "ASSET_PROVENANCE_INCOMPLETE");
       // This receipt records a host assertion, not an Oracle certification.
-      return this.store.append(draft, `${actor.id}/${input.run_id}`, actor.id);
+      const trace = this.store.completeWithJob(draft, `${actor.id}/${input.run_id}`, actor.id, source => this.dispatcher.enqueue(source));
+      this.dispatcher.wake();
+      return trace;
     }
     if (action === "diagnosis/request") {
       const input = recordSchema.parse(body);
       const source = this.store.get(input.id);
       if (!source || source.team_id !== team_id || !await this.mayRead(source, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
       if (source.kind !== "trace" || source.origin !== "runtime") throw new EvolutionError(409, "LIVE_TRACE_REQUIRED");
-      const profile = this.store.profile(team_id, source.agent_id);
-      const status = !profile?.enabled ? "BLOCKED_AUTOMATION_DISABLED" : "BLOCKED_EXECUTOR_UNAVAILABLE";
-      return this.store.append({ team_id, owner_user_id: source.owner_user_id, agent_id: source.agent_id, kind: "job", origin: "runtime", title: `诊断：${source.title}`, status, asset_ids: source.asset_ids, parent_id: source.id, payload: { source_id: source.id, source_hash: source.artifact_hash, model_calls: 0 } }, `${source.id}/diagnosis`, actor.id);
+      const job = this.dispatcher.enqueue(source);
+      this.dispatcher.wake();
+      return job;
+    }
+    if (action === "diagnosis/retry") {
+      const input = recordSchema.extend({ request_id: id }).strict().parse(body);
+      const previous = this.store.get(input.id);
+      if (!previous || previous.team_id !== team_id || !await this.mayRead(previous, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      const source = this.store.get(String(previous.payload.source_id));
+      if (!source || source.team_id !== team_id || !await this.mayRead(source, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      if (actor.id !== source.owner_user_id) throw new EvolutionError(403, "TASK_OWNER_REQUIRED");
+      const job = this.dispatcher.enqueue(source, { previous, requestId: input.request_id });
+      this.dispatcher.wake();
+      return job;
     }
     if (action === "review/decide") {
       const input = recordSchema.extend({ revision: z.number().int().positive(), decision: z.enum(["REJECTED", "NEEDS_EVIDENCE", "REVIEW_APPROVED"]), reason: z.string().min(1).max(4000) }).parse(body);

@@ -4,7 +4,7 @@ import { validatePanelMetaHeaders } from '../middleware/validate-panel-headers.j
 import { respondControlError, respondEnvelope } from '../envelope.js';
 import { toKernelCredentials } from '../../kernel/types.js';
 
-const ACTIONS = new Set(['overview', 'records/list', 'records/get', 'profiles/list', 'profiles/save', 'task/complete', 'diagnosis/request', 'review/decide']);
+const ACTIONS = new Set(['overview', 'records/list', 'records/get', 'profiles/list', 'profiles/save', 'task/complete', 'diagnosis/request', 'diagnosis/retry', 'review/decide']);
 
 /** Core owns permissions and state; Panel never stores credentials or candidate bodies. */
 export function registerEvolutionRoutes(api: Hono, deps: PanelDeps): void {

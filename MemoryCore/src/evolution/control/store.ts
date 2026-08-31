@@ -50,6 +50,36 @@ export class EvolutionStore {
     return row ? JSON.parse(String(row.document)) : null;
   }
 
+  find(teamId: string, kind: RecordKind, dedupeKey: string): EvolutionRecord | null {
+    const row = this.db.prepare("SELECT document FROM evolution_records WHERE team_id=? AND kind=? AND dedupe_key=?").get(teamId, kind, dedupeKey);
+    return row ? JSON.parse(String(row.document)) : null;
+  }
+
+  /** Internal dispatcher only; callers must reauthorize the source before executing a job. */
+  jobs(statuses: string[]): EvolutionRecord[] {
+    return this.db.prepare("SELECT document FROM evolution_records WHERE kind='job' ORDER BY rowid").all()
+      .map(row => JSON.parse(String(row.document)) as EvolutionRecord)
+      .filter(record => record.origin === "runtime" && record.payload.job_type === "diagnosis" && statuses.includes(record.status));
+  }
+
+  /** A crash cannot leave an acknowledged completion without its durable dispatch receipt. */
+  completeWithJob(input: NewRecord, key: string, actor: string, enqueue: (trace: EvolutionRecord) => EvolutionRecord): EvolutionRecord {
+    return this.transaction(() => {
+      const trace = this.append(input, key, actor);
+      enqueue(trace);
+      return trace;
+    });
+  }
+
+  jobTransition(job: EvolutionRecord, status: string, evidence: Record<string, unknown> = {}): EvolutionRecord {
+    return this.transaction(() => {
+      if (job.kind !== "job" || job.payload.job_type !== "diagnosis") throw new EvolutionError(409, "DIAGNOSIS_JOB_REQUIRED");
+      const result = this.transition(job.id, job.revision, [job.status], status, "evolution-dispatcher");
+      this.event(job.id, "evolution-dispatcher", "JOB_EVIDENCE", evidence);
+      return result;
+    });
+  }
+
   list(teamId: string, kind?: RecordKind): EvolutionRecord[] {
     const rows = kind
       ? this.db.prepare("SELECT document FROM evolution_records WHERE team_id=? AND kind=? ORDER BY rowid DESC").all(teamId, kind)

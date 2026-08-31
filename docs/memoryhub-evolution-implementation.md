@@ -2,6 +2,17 @@
 
 状态：IMPLEMENTATION_IN_PROGRESS；不能视为完整交付。2026-08-31。
 
+## 2026-09-01 后端接线进展
+
+- `task/complete` 在同一 metadata SQLite transaction 写入 trace 和诊断 job，响应后唤醒进程内串行 dispatcher；不新增服务或队列基础设施。重复完成上报不重跑模型。
+- 复盘模型是操作员配置的独立 binding：通过 `EVOLUTION_REVIEW_MODELS_FILE` 指定绝对路径的0600 JSON文件，数组每项含 `id / instance_id / team_id / agent_id / config`。config 使用已有 `ReviewModelConfig`（provider/model/base_url/api_key/max_output_tokens/token_ceiling/timeout_ms/temperature=0/fallback=false）。Agent profile 可保存 `review_model_id`；目前 UI 保存草案会保留该字段，尚未提供完整绑定选择器。
+- 配置文件只在服务端读取；HTTP 不能提交任意文件路径、endpoint 或 secret。记录仅包含绑定 fingerprint 与实际模型，不保存 API Key，不继承聊天配置。文件缺失、不安全权限、配置不完整均阻止调用；当前没有设置真实 binding，也未调用 vLLM。
+- 执行前再次验证 Team/Agent/owner/admin grant、source读取权限、profile与binding hash；每次模型调用前使用原预算账本预留。失败独立保留，未知用量不记零；`diagnosis/retry` 用新 request_id 创建独立任务，不能改写原任务。
+- 存储重开后 QUEUED 可执行，RUNNING 已有诊断结果则恢复完成，没有结果则要求核对，不自动重放。Gateway 在该 instance 首次请求时懒初始化恢复；完整启动发现和 metadata LRU 生命周期保护尚未完成，不据此宣称全部服务重启场景通过。
+- Core100 tests/21 files，Panel3 tests，Core plugin/Panel/web builds PASS；control类型检查零新增错误。新增 `dispatcher.test.ts` 使用真实SQLite/服务入口加明确的离线模型 double，不是实际LLM效果证据。
+- 新隔离 `evolution-hub-20260901-r1`（27920/27725）setup/verify/restart PASS；包括 host完成幂等、持久化blocked job、冲突与任意retry路径拒绝、正式资产不变和历史FAIL保留。测试回执明确未运行模型；未对新端口做浏览器登录。
+- 已识别治理接线风险：metadata配置的instance与standalone默认Memory runner身份不总一致。下一步解决对应关系并覆盖旧入口，不能只检查默认库。
+
 ## 已锁定边界
 
 - 主交付为现有 8125 Hub；沿用 TencentDB / Tea 界面，不使用 MyUI。
@@ -49,7 +60,7 @@
 
 ## 尚未完成
 
-1. 任务完成后的持久化自动编排；受限本地 evaluation executor；每个真实 provider/tool step、重试和 Wiki merge 的预算准入。
+1. 任务完成到诊断已接线；仍需诊断到三类候选的持久化续接、完整实例启动恢复、受限本地 evaluation executor，以及每个真实 provider/tool step、重试和 Wiki merge 的预算准入。
 2. 全部旧 Skill / Memory L1/L2/L3 自动写入口治理接线（含后台和 standalone pipeline）；开关尚不能启用，失败不退回直接写是强制准入条件。
 3. 三类正式 writer、原生全局并发锁、scope/grant/base-version/source 权限再核验、登记与索引确认、完整重启恢复。现有采用 coordinator 不能代替这些接口验收。
 4. Skill 评测任务与现有 nanobot bridge 的固定任务适配；服务端 validation/evaluation receipt 和风险授权封口。旧 Oracle/Pair/Gate 不改。

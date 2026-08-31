@@ -108,6 +108,8 @@ import { makeMemoryGenerationLogRouteTable } from "./memory-generation-log-handl
 import { makeEvolutionRouteTable } from "./evolution-handlers.js";
 import { EvolutionService } from "../evolution/control/service.js";
 import { EvolutionError } from "../evolution/control/types.js";
+import { EvolutionDispatcher } from "../evolution/control/dispatcher.js";
+import { fileReviewBindings } from "../evolution/control/model-bindings.js";
 import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
 import type { OffloadV2Deps } from "../offload_server/router.js";
@@ -314,6 +316,7 @@ export class TdaiGateway {
   private metadataStorePool: MetadataStorePool | null = null;
   private memorySystemUserConfig: MemorySystemUserConfig | undefined;
   private readonly metadataServiceByInstance = new Map<string, MetadataService>();
+  private readonly evolutionServiceByInstance = new Map<string, Promise<EvolutionService>>();
 
   // ── Skill conversation-add (§21): per-instance handler cache ──
   //
@@ -432,6 +435,31 @@ export class TdaiGateway {
   private async ensureMetadataStore(instanceId: string): Promise<IMetadataStore> {
     const pool = await this.ensureMetadataStorePool();
     return pool.getStore(instanceId);
+  }
+
+  private ensureEvolutionService(instanceId: string): Promise<EvolutionService> {
+    let pending = this.evolutionServiceByInstance.get(instanceId);
+    if (!pending) {
+      pending = (async () => {
+        const store = await this.ensureMetadataStore(instanceId);
+        if (!(store instanceof SqliteMetadataStore) || this.config.deployMode !== "standalone") throw new EvolutionError(503, "EVOLUTION_STANDALONE_ONLY");
+        const permissions = await this.ensureMetadataService(instanceId);
+        // Do not admit automation before legacy writer governance and adoption are fully connected.
+        const admitted = false;
+        let service: EvolutionService;
+        const dispatcher = new EvolutionDispatcher(store.getEvolutionStore(), {
+          admitted: () => admitted,
+          resolveModel: fileReviewBindings(process.env.EVOLUTION_REVIEW_MODELS_FILE, instanceId),
+          authorize: (source, profile) => service.authorizeDispatch(source, profile),
+          onError: () => this.logger.error("[evolution] dispatcher failed; durable jobs retained"),
+        });
+        service = new EvolutionService(store.getEvolutionStore(), store, permissions, admitted, dispatcher);
+        dispatcher.recover();
+        return service;
+      })().catch(error => { this.evolutionServiceByInstance.delete(instanceId); throw error; });
+      this.evolutionServiceByInstance.set(instanceId, pending);
+    }
+    return pending;
   }
 
   private async ensureMetadataService(instanceId: string): Promise<MetadataService> {
@@ -772,6 +800,11 @@ export class TdaiGateway {
   private async doStop(): Promise<void> {
     this.logger.info("Shutting down gateway...");
 
+    await Promise.all([...this.evolutionServiceByInstance.values()].map(async service => {
+      try { await (await service).dispatcher.close(); } catch { /* Failed initialization has no active worker. */ }
+    }));
+    this.evolutionServiceByInstance.clear();
+
     // 优雅关闭 OTel SDK（flush 剩余 Span/Log）
     try {
       await shutdownOTelSDK();
@@ -1025,11 +1058,7 @@ export class TdaiGateway {
         ...makeChatMemoryRouteTable(),
         ...makeMemoryPromptRouteTable(),
         ...makeMemoryGenerationLogRouteTable(),
-        ...makeEvolutionRouteTable(async instanceId => {
-          const store = await this.ensureMetadataStore(instanceId);
-          if (!(store instanceof SqliteMetadataStore)) throw new EvolutionError(503, "EVOLUTION_STANDALONE_ONLY");
-          return new EvolutionService(store.getEvolutionStore(), store, await this.ensureMetadataService(instanceId));
-        }, typeof req.headers["x-tdai-user-key"] === "string" ? req.headers["x-tdai-user-key"] : ""),
+        ...makeEvolutionRouteTable(instanceId => this.ensureEvolutionService(instanceId), typeof req.headers["x-tdai-user-key"] === "string" ? req.headers["x-tdai-user-key"] : ""),
       } as Record<
         string,
         (body: unknown, auth: import("./v2-schemas.js").V2AuthContext, requestId: string, deps: unknown) => Promise<import("./v2-schemas.js").ApiResponseEnvelope>

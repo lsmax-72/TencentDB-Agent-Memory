@@ -8,6 +8,7 @@ interface Profile {
   asset_kinds: string[]; asset_ids: string[]; daily_tokens: number | null;
   daily_model_calls: number | null; daily_candidates: number | null;
   evaluation_profile_id: string | null; auto_memory: boolean; auto_wiki_maintenance: boolean;
+  review_model_id?: string | null;
 }
 export function EvolutionSettings({ teamId, ready }: { teamId: string; ready: boolean }) {
   const { agents } = useAgents(teamId);
@@ -40,6 +41,7 @@ export function EvolutionSettings({ teamId, ready }: { teamId: string; ready: bo
         asset_kinds: previous?.asset_kinds ?? ['skill', 'memory', 'wiki'], asset_ids: previous?.asset_ids ?? [],
         daily_tokens: tokens ? Number(tokens) : null, daily_model_calls: calls ? Number(calls) : null,
         daily_candidates: candidates ? Number(candidates) : null, evaluation_profile_id: previous?.evaluation_profile_id ?? null,
+        review_model_id: previous?.review_model_id ?? null,
         auto_memory: previous?.auto_memory ?? false, auto_wiki_maintenance: previous?.auto_wiki_maintenance ?? false,
       });
       setProfiles(current => [...current.filter(item => item.agent_id !== agent), result]);

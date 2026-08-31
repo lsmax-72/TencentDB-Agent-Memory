@@ -123,7 +123,22 @@ if (stage === 'verify' || stage === 'restart') {
   if (!profiles.items.length) await api('/evolution/profiles/save', grant);
   const current = (await api('/evolution/profiles/list', scope)).items[0];
   await api('/evolution/profiles/save', { ...grant, enabled: true, revision: current.revision }, { error: 409 });
+  const assetsBefore = await api('/meta/asset/list', { ...scope }, { core: true });
+  const completion = { ...scope, agent_id: identity.agent_id, task_id: identity.task_id, session_id: 'offline-api-session', run_id: 'offline-api-host-receipt',
+    completion: 'host_task_complete', asset_ids: [], task_input: 'Offline API acceptance only; no real Agent or model run',
+    final_output: 'Host test receipt; not a task success or evolution gain', tool_events: [],
+    usage: { input_tokens: null, output_tokens: null, model_calls: 0, tool_calls: 0 }, actual_model: 'NOT_RUN_OFFLINE_ACCEPTANCE', outcome: 'UNKNOWN', used_asset_versions: {},
+  };
+  const trace = await api('/evolution/task/complete', completion);
+  assert.deepEqual(await api('/evolution/task/complete', completion), trace);
+  const job = await api('/evolution/diagnosis/request', { ...scope, id: trace.id });
+  assert.equal(job.status, 'BLOCKED_AUTOMATION_DISABLED');
+  assert.equal((await api('/evolution/records/list', { ...scope, kind: 'job' })).total, 1);
+  await api('/evolution/diagnosis/retry', { ...scope, id: job.id, request_id: '../../etc/passwd' }, { error: 400 });
+  await api('/evolution/task/complete', { ...completion, final_output: 'conflicting replay' }, { error: 409 });
+  assert.deepEqual(await api('/meta/asset/list', { ...scope }, { core: true }), assetsBefore);
   assert.deepEqual(snapshotFiles(join(root, 'runtime')), read('runtime-hashes.json'));
-  save(`${stage}-${Date.now()}.json`, { status: 'PASS', model_calls: 0, historical_gate: record.record.payload.gate, cross_team_denied: true, wrong_key_denied: true, history_immutable: true, automation_disabled: true, runtime_unchanged: true });
+  save(`${stage}-${Date.now()}.json`, { status: 'PASS', model_calls: 0, historical_gate: record.record.payload.gate, cross_team_denied: true, wrong_key_denied: true, history_immutable: true, automation_disabled: true, runtime_unchanged: true,
+    explicit_host_receipt: trace.id, duplicate_completion_same_receipt: true, persisted_job: job.id, job_status: job.status, conflicting_replay_denied: true, arbitrary_retry_path_denied: true, formal_assets_unchanged: true });
   console.log(`${stage.toUpperCase()}_PASS; history FAIL preserved; no model call; no formal writes`);
 }
