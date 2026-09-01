@@ -306,6 +306,29 @@ if (stage === 'full') {
   const memoryMatches = Number(docker('exec', settings.core, 'sh', '-lc', `grep -R -F -- '${settings.exact_fact}' /data/tdai-memory 2>/dev/null | wc -l`));
   assert(memoryMatches >= 1, 'Applied Memory bytes missing');
 
+  const runGovernedMemoryLayer = async (layer, suffix) => {
+    const beforeIds = new Set((await api('/evolution/records/list', { ...scope, kind: 'candidate', asset_kind: 'memory' })).items.map(item => item.id));
+    const nextCompletion = { ...completion, session_id: `full-offline-session-${suffix}`, run_id: `full-offline-run-${suffix}` };
+    const nextTrace = await api('/evolution/task/complete', nextCompletion);
+    assert.deepEqual(await api('/evolution/task/complete', nextCompletion), nextTrace);
+    const candidate = await waitFor(async () => {
+      const items = (await api('/evolution/records/list', { ...scope, kind: 'candidate', asset_kind: 'memory' })).items;
+      return items.find(item => !beforeIds.has(item.id) && item.payload.layer === layer && item.status === 'VALIDATED');
+    }, `${layer} Memory candidate was not generated and validated`);
+    const approved = await api('/evolution/review/decide', { ...scope, id: candidate.id, revision: candidate.revision,
+      decision: 'REVIEW_APPROVED', reason: `OFFLINE FIXTURE：核对 ${layer} 冻结差异、来源与作用域后批准隔离采用。` });
+    const adoption = await api('/evolution/adoption/apply', { ...scope, id: approved.id, revision: approved.revision });
+    assert.equal(adoption.status, 'APPLIED');
+    return { trace: nextTrace, candidate, adoption };
+  };
+  // L2 consumes only the already adopted formal L1 snapshot. L3 is not eligible until L2 itself is adopted.
+  const memoryL2 = await runGovernedMemoryLayer('L2', 'l2');
+  const l2Matches = Number(docker('exec', settings.core, 'sh', '-lc', "grep -R -F -- '用户持续整理项目事实与工程证据' /data/tdai-memory 2>/dev/null | wc -l"));
+  assert(l2Matches >= 1, 'Applied L2 scene bytes missing');
+  const memoryL3 = await runGovernedMemoryLayer('L3', 'l3');
+  const l3Matches = Number(docker('exec', settings.core, 'sh', '-lc', "grep -R -F -- '隔离验收核心记忆' /data/tdai-memory 2>/dev/null | wc -l"));
+  assert(l3Matches >= 1, 'Applied L3 persona bytes missing');
+
   const internal = async (path, body) => {
     const output = execFileSync('docker', ['exec', '-i', settings.core, 'node', '--input-type=module', '-e', `
       const input = JSON.parse(await new Response(process.stdin).text());
@@ -369,14 +392,19 @@ if (stage === 'full') {
   assert.equal((await api('/evolution/profiles/list', scope)).items[0].enabled, true);
   assert.match(JSON.stringify(await api('/knowledge/wiki/page/read', { wiki_id: assets.wiki_id, refs: ['evolution-acceptance'] })), /冻结 Wiki 候选/);
   assert.equal((await api('/evolution/records/get', { ...scope, id: memoryAdoption.id })).record.status, 'APPLIED');
+  assert.equal((await api('/evolution/records/get', { ...scope, id: memoryL2.adoption.id })).record.status, 'APPLIED');
+  assert.equal((await api('/evolution/records/get', { ...scope, id: memoryL3.adoption.id })).record.status, 'APPLIED');
   assert.equal((await api('/evolution/records/get', { ...scope, id: wikiAdoption.id })).record.status, 'APPLIED');
   const historical = await api('/evolution/records/list', { ...scope, kind: 'attempt', origin: 'historical' });
   assert.equal(historical.total, 1); assert.equal(historical.items[0].status, 'FAIL');
   assert.deepEqual(snapshotFiles(join(root, 'runtime')), read('runtime-hashes.json'));
   save(`full-${Date.now()}.json`, { status: 'PASS', origin: 'DETERMINISTIC_OFFLINE_INTEGRATION_FIXTURE', real_llm_effect: false,
     trace_id: trace.id, duplicate_task_receipt: true, memory: { candidate_id: memoryCandidate.id, adoption_id: memoryAdoption.id, exact_fact_readback: true },
+    higher_memory: { l2: { trace_id: memoryL2.trace.id, candidate_id: memoryL2.candidate.id, adoption_id: memoryL2.adoption.id, scene_readback: true },
+      l3: { trace_id: memoryL3.trace.id, candidate_id: memoryL3.candidate.id, adoption_id: memoryL3.adoption.id, persona_readback: true },
+      task_complete_generation: true, frozen_before_review: true, sequential_formal_snapshot_dependency: true },
     wiki: { candidate_id: wikiCandidate.id, adoption_id: wikiAdoption.id, frozen_apply_and_index_readback: true, double_apply_idempotent: true },
     skill: { candidate_id: skillCandidate.id, evaluation_job_id: evalJob.id, evaluation_status: evalJob.status, formal_version_unchanged: true, adoption_blocked: true },
     restart_readback: true, historical_v4_fail_preserved: true, code_graph_unchanged: true });
-  console.log('FULL_OFFLINE_E2E_PASS; Memory applied, Wiki applied, Skill blocked without effect proof, history preserved');
+  console.log('FULL_OFFLINE_E2E_PASS; Memory L1/L2/L3 applied, Wiki applied, Skill blocked without effect proof, history preserved');
 }

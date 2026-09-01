@@ -13,6 +13,13 @@ afterEach(() => stores.splice(0).forEach(store => store.close()));
 const completion = { team_id: "team", agent_id: "agent", task_id: "task", session_id: "session", run_id: "run", completion: "host_task_complete", asset_ids: [],
   task_input: "我正在整理项目文档和任务证据，请记录当前工作的背景。", final_output: "offline test task output", tool_events: [],
   usage: { input_tokens: null, output_tokens: null, model_calls: 0, tool_calls: 0 }, actual_model: "OFFLINE_FIXTURE", outcome: "PASS", used_asset_versions: {} };
+function modelResponse(message: Record<string, unknown>, finish_reason: "stop" | "tool_calls" = "stop") {
+  return Response.json({ id: "offline", object: "chat.completion", created: 1, model: "offline-review", choices: [{ index: 0, finish_reason, message }],
+    usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 } });
+}
+function writeTool(path: string, content: string, id: string) {
+  return modelResponse({ role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "write", arguments: JSON.stringify({ path, content }) } }] }, "tool_calls");
+}
 function setup(route = "memory_gap", assetOwner = "owner", enableValidation = false, autoMemory = false, exactFact = false,
   generateWiki?: NonNullable<Parameters<typeof generateStandaloneProposals>[0]["generateWiki"]>) {
   const metadata = new SqliteMetadataStore(":memory:"); metadata.init(); stores.push(metadata);
@@ -61,6 +68,46 @@ describe("explicit completion to real extraction pipeline with offline model res
     expect(test.metadata.listAssetsByTeam("team")).toEqual(assets);
     await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
     expect(test.request).toHaveBeenCalledOnce(); expect(test.store.list("team", "candidate")).toHaveLength(1);
+  });
+  it("freezes governed L1/L2/L3 candidates atomically when the formal snapshot has higher-layer inputs", async () => {
+    const test = setup();
+    const scope = { team_id: "team", agent_id: "agent", user_id: "owner" };
+    const snapshot = { scope, records: [{ record_id: "existing-l1", content: "用户持续整理项目证据。", type: "work_fact", priority: 50,
+      scene_name: "项目", session_key: "old", session_id: "old", team_id: "team", task_id: "task", user_id: "owner", agent_id: "agent", version: 1,
+      timestamp_str: "2026-09-01T00:00:00Z", timestamp_start: "2026-09-01T00:00:00Z", timestamp_end: "2026-09-01T00:00:00Z",
+      created_time: "2026-09-01T00:00:00Z", updated_time: "2026-09-01T00:00:00Z", metadata_json: "{}" }],
+      files: [{ key: ".metadata/scene_index.json", content: "[]" }, { key: "scene_blocks/existing.md", content: "# 已有场景\n\n项目证据。" }] };
+    test.snapshotMemory.mockResolvedValue({ ...snapshot, hash: memorySnapshotHash(snapshot) });
+    let turn = 0;
+    test.request.mockImplementation(async () => {
+      const trace = test.store.list("team", "trace").find(record => record.payload.completion === "host_task_complete")!;
+      if (++turn === 1) return modelResponse({ role: "assistant", content: JSON.stringify([{ scene_name: "项目", memories: [{ content: completion.task_input,
+        type: "work_fact", source_message_ids: [`${trace.id}:input`] }] }]) });
+      if (turn === 2) return writeTool("scene_blocks/project.md", "# 项目\n\n持续整理项目文档和任务证据。", "l2-write");
+      if (turn === 3) return modelResponse({ role: "assistant", content: "done" });
+      if (turn === 4) return writeTool("persona.md", "# 用户背景\n\n用户持续整理项目文档和证据。", "l3-write");
+      return modelResponse({ role: "assistant", content: "done" });
+    });
+    const assets = test.metadata.listAssetsByTeam("team");
+    await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
+    const candidates = test.store.list("team", "candidate");
+    expect(candidates.map(candidate => candidate.payload.layer).sort()).toEqual(["L1", "L2", "L3"]);
+    expect(test.request).toHaveBeenCalledTimes(5); expect(test.store.jobs(["COMPLETED"], ["proposal"])).toHaveLength(1);
+    expect(test.metadata.listAssetsByTeam("team")).toEqual(assets);
+  });
+  it("blocks a three-layer Memory batch before proposal model calls when candidate quota cannot cover it", async () => {
+    const test = setup();
+    const current = test.store.profile("team", "agent")!;
+    const { revision, updated_at: _updatedAt, ...draft } = current;
+    test.store.saveProfile({ ...draft, daily_candidates: 2 }, revision);
+    const snapshot = { scope: { team_id: "team", agent_id: "agent", user_id: "owner" },
+      records: [{ record_id: "existing", content: "已有事实", created_time: "2026-09-01T00:00:00Z" }] as MemoryTargetSnapshot["records"],
+      files: [{ key: "scene_blocks/existing.md", content: "# 已有场景" }] };
+    test.snapshotMemory.mockResolvedValue({ ...snapshot, hash: memorySnapshotHash(snapshot) });
+    await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
+    const [job] = test.store.jobs(["BLOCKED_BUDGET"], ["proposal"]);
+    expect(job).toBeDefined(); expect(test.store.events(job.id).at(-1)?.document).toMatchObject({ reason: "EVOLUTION_CANDIDATE_BUDGET_EXHAUSTED" });
+    expect(test.request).not.toHaveBeenCalled(); expect(test.store.list("team", "candidate")).toHaveLength(0);
   });
   it("recovers an already frozen batch without replaying the model or creating candidates twice", async () => {
     const test = setup(); await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
@@ -167,8 +214,9 @@ describe("explicit completion to real extraction pipeline with offline model res
     snapshot.records = [{ record_id: "existing", content: "用户正在整理项目文档和任务证据。", version: 1 }] as MemoryTargetSnapshot["records"];
     snapshot.hash = memorySnapshotHash(snapshot); test.snapshotMemory.mockResolvedValue(snapshot);
     await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
-    expect(test.store.list("team", "candidate")[0].status).toBe("DUPLICATE_NO_CHANGE");
-    expect(test.store.list("team", "attempt")[0].payload.existing_records_unchanged).toBe(true);
+    const l1 = test.store.list("team", "candidate").find(candidate => candidate.payload.layer === "L1")!;
+    expect(l1.status).toBe("DUPLICATE_NO_CHANGE");
+    expect(test.store.list("team", "attempt").find(attempt => attempt.payload.candidate_hash === l1.artifact_hash)?.payload.existing_records_unchanged).toBe(true);
     expect(test.store.list("team", "adoption")).toHaveLength(0);
     expect(snapshot.records).toHaveLength(1);
   });

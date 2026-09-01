@@ -6,7 +6,8 @@ import type { ReviewBinding } from "./model-bindings.js";
 import { EvolutionError, type EvolutionProfile, type EvolutionRecord } from "./types.js";
 import { contentHash, type EvolutionStore } from "./store.js";
 import { generateSkillProposals } from "./proposals.js";
-import { proposeL1 } from "./memory-proposals.js";
+import { buildHigherMemoryPayload, buildL1Payloads } from "./memory-proposals.js";
+import { StoragePaths } from "../../core/storage/types.js";
 import type { SnapshotMemory } from "./memory-snapshot.js";
 import { memorySnapshotHash } from "./memory-snapshot.js";
 import { freezeCandidates } from "./proposals.js";
@@ -79,12 +80,34 @@ export async function generateStandaloneProposals(deps: GenerationDependencies, 
       payload: { evidence_type: "memory_snapshot", target_id: target.asset_id, snapshot_hash: snapshot.hash, snapshot },
     }, `${job.id}/memory-snapshot`, source.owner_user_id);
     const authorizeSnapshot = async () => await authorize() && (await deps.snapshotMemory!(scope)).hash === snapshot.hash;
-    const allocationId = store.allocateCandidateSlots(job.id);
+    const frozenSnapshot = new Map(snapshot.files.map(file => [file.key, Buffer.from(file.content)]));
+    const runL2 = snapshot.records.length > 0;
+    const runL3 = snapshot.files.some(file => file.key === StoragePaths.sceneIndex || file.key.startsWith(StoragePaths.sceneBlocksDir));
+    const higherLayerCount = Number(runL2) + Number(runL3);
+    // Reserve the maximum output batch before any model call. One job freezes L1/L2/L3 together or none.
+    const allocationId = store.allocateCandidateSlots(job.id, 10 + higherLayerCount);
+    const allocation = store.assertCandidateAllocation(allocationId, source.team_id, source.agent_id, source.owner_user_id);
+    if (allocation <= higherLayerCount) {
+      freezeCandidates(store, source, [], allocationId);
+      throw new EvolutionError(429, "EVOLUTION_CANDIDATE_BUDGET_EXHAUSTED");
+    }
     const runner = createRunner!({ store, source, jobId: job.id, allocationId, authorize: authorizeSnapshot });
     // Only task input is offered as an L1 fact source; an assistant answer is not factual proof.
-    return proposeL1({ store, source, allocationId, targetId: target.asset_id, snapshotRecord, snapshot: new Map(snapshot.files.map(file => [file.key, Buffer.from(file.content)])), runner }, [{
+    const proposalInput = { store, source, allocationId, targetId: target.asset_id, snapshotRecord, snapshot: frozenSnapshot, runner };
+    const payloads = await buildL1Payloads(proposalInput, [{
       id: `${trace.id}:input`, role: "user", content: String(trace.payload.task_input ?? ""), timestamp: Date.parse(trace.created_at),
-    }]);
+    }], allocation - higherLayerCount);
+    if (runL2) {
+      const l2 = await buildHigherMemoryPayload(proposalInput, "L2", snapshot.records.map(record => ({
+        id: record.record_id, content: record.content, created_at: record.created_time,
+      })));
+      if (l2) payloads.push(l2);
+    }
+    if (runL3) {
+      const l3 = await buildHigherMemoryPayload(proposalInput, "L3");
+      if (l3) payloads.push(l3);
+    }
+    return freezeCandidates(store, source, payloads, allocationId);
   }
   if (source.payload.route !== "skill_defect") throw new EvolutionError(409, "SKILL_DEFECT_EVIDENCE_REQUIRED");
   const core = deps.getSkillCore();

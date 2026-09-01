@@ -29,14 +29,15 @@ function requireSource(source: EvolutionRecord): void {
   if (source.origin !== "runtime" || !["trace", "diagnosis"].includes(source.kind)) throw new EvolutionError(409, "LIVE_MEMORY_SOURCE_REQUIRED");
 }
 
-export async function proposeL1(input: MemoryProposalInput, messages: ConversationMessage[]): Promise<EvolutionRecord[]> {
+/** Build immutable L1 payloads without committing them, so one task can freeze all governed Memory layers atomically. */
+export async function buildL1Payloads(input: MemoryProposalInput, messages: ConversationMessage[], maxMemoriesPerSession = 10): Promise<CandidatePayload[]> {
   requireSource(input.source);
   input.store.assertCandidateAllocation(input.allocationId, input.source.team_id, input.source.agent_id);
   const payloads: CandidatePayload[] = [];
   const messageIds = new Set(messages.map(message => message.id));
   const result = await extractL1Memories({
     messages, sessionKey: input.source.id, baseDir: "evolution-shadow-only", config: {},
-    options: { llmRunner: input.runner, enableDedup: false, proposalSink: async memories => {
+    options: { llmRunner: input.runner, enableDedup: false, maxMemoriesPerSession, proposalSink: async memories => {
       // Validate the entire batch before creating any immutable proposal.
       if (memories.some(memory => !memory.source_message_ids.length || memory.source_message_ids.some(id => !messageIds.has(id)))) throw new EvolutionError(400, "MEMORY_SOURCE_FABRICATED");
       for (const memory of memories) payloads.push({
@@ -47,11 +48,15 @@ export async function proposeL1(input: MemoryProposalInput, messages: Conversati
     } },
   });
   if (!result.success) throw new EvolutionError(503, "MEMORY_EXTRACTION_FAILED");
-  return freezeCandidates(input.store, input.source, payloads, input.allocationId);
+  return payloads;
+}
+
+export async function proposeL1(input: MemoryProposalInput, messages: ConversationMessage[]): Promise<EvolutionRecord[]> {
+  return freezeCandidates(input.store, input.source, await buildL1Payloads(input, messages), input.allocationId);
 }
 
 /** Run the existing L2/L3 algorithms, including navigation/index post-processing, in shadow storage. */
-export async function proposeHigherMemory(input: MemoryProposalInput, layer: "L2" | "L3", memories: Array<{ content: string; created_at: string; id?: string }> = []): Promise<EvolutionRecord | null> {
+export async function buildHigherMemoryPayload(input: MemoryProposalInput, layer: "L2" | "L3", memories: Array<{ content: string; created_at: string; id?: string }> = []): Promise<CandidatePayload | null> {
   requireSource(input.source);
   input.store.assertCandidateAllocation(input.allocationId, input.source.team_id, input.source.agent_id);
   const writable = (key: string) => key === StoragePaths.persona || key === StoragePaths.checkpoint
@@ -64,15 +69,21 @@ export async function proposeHigherMemory(input: MemoryProposalInput, layer: "L2
     : await new PersonaGenerator(options).generateLocalPersona("governed task completion");
   if (!success) throw new EvolutionError(503, "MEMORY_GENERATION_FAILED");
   const files = shadow.freeze();
-  if (!files.length) { freezeCandidates(input.store, input.source, [], input.allocationId); return null; }
+  if (!files.length) return null;
   if (files.some(file => file.after.trim() === "[DELETED]" || !file.after.trim())) throw new EvolutionError(409, "MEMORY_DESTRUCTIVE_PROPOSAL_REQUIRES_SEPARATE_REVIEW");
   // The bundle is one candidate: index and navigation changes cannot be adopted independently.
   const before = JSON.stringify(files.map(({ key, before }) => ({ key, content: before })));
   const after = JSON.stringify(files.map(({ key, after }) => ({ key, content: after })));
-  return freezeCandidate(input.store, input.source, {
+  return {
     asset_kind: "memory", target_id: input.targetId, layer, operation: "update",
     base_hash: contentHash(before), base_version: null, before, after,
     ...snapshotEvidence(input), memory_files: files,
     source_snapshot_hash: contentHash([...input.snapshot].map(([key, bytes]) => [key, bytes.toString("base64")]).sort()),
-  }, input.allocationId);
+  };
+}
+
+export async function proposeHigherMemory(input: MemoryProposalInput, layer: "L2" | "L3", memories: Array<{ content: string; created_at: string; id?: string }> = []): Promise<EvolutionRecord | null> {
+  const payload = await buildHigherMemoryPayload(input, layer, memories);
+  return payload ? freezeCandidate(input.store, input.source, payload, input.allocationId)
+    : (freezeCandidates(input.store, input.source, [], input.allocationId), null);
 }
