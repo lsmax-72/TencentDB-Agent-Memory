@@ -2,6 +2,19 @@
 
 状态：IMPLEMENTATION_IN_PROGRESS；不能视为完整交付。2026-09-01。
 
+## 完整隔离端到端验收（2026-09-01 15:24）
+
+新冻结实例 `/Users/lsmax/Coder/phase6-artifacts/outputs/evolution-hub-20260901-r11` 已完成真实 Core / Panel / Knowledge 联合验收。它不连接 vLLM，独立端口为 Core 37920、Hub 37725；确定性离线模型 fixture 明确只验证控制流，不能作为真实模型效果证据。
+
+- Memory：明确 task-complete 触发复盘和候选，低风险 L1 事实必须逐字来自 owner 输入；后台资格和授权通过后真实采用，正式读取可见。
+- Wiki：从真实 Knowledge 页面快照构造冻结候选，内容校验后人工批准；正式应用冻结 bytes、索引、readback 全部成功，重复 apply 返回同一结果。
+- Skill：内容校验正确要求效果证据。隔离 evaluator 故意无可执行配置，任务明确 `BLOCKED_EVALUATOR_CONFIGURATION`；审批、采用均被拒绝，正式 Skill 未变化。
+- 可靠性：重复 task-complete 幂等；错误 key、跨 Team、冲突 replay 和任意 retry 路径被拒；三类状态及正式内容在顺序重启后读回；v4 历史仍为 `FAIL / NO_NEW_FIX`。
+
+验收期间发现 standalone SkillCore 的资产同步 hook 错用固定 `default` metadata instance。修复后按当前 HTTP service ID 通过 AsyncLocalStorage 选择实例，并用并发测试证明请求上下文不串租户。Core 164 tests、Panel 3 tests、Knowledge 11 tests和全部相关构建通过。
+
+此前 r5-r10 的失败目录和 receipt 均保留，不作为成功结果覆盖：它们分别暴露 Skill fixture 格式、tenant metadata、快速状态迁移轮询、Knowledge 运行产物挂载、Knowledge URL 拼接以及 Docker 同时重启内存压力问题。主 8125 尚未更新；下一步必须先备份再交付，初始 automation 仍关闭。
+
 ## 最新腾讯原生配置界面（2026-09-01 15:04）
 
 8125 的目标界面继续沿用 TencentDB / Tea，而不是 MyUI。新增的 `profiles/options` 由 Core 按当前管理员、Agent 固定资产和写权限计算：前端只能选择真实绑定的 Skill、Chat Memory、LLM Wiki，Code Graph 不出现；review/evaluation 下拉只显示操作员受限配置的 ID，不把 endpoint、文件路径或 secret 发给浏览器。

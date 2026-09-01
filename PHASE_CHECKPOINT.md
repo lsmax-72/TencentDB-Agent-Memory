@@ -1,5 +1,15 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 15:24 续跑：完整三资产隔离验收通过
+
+- 新独立实例 `evolution-hub-20260901-r11`（Core `37920` / Hub `37725`）完整通过。它使用独立网络、loopback 端口、存储和冻结 runtime，不挂载正式数据；vLLM 未连接或探测。
+- 明确的 host task-complete 重复上报保持同一 receipt。确定性离线 OpenAI-compatible fixture 只用于检验编排：Memory 低风险 L1 候选经来源逐字核验后自动授权、真实采用并读回；Wiki 候选从真实 Knowledge 快照冻结，经内容校验、人工批准、正式写入、索引和读回，第二次采用幂等。
+- Skill 候选内容校验后进入 `NEEDS_EVIDENCE`；因受限 evaluator 路径故意未配置，评测任务为 `BLOCKED_EVALUATOR_CONFIGURATION`，审查和采用均被拒绝，正式 Skill version/content 不变。此结果不宣称真实 LLM 效果成立。
+- 顺序重启 model fixture、Hub、Core 后，Memory/Wiki 的 `APPLIED` 状态及读回内容仍在；v4 历史 Attempt 仍为 `FAIL / NO_NEW_FIX`，Code Graph 未修改。r5-r10 的 setup/implementation/infra 失败均保留，未覆盖；r10 在重启前成功的业务步骤也保留为失败 Attempt 的诊断证据。
+- 隔离验收暴露并修复 standalone Skill 资产同步错误：全局 SkillCore hook 过去固定写 `default` metadata instance，非 default service 创建 Skill 时资产登记失败。现在通过 AsyncLocalStorage 绑定当前 HTTP tenant，并新增并发隔离回归测试；HTTP 外调用仍保留原 fallback。
+- 回归：Core **164 tests / 37 files PASS**、plugin build PASS、control strict **0** 新错误（101 条既有传递 diagnostics）；Panel **3 tests PASS**、backend/web build PASS；Knowledge **11 tests / 4 files PASS**、build PASS；验收脚本语法和 `git diff --check` PASS。前端构建仍只有既有重复依赖键和 bundle size 警告。
+- 下一步：先固化本节本地提交，然后只读检查主 `8125` 容器、挂载和配置，完整备份后以自动化默认关闭方式更新。必须保留现有用户、Team、Memory/Wiki/Skill 数据，并在真实 8125 浏览器验证六页与原有 Code Graph；尚未完成前不能宣称主 Hub 已交付。
+
 ## 2026-09-01 15:04 续跑：腾讯原生治理配置
 
 - 从 `51bf18f` 继续。Core 新增管理员只读 `profiles/options`：只返回指定 Agent 已固定绑定、当前管理员仍可写且属于 Skill / Chat Memory / LLM Wiki 的资产；Code Graph 不进入自进化。可选复盘模型和 Skill 评测配置来自服务端受限文件，只暴露绑定 ID，不暴露 endpoint、路径或 secret。

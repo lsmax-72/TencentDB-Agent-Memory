@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const [stage, rootArg] = process.argv.slice(2);
-assert(['setup', 'verify', 'restart', 'governance', 'validation'].includes(stage) && rootArg, 'Usage: node scripts/evolution/isolated-acceptance.mjs setup|verify|restart|governance|validation <NEW absolute output directory>');
+assert(['setup', 'verify', 'restart', 'governance', 'validation', 'full'].includes(stage) && rootArg, 'Usage: node scripts/evolution/isolated-acceptance.mjs setup|verify|restart|governance|validation|full <NEW absolute output directory>');
 const root = resolve(rootArg);
 assert(rootArg === root && basename(root).startsWith('evolution-') && root !== repo, 'Dedicated absolute evolution-* path required');
 const tag = basename(root); assert(/^[a-z0-9-]+$/.test(tag));
@@ -16,9 +16,10 @@ const save = (name, value) => writeFileSync(join(root, name), JSON.stringify(val
 const read = name => JSON.parse(readFileSync(join(root, name), 'utf8'));
 const hash = data => createHash('sha256').update(data).digest('hex');
 let settings = stage === 'setup' ? {
-  instance: tag, core: `${tag}-core`, hub: `${tag}-hub`, network: tag,
+  instance: tag, core: `${tag}-core`, hub: `${tag}-hub`, model: `${tag}-offline-model`, network: tag,
   core_port: Number(process.env.EVOLUTION_TEST_CORE_PORT ?? 24920), hub_port: Number(process.env.EVOLUTION_TEST_HUB_PORT ?? 24725), gateway_key: randomBytes(32).toString('hex'),
-  user_key: `sk-mem-${randomBytes(24).toString('hex')}`,
+  user_key: `sk-mem-${randomBytes(24).toString('hex')}`, internal_token: randomBytes(32).toString('hex'),
+  exact_fact: '本次隔离验收只记录一条可逐字核验的项目事实。',
 } : read('private/settings.json');
 assert([settings.core_port, settings.hub_port].every(port => Number.isInteger(port) && port >= 10000 && port < 65536) && settings.core_port !== settings.hub_port, 'Dedicated non-production ports required');
 async function api(path, body = {}, options = {}) {
@@ -34,7 +35,7 @@ async function api(path, body = {}, options = {}) {
   return result.data;
 }
 async function ready(url) {
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 80; i++) {
     try { if ((await fetch(url, { signal: AbortSignal.timeout(1000) })).ok) return; } catch {}
     await new Promise(resolve => setTimeout(resolve, 500));
   }
@@ -51,31 +52,39 @@ function snapshotFiles(dir, prefix = '') {
 }
 if (stage === 'setup') {
   assert(!existsSync(root), 'Do not overwrite historical acceptance');
-  for (const name of [settings.core, settings.hub]) assert(!docker('ps', '-a', '--filter', `name=^${name}$`, '--format', '{{.Names}}'), 'Container exists');
+  for (const name of [settings.core, settings.hub, settings.model]) assert(!docker('ps', '-a', '--filter', `name=^${name}$`, '--format', '{{.Names}}'), 'Container exists');
   mkdirSync(root, { recursive: true, mode: 0o700 });
   for (const name of ['private', 'core-data', 'knowledge-data', 'runtime', 'history']) mkdirSync(join(root, name), { mode: 0o700 });
   save('private/settings.json', settings);
-  for (const [source, target] of [['MemoryCore/src', 'core-src'], ['MemoryPanel/dist', 'panel-dist'], ['MemoryPanel/web/dist', 'web-dist']]) {
+  for (const [source, target] of [['MemoryCore/src', 'core-src'], ['MemoryPanel/dist', 'panel-dist'], ['MemoryPanel/web/dist', 'web-dist'], ['MemoryKnowledge/dist', 'knowledge-dist']]) {
     assert(existsSync(join(repo, source)), `Build ${source} first`);
     cpSync(join(repo, source), join(root, 'runtime', target), { recursive: true, errorOnExist: true, force: false });
   }
+  cpSync(join(repo, 'scripts/evolution/offline-openai-fixture.mjs'), join(root, 'runtime/offline-openai-fixture.mjs'), { errorOnExist: true, force: false });
   save('runtime-hashes.json', snapshotFiles(join(root, 'runtime')));
   const images = { core: docker('inspect', 'tdai-memory-core', '--format', '{{.Image}}'), hub: docker('inspect', 'tdai-memory-hub', '--format', '{{.Image}}') };
-  save('preflight.json', { images, kind: 'OFFLINE_INTEGRATION_ACCEPTANCE', model_calls: 0, production_mounts: false, ports: [settings.core_port, settings.hub_port] });
+  save('preflight.json', { images, kind: 'OFFLINE_INTEGRATION_ACCEPTANCE', model_calls: 0, production_mounts: false,
+    automation_admitted: true, model_fixture: 'DETERMINISTIC_OFFLINE_OPENAI_COMPATIBLE', ports: [settings.core_port, settings.hub_port] });
   save('private/core.yaml', { deployMode: 'standalone', stateBackend: 'local',
     server: { port: 8420, host: '0.0.0.0', apiKey: settings.gateway_key }, data: { baseDir: '/data/tdai-memory' },
     llm: { baseUrl: '', apiKey: '', model: '' },
     memory: { storeBackend: 'sqlite', embedding: { provider: 'none' }, capture: { enabled: false }, extraction: { enabled: false }, pipeline: { enableWarmup: false, everyNConversations: 1000000 } },
-    skill: { enabled: false, extraction: { enabled: false } },
+    skill: { enabled: true, extraction: { enabled: false } },
   });
   // Dedicated bridge and loopback publication. Model routes have no configuration or credentials.
   // Docker Desktop does not publish ports on internal-only networks; retain r1 as a failed setup.
   docker('network', 'create', settings.network);
+  docker('run', '-d', '--name', settings.model, '--network', settings.network, '--no-healthcheck', '--entrypoint', 'node',
+    '-v', `${root}/runtime/offline-openai-fixture.mjs:/fixture.mjs:ro`, '-e', 'PORT=18080', '-e', 'MODEL_ID=offline-evolution-review',
+    '-e', `EXACT_FACT=${settings.exact_fact}`, images.core, '/fixture.mjs');
   docker('run', '-d', '--name', settings.core, '--network', settings.network,
     '-p', `127.0.0.1:${settings.core_port}:8420`, '-v', `${root}/core-data:/data/tdai-memory`,
     '-v', `${root}/runtime/core-src:/app/src:ro`, '-v', `${root}/private/core.yaml:/data/config/tdai-gateway.yaml:ro`,
     '-v', `${root}/history:/evolution-history:ro`, '-v', `${root}/private:/evolution-private:ro`,
-    '-e', 'TDAI_GATEWAY_API_KEY=', '-e', 'TDAI_DATA_DIR=/data/tdai-memory', images.core);
+    '-e', 'TDAI_GATEWAY_API_KEY=', '-e', 'TDAI_DATA_DIR=/data/tdai-memory',
+    '-e', 'EVOLUTION_AUTOMATION_ADMITTED=1', '-e', 'EVOLUTION_REVIEW_MODELS_FILE=/evolution-private/review-models.json',
+    '-e', 'EVOLUTION_EVALUATION_PROFILES_FILE=/evolution-private/evaluation-profiles.json',
+    '-e', `EVOLUTION_KNOWLEDGE_URL=http://${settings.hub}:8424`, '-e', `EVOLUTION_INTERNAL_TOKEN=${settings.internal_token}`, images.core);
   await ready(`http://127.0.0.1:${settings.core_port}/health`);
   const user = await api('/internal/meta/user/init-admin', { username: 'evolution-test-admin', user_key: settings.user_key }, { core: true });
   const owner_user_id = user.user_id ?? user.user?.user_id; assert(owner_user_id);
@@ -87,9 +96,25 @@ if (stage === 'setup') {
   docker('run', '-d', '--name', settings.hub, '--network', settings.network,
     '-p', `127.0.0.1:${settings.hub_port}:8125`, '-v', `${root}/knowledge-data:/data/knowledge`,
     '-v', `${root}/runtime/panel-dist:/app/panel/dist:ro`, '-v', `${root}/runtime/web-dist:/app/panel/web/dist:ro`,
+    '-v', `${root}/runtime/knowledge-dist:/app/knowledge/dist:ro`,
     '-v', `${root}/private/metadata-instances.json:/app/panel/config/metadata-instances.json:ro`,
-    '-e', 'KNOWLEDGE_LLM_BINDING_SYNC=0', '-e', 'LLM_MODE=custom', images.hub);
+    '-e', 'KNOWLEDGE_LLM_BINDING_SYNC=0', '-e', 'LLM_MODE=custom', '-e', `EVOLUTION_INTERNAL_TOKEN=${settings.internal_token}`, images.hub);
   await ready(`http://127.0.0.1:${settings.hub_port}/health`);
+  const skill = await api('/skill/create', { team_id: team.team_id, agent_id: agent.agent_id, user_id: owner_user_id, task_id: task.task_id,
+    name: 'workspace', content: '---\nname: workspace\ndescription: General workspace editing discipline for isolated acceptance.\n---\n\n# Workspace hygiene\n\nRead the target, make the requested change, and verify the result.\n' }, { core: true });
+  const wiki = await api('/knowledge/wiki/create', { team_id: team.team_id, name: '自进化 Wiki 验收 / TEST ONLY' });
+  await api('/knowledge/wiki/raw/write', { team_id: team.team_id, wiki_id: wiki.wiki_id,
+    files: [{ filename: 'source.md', content: '# 可信测试材料\n\n这是隔离实例的离线验收材料，不代表生产知识。\n' }] });
+  await api('/knowledge/allocate', { team_id: team.team_id, agent_id: agent.agent_id, knowledge_id: wiki.wiki_id });
+  const memoryAssets = (await api('/meta/asset/list', { team_id: team.team_id }, { core: true })).items.filter(item => item.asset_type === 'chat_memory');
+  assert.equal(memoryAssets.length, 1, 'Expected the Agent native chat-memory asset');
+  save('assets.json', { memory_id: memoryAssets[0].asset_id, skill_id: skill.skill_id, wiki_id: wiki.wiki_id });
+  save('private/review-models.json', [{ id: 'offline-review', instance_id: settings.instance, team_id: team.team_id, agent_id: agent.agent_id,
+    config: { provider: 'openai-compatible', model: 'offline-evolution-review', base_url: `http://${settings.model}:18080/v1`, api_key: 'offline-fixture-only',
+      max_output_tokens: 2048, token_ceiling: 65536, timeout_ms: 5000, temperature: 0, fallback: false } }]);
+  save('private/evaluation-profiles.json', [{ id: 'offline-blocked-evaluator', instance_id: settings.instance, team_id: team.team_id, agent_id: agent.agent_id,
+    suite_kind: 'AC_REGRESSION_V1', python_executable: '/not-configured/python', nanobot_repo: '/not-configured/nanobot', nanobot_config: '/not-configured/config.json',
+    model_preset: 'offline-blocked', provider: 'vllm', model_id: 'qwen3.8-27b' }]);
   const source = '/Users/lsmax/Documents/Codex/2026-08-29/n/outputs/phase-5b-candidate-v4/main.json';
   const original = readFileSync(source); writeFileSync(join(root, 'history/v4-main.json'), original, { flag: 'wx', mode: 0o600 });
   const frozen = readFileSync(join(dirname(source), 'freeze.json')); writeFileSync(join(root, 'history/v4-freeze.json'), frozen, { flag: 'wx', mode: 0o600 });
@@ -109,7 +134,8 @@ if (stage === 'verify' || stage === 'restart') {
   }
   const identity = read('identity.json');
   const scope = { team_id: identity.team_id };
-  const overview = await api('/evolution/overview', scope); assert.equal(overview.automation_ready, false);
+  const admitted = Boolean(read('preflight.json').automation_admitted);
+  const overview = await api('/evolution/overview', scope); assert.equal(overview.automation_ready, admitted);
   const list = await api('/evolution/records/list', { ...scope, kind: 'attempt', origin: 'historical' });
   assert.equal(list.total, 1); assert.equal(list.items[0].status, 'FAIL');
   const record = await api('/evolution/records/get', { ...scope, id: list.items[0].id });
@@ -122,7 +148,7 @@ if (stage === 'verify' || stage === 'restart') {
   const profiles = await api('/evolution/profiles/list', scope);
   if (!profiles.items.length) await api('/evolution/profiles/save', grant);
   const current = (await api('/evolution/profiles/list', scope)).items[0];
-  await api('/evolution/profiles/save', { ...grant, enabled: true, revision: current.revision }, { error: 409 });
+  if (!admitted) await api('/evolution/profiles/save', { ...grant, enabled: true, revision: current.revision }, { error: 409 });
   const assetsBefore = await api('/meta/asset/list', { ...scope }, { core: true });
   const completion = { ...scope, agent_id: identity.agent_id, task_id: identity.task_id, session_id: 'offline-api-session', run_id: 'offline-api-host-receipt',
     completion: 'host_task_complete', asset_ids: [], task_input: 'Offline API acceptance only; no real Agent or model run',
@@ -138,7 +164,7 @@ if (stage === 'verify' || stage === 'restart') {
   await api('/evolution/task/complete', { ...completion, final_output: 'conflicting replay' }, { error: 409 });
   assert.deepEqual(await api('/meta/asset/list', { ...scope }, { core: true }), assetsBefore);
   assert.deepEqual(snapshotFiles(join(root, 'runtime')), read('runtime-hashes.json'));
-  save(`${stage}-${Date.now()}.json`, { status: 'PASS', model_calls: 0, historical_gate: record.record.payload.gate, cross_team_denied: true, wrong_key_denied: true, history_immutable: true, automation_disabled: true, runtime_unchanged: true,
+  save(`${stage}-${Date.now()}.json`, { status: 'PASS', model_calls: 0, historical_gate: record.record.payload.gate, cross_team_denied: true, wrong_key_denied: true, history_immutable: true, automation_admitted: admitted, runtime_unchanged: true,
     explicit_host_receipt: trace.id, duplicate_completion_same_receipt: true, persisted_job: job.id, job_status: job.status, conflicting_replay_denied: true, arbitrary_retry_path_denied: true, formal_assets_unchanged: true });
   console.log(`${stage.toUpperCase()}_PASS; history FAIL preserved; no model call; no formal writes`);
 }
@@ -240,4 +266,117 @@ if (stage === 'validation') {
     independent_live_source_check: true, duplicate_request_same_job: true, review_is_not_adoption: true, stale_double_review_denied: true,
     arbitrary_command_denied: true, official_assets_unchanged: true, no_improvement_claim: true, automation_admission_disabled: true });
   console.log('VALIDATION_PASS; offline fixture; live source checks; review is not adoption; zero models/formal writes');
+}
+if (stage === 'full') {
+  const preflight = read('preflight.json');
+  assert.equal(preflight.production_mounts, false); assert.equal(preflight.automation_admitted, true);
+  assert.equal(preflight.model_fixture, 'DETERMINISTIC_OFFLINE_OPENAI_COMPATIBLE');
+  const identity = read('identity.json'), assets = read('assets.json'), scope = { team_id: identity.team_id };
+  const waitFor = async (predicate, message, attempts = 80) => {
+    for (let i = 0; i < attempts; i++) { const value = await predicate(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 250)); }
+    throw new Error(message);
+  };
+  const options = await api('/evolution/profiles/options', { ...scope, agent_id: identity.agent_id });
+  assert.equal(options.automation_ready, true); assert.deepEqual(options.review_model_ids, ['offline-review']);
+  assert.deepEqual(options.evaluation_profile_ids, ['offline-blocked-evaluator']);
+  assert.deepEqual(new Set(options.assets.map(item => item.id)), new Set([assets.memory_id, assets.skill_id, assets.wiki_id]));
+  assert.equal(options.assets.some(item => item.asset_kind === 'code_graph'), false);
+  const previous = (await api('/evolution/profiles/list', scope)).items[0];
+  const profile = await api('/evolution/profiles/save', { ...scope, agent_id: identity.agent_id, enabled: true, revision: previous?.revision ?? 0,
+    asset_kinds: ['skill', 'memory', 'wiki'], asset_ids: [assets.memory_id, assets.skill_id, assets.wiki_id],
+    daily_tokens: 1000000, daily_model_calls: 50, daily_candidates: 20, evaluation_profile_id: 'offline-blocked-evaluator',
+    review_model_id: 'offline-review', auto_memory: true, auto_wiki_maintenance: false });
+  assert.equal(profile.enabled, true);
+
+  const completion = { ...scope, agent_id: identity.agent_id, task_id: identity.task_id, session_id: 'full-offline-session', run_id: 'full-offline-run',
+    completion: 'host_task_complete', asset_ids: [], task_input: settings.exact_fact,
+    final_output: 'OFFLINE FIXTURE：宿主任务已明确完成，仅验证治理工程闭环。', tool_events: [],
+    usage: { input_tokens: null, output_tokens: null, model_calls: 0, tool_calls: 0 }, actual_model: 'HOST_NOT_MODELLED_OFFLINE_FIXTURE', outcome: 'PASS', used_asset_versions: {},
+  };
+  const trace = await api('/evolution/task/complete', completion);
+  assert.deepEqual(await api('/evolution/task/complete', completion), trace);
+  const memoryCandidate = await waitFor(async () => {
+    const items = (await api('/evolution/records/list', { ...scope, kind: 'candidate', asset_kind: 'memory' })).items;
+    return items.find(item => item.parent_id && item.payload.after === settings.exact_fact && ['AUTO_AUTHORIZED', 'APPLIED'].includes(item.status));
+  }, 'Memory candidate was not auto-authorized or applied');
+  const memoryAdoption = await waitFor(async () => {
+    const items = (await api('/evolution/records/list', { ...scope, kind: 'adoption' })).items;
+    return items.find(item => item.parent_id === memoryCandidate.id && item.status === 'APPLIED');
+  }, 'Memory candidate was not applied');
+  const memoryMatches = Number(docker('exec', settings.core, 'sh', '-lc', `grep -R -F -- '${settings.exact_fact}' /data/tdai-memory 2>/dev/null | wc -l`));
+  assert(memoryMatches >= 1, 'Applied Memory bytes missing');
+
+  const internal = async (path, body) => {
+    const output = execFileSync('docker', ['exec', '-i', settings.core, 'node', '--input-type=module', '-e', `
+      const input = JSON.parse(await new Response(process.stdin).text());
+      const response = await fetch(input.url, {method:'POST', headers:{'content-type':'application/json','authorization':'Bearer '+input.token,'x-tdai-service-id':input.service}, body:JSON.stringify(input.body)});
+      const result = await response.json(); if (!response.ok || result.code !== 0) throw new Error(JSON.stringify(result)); console.log(JSON.stringify(result.data));
+    `], { input: JSON.stringify({ url: `http://${settings.hub}:8424/v3/internal/evolution/wiki/${path}`, token: settings.internal_token,
+      service: settings.instance, body }), encoding: 'utf8' });
+    return JSON.parse(output);
+  };
+  const wikiBase = await internal('snapshot', { team_id: identity.team_id, wiki_id: assets.wiki_id });
+  const wikiPage = `---\ntitle: 隔离自进化验收\nsources:\n  - source.md\n---\n\n这是一条隔离实例的冻结 Wiki 候选，只用于验证采用链路。\n`;
+  const wikiPayload = { revision: 1, base: wikiBase, files: [{ path: 'wiki/evolution-acceptance.md', before: null, after: Buffer.from(wikiPage).toString('base64') }],
+    source_paths: ['raw/sources/source.md'] };
+  const wikiProposal = { ...wikiPayload, hash: hash(JSON.stringify(wikiPayload)) };
+  const seedCandidate = input => JSON.parse(execFileSync('docker', ['exec', '-i', settings.core, 'node', '--import', 'tsx', '--input-type=module', '-e', `
+    import { readFileSync } from 'node:fs'; import { SqliteMetadataStore } from '/app/src/metadata/store/sqlite-adapter.ts';
+    import { resolveSqliteDbPath } from '/app/src/metadata/store/db-name.ts'; import { contentHash } from '/app/src/evolution/control/store.ts';
+    const input=JSON.parse(readFileSync(0,'utf8')); const metadata=new SqliteMetadataStore(resolveSqliteDbPath('/data/tdai-memory/metadata',input.instance)); metadata.init();
+    try { const store=metadata.getEvolutionStore(), source=store.get(input.source_id); if(!source) throw new Error('source missing');
+      const record=store.append({team_id:input.team_id,agent_id:input.agent_id,owner_user_id:input.owner_user_id,asset_ids:[input.target_id],parent_id:source.id,
+        kind:'candidate',origin:'runtime',status:'FROZEN',title:input.title,payload:{...input.payload,base_hash:contentHash(input.payload.before)}},input.key,input.owner_user_id);
+      console.log(JSON.stringify(record)); } finally { metadata.close(); }
+  `], { input: JSON.stringify({ ...input, instance: settings.instance, ...identity }), encoding: 'utf8' }));
+  const wikiCandidate = seedCandidate({ source_id: trace.id, target_id: assets.wiki_id, key: 'full-e2e/wiki-candidate', title: '[OFFLINE FIXTURE] 冻结 Wiki 采用验收',
+    payload: { asset_kind: 'wiki', target_id: assets.wiki_id, operation: 'update', base_version: null, before: JSON.stringify(wikiBase),
+      after: JSON.stringify(wikiProposal.files), source_record_ids: [trace.id], wiki_proposal: wikiProposal } });
+  await api('/evolution/validation/request', { ...scope, id: wikiCandidate.id });
+  const validatedWiki = await waitFor(async () => { const record = (await api('/evolution/records/get', { ...scope, id: wikiCandidate.id })).record; return record.status === 'VALIDATED' ? record : null; }, 'Wiki validation did not pass');
+  const approvedWiki = await api('/evolution/review/decide', { ...scope, id: validatedWiki.id, revision: validatedWiki.revision,
+    decision: 'REVIEW_APPROVED', reason: 'OFFLINE FIXTURE：核对冻结来源、差异和目标后批准隔离采用。' });
+  const wikiAdoption = await api('/evolution/adoption/apply', { ...scope, id: approvedWiki.id, revision: approvedWiki.revision });
+  assert.equal(wikiAdoption.status, 'APPLIED');
+  assert.deepEqual(await api('/evolution/adoption/apply', { ...scope, id: approvedWiki.id, revision: approvedWiki.revision }), wikiAdoption);
+  const wikiRead = await api('/knowledge/wiki/page/read', { wiki_id: assets.wiki_id, refs: ['evolution-acceptance'] });
+  assert.match(JSON.stringify(wikiRead), /冻结 Wiki 候选/);
+
+  const officialSkill = await api('/skill/get', { team_id: identity.team_id, agent_id: identity.agent_id, user_id: identity.owner_user_id,
+    skill_id: assets.skill_id, include_content: true, include_manifest: true }, { core: true });
+  const skillAfter = `${officialSkill.content}\nDo not treat benchmark-specific answers as reusable rules.\n`;
+  const skillContentHash = `sha256:${hash(skillAfter)}`;
+  const artifact = { candidate_id: 'full-offline-skill-candidate', operation: 'UPDATE', skill_id: assets.skill_id, base_version: officialSkill.version,
+    content: skillAfter, content_hash: skillContentHash,
+    artifact_hash: `sha256:${hash(JSON.stringify({ skill_id: assets.skill_id, base_version: officialSkill.version, content_hash: skillContentHash, format: 'SKILL_MD_V1' }))}`,
+    source: { user_id: identity.owner_user_id, team_id: identity.team_id, agent_id: identity.agent_id, task_id: identity.task_id }, created_at: new Date().toISOString() };
+  const skillCandidate = seedCandidate({ source_id: trace.id, target_id: assets.skill_id, key: 'full-e2e/skill-candidate', title: '[OFFLINE FIXTURE] Skill 评测阻塞验收',
+    payload: { asset_kind: 'skill', target_id: assets.skill_id, operation: 'update', base_version: officialSkill.version, before: officialSkill.content,
+      after: skillAfter, source_record_ids: [trace.id], skill_artifact: artifact } });
+  await api('/evolution/validation/request', { ...scope, id: skillCandidate.id });
+  const needsEffect = await waitFor(async () => { const record = (await api('/evolution/records/get', { ...scope, id: skillCandidate.id })).record; return record.status === 'NEEDS_EVIDENCE' ? record : null; }, 'Skill content validation did not require effect evidence');
+  const evalJob = await api('/evolution/evaluation/request', { ...scope, id: needsEffect.id });
+  assert.equal(evalJob.status, 'BLOCKED_EVALUATOR_CONFIGURATION');
+  await api('/evolution/review/decide', { ...scope, id: needsEffect.id, revision: needsEffect.revision, decision: 'REVIEW_APPROVED', reason: 'must remain blocked' }, { error: 409 });
+  const skillReadback = await api('/skill/get', { team_id: identity.team_id, agent_id: identity.agent_id, user_id: identity.owner_user_id,
+    skill_id: assets.skill_id, include_content: true }, { core: true });
+  assert.equal(skillReadback.version, officialSkill.version); assert.equal(skillReadback.content, officialSkill.content);
+  await api('/evolution/adoption/apply', { ...scope, id: needsEffect.id, revision: needsEffect.revision }, { error: 409 });
+
+  docker('restart', settings.model);
+  docker('restart', settings.hub); await ready(`http://127.0.0.1:${settings.hub_port}/health`);
+  docker('restart', settings.core); await ready(`http://127.0.0.1:${settings.core_port}/health`);
+  assert.equal((await api('/evolution/profiles/list', scope)).items[0].enabled, true);
+  assert.match(JSON.stringify(await api('/knowledge/wiki/page/read', { wiki_id: assets.wiki_id, refs: ['evolution-acceptance'] })), /冻结 Wiki 候选/);
+  assert.equal((await api('/evolution/records/get', { ...scope, id: memoryAdoption.id })).record.status, 'APPLIED');
+  assert.equal((await api('/evolution/records/get', { ...scope, id: wikiAdoption.id })).record.status, 'APPLIED');
+  const historical = await api('/evolution/records/list', { ...scope, kind: 'attempt', origin: 'historical' });
+  assert.equal(historical.total, 1); assert.equal(historical.items[0].status, 'FAIL');
+  assert.deepEqual(snapshotFiles(join(root, 'runtime')), read('runtime-hashes.json'));
+  save(`full-${Date.now()}.json`, { status: 'PASS', origin: 'DETERMINISTIC_OFFLINE_INTEGRATION_FIXTURE', real_llm_effect: false,
+    trace_id: trace.id, duplicate_task_receipt: true, memory: { candidate_id: memoryCandidate.id, adoption_id: memoryAdoption.id, exact_fact_readback: true },
+    wiki: { candidate_id: wikiCandidate.id, adoption_id: wikiAdoption.id, frozen_apply_and_index_readback: true, double_apply_idempotent: true },
+    skill: { candidate_id: skillCandidate.id, evaluation_job_id: evalJob.id, evaluation_status: evalJob.status, formal_version_unchanged: true, adoption_blocked: true },
+    restart_readback: true, historical_v4_fail_preserved: true, code_graph_unchanged: true });
+  console.log('FULL_OFFLINE_E2E_PASS; Memory applied, Wiki applied, Skill blocked without effect proof, history preserved');
 }
