@@ -1,5 +1,15 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 15:45 本机 8125 交付完成
+
+- 主 MemoryCore / MemoryHub 已在原 named volumes 上更新并恢复健康：`http://localhost:8125`、8420、8424 均可用。现有 `default-team`、admin 登录及正式 Chat Memory 保留；Code Graph、Skill、Wiki 原页面通过浏览器回归。
+- 一致性备份位于 `/Users/lsmax/Coder/phase6-artifacts/backups/memoryhub-main-20260901-1535`，包含停服状态下的 Core/Hub volume 压缩包、校验和、原容器 inspect、Core 配置和私有重建 env。运行冻结快照位于 `/Users/lsmax/Coder/phase6-artifacts/runtime/memoryhub-main-20260901-r1`。
+- Docker Hub token endpoint 超时使本地镜像重建不可用；本次未覆盖 `latest`，而是复用原镜像依赖并只读挂载已测试的 Core / Panel / Knowledge 冻结产物。容器重建及再次顺序重启均成功，数据与历史读回通过。此运行方式是当前 standalone 本机交付，不是可分发镜像或云部署。
+- 8125 新建隔离 Team `自进化历史 / TEST ONLY`（`team-yys3k7rtoj`），只读导入原 v4 Attempt 和 frozen Candidate。评测中心实际显示 `FAIL / NO_NEW_FIX`、原 tokens/tool/model/case 结果及 hashes；候选页显示 `HISTORICAL_FROZEN / 历史证据·只读`；采用 API 返回 `LIVE_CANDIDATE_REQUIRED`，没有生成 v5 或修改历史。
+- 主环境没有 review/evaluation binding，`EVOLUTION_AUTOMATION_ADMITTED=0`；浏览器显示“自动闭环尚未通过运行准入”，0 adoption。未调用或探测 vLLM，没有真实模型效果声明。
+- 浏览器在真正 `localhost:8125` 验证六页、详情、Team 切换、旧页面、重启读回，console 0 error/warn。主验收证据位于 `/Users/lsmax/Coder/phase6-artifacts/outputs/memoryhub-main-20260901-r1`。
+- 完整运行恢复见 `docs/memoryhub-evolution-runbook.md`，逐项验收见 `docs/memoryhub-evolution-acceptance-report.md`。仍保留用户 deployment 三个改动，不 push/PR/merge。
+
 ## 2026-09-01 15:24 续跑：完整三资产隔离验收通过
 
 - 新独立实例 `evolution-hub-20260901-r11`（Core `37920` / Hub `37725`）完整通过。它使用独立网络、loopback 端口、存储和冻结 runtime，不挂载正式数据；vLLM 未连接或探测。

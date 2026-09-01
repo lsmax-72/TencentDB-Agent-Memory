@@ -1,6 +1,14 @@
 # MemoryHub 自进化实施记录
 
-状态：IMPLEMENTATION_IN_PROGRESS；不能视为完整交付。2026-09-01。
+状态：LOCAL_STANDALONE_DELIVERED；主 8125 已交付，真实 LLM 效果仍明确 BLOCKED。2026-09-01。
+
+## 主 8125 交付（2026-09-01 15:45）
+
+现有本机 MemoryHub 已在一致性备份后更新。原 Core/Hub volumes、管理员登录、default-team 和 Chat Memory 均保留；TencentDB / Tea 原生侧边栏现在包含六个自进化页面。专用 `自进化历史 / TEST ONLY` Team 展示真实 v4 `FAIL / NO_NEW_FIX` 和只读 frozen Candidate，不能审查或采用。
+
+主环境没有模型/评测 binding，且 `EVOLUTION_AUTOMATION_ADMITTED=0`，因此只能查看证据和关闭状态配置。浏览器明确显示未通过运行准入，不会把内容校验或离线 fixture 包装成 Agent 效果。Code Graph 及原资产页面未改变。
+
+Docker Hub token endpoint 在交付时超时，无法构建新的可分发镜像。本机因此复用原镜像中的依赖，只读挂载经过测试并记录 hash 的 Core / Panel / Knowledge 冻结产物；这满足当前 standalone 交付，但不是云端或镜像发布验收。备份、重建和排障命令见 `docs/memoryhub-evolution-runbook.md`，完整证据矩阵见 `docs/memoryhub-evolution-acceptance-report.md`。
 
 ## 完整隔离端到端验收（2026-09-01 15:24）
 
