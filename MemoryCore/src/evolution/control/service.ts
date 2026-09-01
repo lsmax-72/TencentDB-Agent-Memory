@@ -22,7 +22,12 @@ const profileSchema = scopeSchema.extend({
   auto_memory: z.boolean(), auto_wiki_maintenance: z.boolean(),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
+
+interface EvolutionConfiguration {
+  reviewBindingIds(teamId: string, agentId: string): string[];
+  evaluationBindingIds(teamId: string, agentId: string): string[];
+}
 
 export class EvolutionService {
   readonly dispatcher: EvolutionDispatcher;
@@ -34,6 +39,7 @@ export class EvolutionService {
     private readonly automationReady = false,
     dispatcher?: EvolutionDispatcher,
     private readonly adoptionWriter?: FrozenAssetWriter,
+    private readonly configuration?: EvolutionConfiguration,
   ) {
     this.dispatcher = dispatcher ?? new EvolutionDispatcher(store, {
       admitted: () => this.automationReady, resolveModel: () => null,
@@ -139,25 +145,59 @@ export class EvolutionService {
       // Grants reveal private target IDs; only their author may inspect them.
       return { items: this.store.profiles(team_id).filter(profile => profile.authorized_by === actor.id) };
     }
+    if (action === "profiles/options") {
+      if (actor.role !== "admin") throw new EvolutionError(403, "ADMIN_REQUIRED");
+      const input = scopeSchema.extend({ agent_id: id }).strict().parse(body);
+      const agent = await this.metadata.getAgentById(input.agent_id);
+      if (!agent || agent.team_id !== team_id || agent.status !== "active") throw new EvolutionError(404, "AGENT_NOT_FOUND");
+      const bindings = await this.metadata.listAgentFixedAssets(input.agent_id, { limit: 1000, offset: 0 });
+      const assets = (await Promise.all(bindings.items.map(row => this.metadata.getAssetById(row.asset_id))))
+        .filter(asset => asset && asset.team_id === team_id && ["skill", "chat_memory", "llm_wiki"].includes(asset.asset_type));
+      const writable = (await Promise.all(assets.map(async asset => ({ asset: asset!, allowed: (await this.permissions.checkAssetPermission({ asset_id: asset!.asset_id, user_id: actor.id, action: "write" })).allowed }))))
+        .filter(item => item.allowed).map(({ asset }) => ({ id: asset.asset_id, name: asset.name, asset_kind: asset.asset_type === "chat_memory" ? "memory" : asset.asset_type === "llm_wiki" ? "wiki" : "skill" }));
+      return { assets: writable, review_model_ids: this.configuration?.reviewBindingIds(team_id, input.agent_id) ?? [],
+        evaluation_profile_ids: this.configuration?.evaluationBindingIds(team_id, input.agent_id) ?? [],
+        adoption_kinds: (["skill", "memory", "wiki"] as const).filter(assetKind => this.adoptionWriter?.supports?.(assetKind) === true),
+        automation_ready: this.automationReady };
+    }
     if (action === "profiles/save") {
       if (actor.role !== "admin") throw new EvolutionError(403, "ADMIN_REQUIRED");
       const { revision, ...input } = profileSchema.parse(body);
       const agent = await this.metadata.getAgentById(input.agent_id);
       if (!agent || agent.team_id !== team_id || agent.status !== "active") throw new EvolutionError(404, "AGENT_NOT_FOUND");
+      const fixed = input.asset_ids.length
+        ? new Set((await this.metadata.listAgentFixedAssets(input.agent_id, { limit: 1000, offset: 0 })).items.map(row => row.asset_id))
+        : new Set<string>();
       for (const asset_id of input.asset_ids) {
         const asset = await this.metadata.getAssetById(asset_id);
-        if (!asset || asset.team_id !== team_id || !(await this.permissions.checkAssetPermission({ asset_id, user_id: actor.id, action: "write" })).allowed) throw new EvolutionError(403, "TARGET_WRITE_DENIED");
+        if (!asset || asset.team_id !== team_id || !fixed.has(asset_id) || !["skill", "chat_memory", "llm_wiki"].includes(asset.asset_type)
+          || !(await this.permissions.checkAssetPermission({ asset_id, user_id: actor.id, action: "write" })).allowed) throw new EvolutionError(403, "TARGET_WRITE_DENIED");
       }
       if (input.enabled && (!input.daily_tokens || !input.daily_model_calls || !input.daily_candidates || !input.asset_kinds.length)) throw new EvolutionError(400, "BUDGET_AND_SCOPE_REQUIRED");
-      if (input.enabled && input.asset_kinds.includes("skill") && !input.evaluation_profile_id) throw new EvolutionError(400, "SKILL_EVALUATION_PROFILE_REQUIRED");
       if (input.enabled && !this.automationReady) throw new EvolutionError(409, "AUTOMATION_ADMISSION_REQUIRED");
+      if (input.enabled && input.asset_kinds.includes("skill") && !input.evaluation_profile_id) throw new EvolutionError(400, "SKILL_EVALUATION_PROFILE_REQUIRED");
+      if (input.enabled && !input.review_model_id) throw new EvolutionError(400, "REVIEW_MODEL_REQUIRED");
+      if (input.enabled) {
+        const reviewModelId = input.review_model_id!;
+        const reviewAvailable = this.configuration?.reviewBindingIds(team_id, input.agent_id).includes(reviewModelId) === true;
+        const evaluationAvailable = !input.asset_kinds.includes("skill")
+          || this.configuration?.evaluationBindingIds(team_id, input.agent_id).includes(input.evaluation_profile_id!) === true;
+        if (!reviewAvailable || !evaluationAvailable) throw new EvolutionError(409, "MODEL_OR_EVALUATION_BINDING_UNAVAILABLE");
+      }
+      if (input.enabled) {
+        const assetKinds = new Set((await Promise.all(input.asset_ids.map(assetId => this.metadata.getAssetById(assetId)))).map(asset => asset?.asset_type === "chat_memory" ? "memory" : asset?.asset_type === "llm_wiki" ? "wiki" : asset?.asset_type));
+        if (input.asset_kinds.some(assetKind => !assetKinds.has(assetKind))) throw new EvolutionError(400, "ASSET_KIND_REQUIRES_BOUND_TARGET");
+      }
       if (input.enabled && (!this.adoptionWriter || input.asset_kinds.some(assetKind => !this.adoptionWriter?.supports?.(assetKind)))) throw new EvolutionError(409, "ASSET_ADOPTION_PATH_UNAVAILABLE");
       return withLocalMutationBoundary(async () => {
         // A request queued behind an old write may have lost its permissions while waiting.
         const refreshed = await this.actor(userKey, team_id);
         if (refreshed.role !== "admin") throw new EvolutionError(403, "ADMIN_REQUIRED");
+        const currentFixed = input.asset_ids.length
+          ? new Set((await this.metadata.listAgentFixedAssets(input.agent_id, { limit: 1000, offset: 0 })).items.map(row => row.asset_id))
+          : new Set<string>();
         for (const asset_id of input.asset_ids) {
-          if (!(await this.permissions.checkAssetPermission({ asset_id, user_id: actor.id, action: "write" })).allowed) throw new EvolutionError(403, "TARGET_WRITE_DENIED");
+          if (!currentFixed.has(asset_id) || !(await this.permissions.checkAssetPermission({ asset_id, user_id: refreshed.id, action: "write" })).allowed) throw new EvolutionError(403, "TARGET_WRITE_DENIED");
         }
         return this.store.saveProfile({ ...input, authorized_by: actor.id }, revision);
       });

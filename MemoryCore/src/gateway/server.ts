@@ -109,7 +109,7 @@ import { makeEvolutionRouteTable } from "./evolution-handlers.js";
 import { EvolutionService } from "../evolution/control/service.js";
 import { EvolutionError } from "../evolution/control/types.js";
 import { EvolutionDispatcher } from "../evolution/control/dispatcher.js";
-import { fileReviewBindings } from "../evolution/control/model-bindings.js";
+import { fileReviewBindings, listReviewBindingIds } from "../evolution/control/model-bindings.js";
 import { localLegacyMutationGuard } from "../evolution/control/legacy-governance.js";
 import { generateStandaloneProposals } from "../evolution/control/generation.js";
 import { localMemorySnapshot } from "../evolution/control/memory-snapshot.js";
@@ -120,7 +120,7 @@ import { MemoryFrozenAssetHandler } from "../evolution/control/memory-adoption-h
 import { SkillFrozenAssetHandler } from "../evolution/control/skill-adoption-handler.js";
 import { WikiFrozenAssetHandler } from "../evolution/control/wiki-adoption-handler.js";
 import { WikiProposalBridge } from "../evolution/control/wiki-proposal-bridge.js";
-import { fileSkillEvaluationBindings, persistSkillEvaluation } from "../evolution/control/skill-evaluation-executor.js";
+import { fileSkillEvaluationBindings, listSkillEvaluationBindingIds, persistSkillEvaluation } from "../evolution/control/skill-evaluation-executor.js";
 import { applyFrozenCandidate, type FrozenAssetWriter } from "../evolution/control/adoption.js";
 import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
@@ -505,7 +505,10 @@ export class TdaiGateway {
           canRead: (record, userId) => service.canReadRecord(record, userId),
           handlers: { memory: memoryHandler, ...(skillHandler ? { skill: skillHandler } : {}), ...(wikiHandler ? { wiki: wikiHandler } : {}) },
         });
-        service = new EvolutionService(store.getEvolutionStore(), store, permissions, admitted, dispatcher, adoptionWriter);
+        service = new EvolutionService(store.getEvolutionStore(), store, permissions, admitted, dispatcher, adoptionWriter, {
+          reviewBindingIds: (teamId, agentId) => listReviewBindingIds(process.env.EVOLUTION_REVIEW_MODELS_FILE, instanceId, teamId, agentId),
+          evaluationBindingIds: (teamId, agentId) => listSkillEvaluationBindingIds(process.env.EVOLUTION_EVALUATION_PROFILES_FILE, instanceId, teamId, agentId),
+        });
         dispatcher.recover();
         return service;
       })().catch(error => {

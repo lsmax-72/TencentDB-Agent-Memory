@@ -18,18 +18,28 @@ export interface ReviewBinding {
 }
 export type ResolveReviewBinding = (profile: EvolutionProfile) => ReviewBinding | null;
 
+function readBindings(path: string | undefined) {
+  if (!path || !isAbsolute(path)) throw new Error("absolute path required");
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256_000 || (stat.mode & 0o077) !== 0) throw new Error("private regular config required");
+  return z.array(z.object({
+    id: z.string().min(1).max(180), instance_id: z.string().min(1), team_id: z.string().min(1), agent_id: z.string().min(1),
+    config: z.record(z.string(), z.unknown()),
+  }).strict()).max(100).parse(JSON.parse(readFileSync(path, "utf8")));
+}
+
+export function listReviewBindingIds(path: string | undefined, instanceId: string, teamId: string, agentId: string): string[] {
+  if (!path) return [];
+  try { return readBindings(path).filter(row => row.instance_id === instanceId && row.team_id === teamId && row.agent_id === agentId).map(row => row.id).sort(); }
+  catch { throw new EvolutionError(503, "REVIEW_BINDING_INVALID"); }
+}
+
 /** The path is operator configuration, never an HTTP argument. Secrets never enter evolution records. */
 export function fileReviewBindings(path: string | undefined, instanceId: string, request: typeof fetch = fetch): ResolveReviewBinding {
   return profile => {
     if (!path || !profile.review_model_id) return null;
     try {
-      if (!isAbsolute(path)) throw new Error("absolute path required");
-      const stat = lstatSync(path);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256_000 || (stat.mode & 0o077) !== 0) throw new Error("private regular config required");
-      const bindings = z.array(z.object({
-        id: z.string().min(1).max(180), instance_id: z.string().min(1), team_id: z.string().min(1), agent_id: z.string().min(1),
-        config: z.record(z.string(), z.unknown()),
-      }).strict()).max(100).parse(JSON.parse(readFileSync(path, "utf8")));
+      const bindings = readBindings(path);
       const matches = bindings.filter(binding => binding.instance_id === instanceId && binding.id === profile.review_model_id && binding.team_id === profile.team_id && binding.agent_id === profile.agent_id);
       if (!matches.length) return null;
       if (matches.length !== 1) throw new Error("ambiguous binding");

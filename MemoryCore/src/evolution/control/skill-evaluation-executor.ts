@@ -33,14 +33,23 @@ function executableFile(path: string): void {
   const stat = statSync(realpathSync(path));
   if (!stat.isFile() || (stat.mode & 0o111) === 0) throw new Error("executable required");
 }
+function readEvaluationConfigs(path: string | undefined): EvaluationConfig[] {
+  if (!path) throw new Error("evaluation config required");
+  privateFile(path, 256_000);
+  return z.array(configSchema).max(100).parse(JSON.parse(readFileSync(path, "utf8")));
+}
+export function listSkillEvaluationBindingIds(path: string | undefined, instanceId: string, teamId: string, agentId: string): string[] {
+  if (!path) return [];
+  try { return readEvaluationConfigs(path).filter(row => row.instance_id === instanceId && row.team_id === teamId && row.agent_id === agentId).map(row => row.id).sort(); }
+  catch { throw new EvolutionError(503, "EVALUATION_BINDING_INVALID"); }
+}
 
 /** Operator-owned fixed runner configuration; no command, path, model or suite is accepted from HTTP. */
 export function fileSkillEvaluationBindings(path: string | undefined, instanceId: string, store: EvolutionStore, core: SkillCore): ResolveSkillEvaluation {
   return profile => {
     if (!path || !profile.evaluation_profile_id) return null;
     try {
-      privateFile(path, 256_000);
-      const entries = z.array(configSchema).max(100).parse(JSON.parse(readFileSync(path, "utf8")));
+      const entries = readEvaluationConfigs(path);
       const matches = entries.filter(row => row.id === profile.evaluation_profile_id && row.instance_id === instanceId && row.team_id === profile.team_id && row.agent_id === profile.agent_id);
       if (!matches.length) return null;
       if (matches.length !== 1) throw new Error("ambiguous binding");

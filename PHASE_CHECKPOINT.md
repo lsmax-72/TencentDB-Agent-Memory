@@ -1,5 +1,13 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 15:04 续跑：腾讯原生治理配置
+
+- 从 `51bf18f` 继续。Core 新增管理员只读 `profiles/options`：只返回指定 Agent 已固定绑定、当前管理员仍可写且属于 Skill / Chat Memory / LLM Wiki 的资产；Code Graph 不进入自进化。可选复盘模型和 Skill 评测配置来自服务端受限文件，只暴露绑定 ID，不暴露 endpoint、路径或 secret。
+- 启用 profile 现在必须同时满足 admission、每日 token/model-call/candidate 预算、独立 review binding、每类至少一个固定目标、三类真实 adoption handler；Skill 还必须有受限 evaluation binding。保存前与进入 mutation boundary 后均复查固定绑定及写权限，不能用失效/跨 Team 资产获得治理授权。
+- MemoryPanel 使用现有 TencentDB / Tea 组件提供 Agent、资产类型、固定资产、模型/评测绑定、有限 Memory/Wiki 自动采用和启用开关；未满足后台 admission 时只能保存关闭草案，不使用 MyUI。
+- 验证：Core **163 tests / 36 files PASS**；control strict **0** 新错误（101 条既有传递 diagnostics）；Panel **3 tests PASS**、backend/web build PASS；Knowledge **11 tests PASS**、build PASS。Core 聚合 `npm run build` 仍被仓库既有缺失 `scripts/seed-v2/tsconfig.json` 阻断，plugin 产物已成功构建，本节未新增该问题。
+- 下一步：创建全新隔离实例，覆盖任务完成幂等、预算、三类候选/校验/审查/采用、权限、重启恢复及历史只读；通过后才备份并升级主 8125。仍不调用 vLLM、不更改 v4 FAIL/历史 Attempt。
+
 ## 2026-09-01 14:51 续跑：受限 Skill 对照评测任务
 
 - 从 `2b640b9` 继续。新增持久 `evaluation` job：Skill 候选详情可请求 Baseline/Candidate 对照；重复请求幂等，retry建立独立任务，RUNNING重启时已有Attempt只核对完成、无结果标记RECONCILE_REQUIRED而不盲重跑。
