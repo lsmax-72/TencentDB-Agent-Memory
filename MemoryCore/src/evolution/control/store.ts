@@ -104,8 +104,9 @@ export class EvolutionStore {
           ...(candidate.payload.evidence_mode === "offline_test" ? { evidence_mode: "offline_test" } : {}) },
       }, job.id, "evolution-validator");
       const profile = this.profile(candidate.team_id, candidate.agent_id);
-      const autoAuthorized = report.result === "PASS" && report.auto_eligible === true && candidate.payload.asset_kind === "memory"
-        && profile?.enabled === true && profile.auto_memory === true;
+      const autoAuthorized = report.result === "PASS" && report.auto_eligible === true && profile?.enabled === true
+        && (candidate.payload.asset_kind === "memory" && profile.auto_memory === true
+          || candidate.payload.asset_kind === "wiki" && profile.auto_wiki_maintenance === true);
       const status = autoAuthorized ? "AUTO_AUTHORIZED" : report.result === "PASS" ? "VALIDATED" : report.result === "FAIL" ? "VALIDATION_FAILED" : report.result;
       this.transition(candidate.id, candidate.revision, ["FROZEN", "NEEDS_EVIDENCE", "VALIDATION_FAILED"], status, "evolution-validator");
       this.jobTransition(job, "COMPLETED", { result_id: attempt.id, result: report.result, model_calls: 0 });

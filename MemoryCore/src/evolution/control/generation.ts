@@ -9,6 +9,8 @@ import { generateSkillProposals } from "./proposals.js";
 import { proposeL1 } from "./memory-proposals.js";
 import type { SnapshotMemory } from "./memory-snapshot.js";
 import { memorySnapshotHash } from "./memory-snapshot.js";
+import { freezeCandidates } from "./proposals.js";
+import type { FrozenWikiProposal } from "./wiki-proposal-bridge.js";
 
 export interface GenerationDependencies {
   store: EvolutionStore;
@@ -17,6 +19,8 @@ export interface GenerationDependencies {
   getSkillCore: () => SkillCore | undefined;
   authorize: (source: EvolutionRecord, profile: EvolutionProfile) => Promise<boolean>;
   snapshotMemory?: SnapshotMemory;
+  generateWiki?: (input: { store: EvolutionStore; source: EvolutionRecord; job: EvolutionRecord; profile: EvolutionProfile; binding: ReviewBinding;
+    target: AssetEntity; authorize: () => Promise<boolean> }) => Promise<FrozenWikiProposal>;
 }
 
 /** Local host integration: no formal writer is given to a reviewer or to a generation job. */
@@ -25,11 +29,10 @@ export async function generateStandaloneProposals(deps: GenerationDependencies, 
   if (source.kind !== "diagnosis" || source.origin !== "runtime" || job.payload.source_hash !== source.artifact_hash) throw new EvolutionError(409, "LIVE_DIAGNOSIS_REQUIRED");
   const kind = job.payload.stage === "skill" ? "skill" : job.payload.stage === "memory_l1" ? "memory" : job.payload.stage === "wiki" ? "wiki" : null;
   if (!kind || !profile.asset_kinds.includes(kind)) throw new EvolutionError(403, "GENERATION_ASSET_SCOPE_DENIED");
-  if (kind === "wiki") throw new EvolutionError(501, "WIKI_SOURCE_BRIDGE_REQUIRED");
-  if (!binding.createProposalRunner) throw new EvolutionError(503, "PROPOSAL_RUNNER_UNAVAILABLE");
+  if (kind !== "wiki" && !binding.createProposalRunner) throw new EvolutionError(503, "PROPOSAL_RUNNER_UNAVAILABLE");
   const trace = source.parent_id ? store.get(source.parent_id) : null;
   if (!trace || trace.kind !== "trace" || trace.origin !== "runtime" || trace.team_id !== source.team_id || trace.agent_id !== source.agent_id || trace.owner_user_id !== source.owner_user_id) throw new EvolutionError(409, "DIAGNOSIS_TRACE_MISSING");
-  const targetType = kind === "memory" ? "chat_memory" : "skill";
+  const targetType = kind === "memory" ? "chat_memory" : kind === "wiki" ? "llm_wiki" : "skill";
   const targets: AssetEntity[] = [];
   for (const id of profile.asset_ids) {
     const asset = await metadata.getAssetById(id);
@@ -52,6 +55,16 @@ export async function generateStandaloneProposals(deps: GenerationDependencies, 
   }
   if (!await authorize()) throw new EvolutionError(403, "PROPOSAL_TARGET_PERMISSION_DENIED");
   // Source ACL is never broadened by the target list; all target reads are independently checked.
+  if (kind === "wiki") {
+    if (targets.length !== 1) throw new EvolutionError(409, "ONE_EXPLICIT_WIKI_TARGET_REQUIRED");
+    if (!deps.generateWiki) throw new EvolutionError(501, "WIKI_SOURCE_BRIDGE_REQUIRED");
+    const allocationId = store.allocateCandidateSlots(job.id, 1);
+    const proposal = await deps.generateWiki({ store, source, job, profile, binding, target: targets[0], authorize });
+    const before = JSON.stringify(proposal.base), after = JSON.stringify(proposal.files);
+    return freezeCandidates(store, source, [{ asset_kind: "wiki", target_id: targets[0].asset_id, operation: "update",
+      base_hash: contentHash(before), base_version: null, before, after, source_record_ids: [source.id], wiki_proposal: proposal,
+    }], allocationId);
+  }
   if (kind === "memory") {
     if (targets.length !== 1) throw new EvolutionError(409, "ONE_EXPLICIT_MEMORY_TARGET_REQUIRED");
     const [target] = await permissions.resolveChatMemoryTargets([targets[0].asset_id]);

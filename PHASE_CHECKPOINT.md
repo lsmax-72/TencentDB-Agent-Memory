@@ -1,5 +1,14 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 14:42 续跑：Wiki 隔离生成与预算闭环
+
+- 从 `9a3b657` 继续。Wiki proposal job 现可选择唯一显式 `llm_wiki` 目标，经固定 Core→Knowledge 私有 bridge 从服务端注册的 `raw/sources/*` 读取可信材料；请求不能提供来源路径、endpoint之外的命令或文件系统能力。
+- Knowledge 复用原 extract+merge 流程，但全部运行在 shadow copy；生成/合并后冻结最终页面 bytes。Core 在请求前一次性预留最多8个模型调用及其完整 token ceiling，Knowledge 禁用 SDK 隐藏重试、逐次限制 temperature=0/context/output/call-count并返回非空 usage；丢失响应/usage保留全额预留，不填0。
+- reviewer API key 只存在服务端闭包和内部请求，不能被 JSON/string inspection 或 evolution record 序列化。每个真实 Wiki 模型步骤落独立非敏感 usage 记录；授权和目标快照在冻结前再次核验。
+- Wiki 内容分流新增严格 mechanical maintenance 判定：仅正文和其他metadata逐字不变、来源列表无删除且只引用已注册材料的去重/补引用可标记自动资格；新页面、正文或结论变化仍人工。是否自动采用还需 profile 的 `auto_wiki_maintenance` 和后台完整授权重验。
+- 验证：Core **157 tests / 33 files PASS**、plugin build PASS；Knowledge **11 tests / 4 files PASS**、typecheck/build PASS。全部为离线/mock transport契约验证，没有调用vLLM，也不宣称真实Wiki质量效果。
+- 下一步：接受限 nanobot Skill evaluation job 和 effect receipt；随后完整隔离 E2E 与8125交付。
+
 ## 2026-09-01 09:48 续跑：三类冻结资产的受治理采用
 
 - 从 `6ac85a3` 继续。Core 已接入统一受治理 writer：每次采用重新核验管理员/授权人、Team/Agent/目标写权限、递归来源读取权限、profile 范围、冻结 hash 与目标 base version；写入仅在全局 mutation boundary 内取得正式 permit，避免与旧 Skill/Memory 写入口并发穿透。

@@ -13,15 +13,17 @@ afterEach(() => stores.splice(0).forEach(store => store.close()));
 const completion = { team_id: "team", agent_id: "agent", task_id: "task", session_id: "session", run_id: "run", completion: "host_task_complete", asset_ids: [],
   task_input: "我正在整理项目文档和任务证据，请记录当前工作的背景。", final_output: "offline test task output", tool_events: [],
   usage: { input_tokens: null, output_tokens: null, model_calls: 0, tool_calls: 0 }, actual_model: "OFFLINE_FIXTURE", outcome: "PASS", used_asset_versions: {} };
-function setup(route = "memory_gap", assetOwner = "owner", enableValidation = false, autoMemory = false, exactFact = false) {
+function setup(route = "memory_gap", assetOwner = "owner", enableValidation = false, autoMemory = false, exactFact = false,
+  generateWiki?: NonNullable<Parameters<typeof generateStandaloneProposals>[0]["generateWiki"]>) {
   const metadata = new SqliteMetadataStore(":memory:"); metadata.init(); stores.push(metadata);
   metadata.createUser({ user_id: "owner", auth_provider: "local", external_id: "owner", username: "test-owner", default_key_value: "test-key" });
   metadata.createTeam({ team_id: "team", name: "TEST ONLY", owner_user_id: "owner" });
   metadata.createAgent({ agent_id: "agent", team_id: "team", owner_user_id: "owner", name: "test-agent" });
   metadata.createTask({ task_id: "task", team_id: "team", creator_user_id: "owner", title: "offline end-to-end test" });
   metadata.createAsset({ asset_id: "chat_memory-team-agent", team_id: "team", asset_type: "chat_memory", name: "test memory", owner_user_id: assetOwner, source_type: "offline_fixture", visibility: "private", status: "approved" });
+  metadata.createAsset({ asset_id: "wiki-team-agent", team_id: "team", asset_type: "llm_wiki", name: "test wiki", owner_user_id: assetOwner, source_type: "offline_fixture", visibility: "private", status: "approved" });
   const store = metadata.getEvolutionStore();
-  const profile = store.saveProfile({ team_id: "team", agent_id: "agent", enabled: true, asset_kinds: ["skill", "memory", "wiki"], asset_ids: ["chat_memory-team-agent"], daily_tokens: 300000, daily_model_calls: 10, daily_candidates: 50, evaluation_profile_id: null, auto_memory: autoMemory, auto_wiki_maintenance: false, authorized_by: "owner", review_model_id: "review" }, 0);
+  const profile = store.saveProfile({ team_id: "team", agent_id: "agent", enabled: true, asset_kinds: ["skill", "memory", "wiki"], asset_ids: ["chat_memory-team-agent", "wiki-team-agent"], daily_tokens: 300000, daily_model_calls: 10, daily_candidates: 50, evaluation_profile_id: null, auto_memory: autoMemory, auto_wiki_maintenance: false, authorized_by: "owner", review_model_id: "review" }, 0);
   const permissions = new MetadataService(metadata, "offline-instance");
   const complete = vi.fn(async (input: { system: string; evidence: string }) => {
     const [trace] = JSON.parse(input.evidence);
@@ -41,7 +43,8 @@ function setup(route = "memory_gap", assetOwner = "owner", enableValidation = fa
     canRead: record => service.canReadRecord(record, candidate.owner_user_id) }, candidate));
   const autoApply = vi.fn(async () => {});
   const dispatcher = new EvolutionDispatcher(store, { admitted: () => true, resolveModel: () => binding, authorize,
-    generate: (source, job, grant, model) => generateStandaloneProposals({ store, metadata, permissions, authorize, snapshotMemory, getSkillCore: () => undefined }, source, job, grant, model),
+    generate: (source, job, grant, model) => generateStandaloneProposals({ store, metadata, permissions, authorize, snapshotMemory, getSkillCore: () => undefined,
+      ...(generateWiki ? { generateWiki } : {}) }, source, job, grant, model),
     ...(enableValidation ? { validate, autoApply } : {}),
   });
   service = new EvolutionService(store, metadata, permissions, true, dispatcher);
@@ -82,6 +85,16 @@ describe("explicit completion to real extraction pipeline with offline model res
     const [job] = test.store.jobs(["BLOCKED_GENERATION"], ["proposal"]);
     expect(test.store.events(job.id).at(-1)?.document).toMatchObject({ reason: "WIKI_SOURCE_BRIDGE_REQUIRED" });
     expect(test.request).not.toHaveBeenCalled(); expect(test.store.list("team", "candidate")).toHaveLength(0);
+  });
+  it("freezes a Wiki proposal returned by the fixed internal source bridge", async () => {
+    const proposal = { revision: 1 as const, base: { files: { "raw/sources/manual.md": "c291cmNl" }, hash: "a".repeat(64) },
+      files: [{ path: "wiki/page.md", before: null, after: "cGFnZQ==" }], source_paths: ["raw/sources/manual.md"], hash: "b".repeat(64) };
+    const generateWiki = vi.fn(async () => proposal);
+    const test = setup("wiki_gap", "owner", false, false, false, generateWiki);
+    await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
+    const [candidate] = test.store.list("team", "candidate");
+    expect(generateWiki).toHaveBeenCalledOnce(); expect(candidate.payload).toMatchObject({ asset_kind: "wiki", target_id: "wiki-team-agent", wiki_proposal: proposal });
+    expect(test.request).not.toHaveBeenCalled();
   });
   it("preserves the failed proposal and explicitly retries once under an independent receipt", async () => {
     const test = setup(); test.request.mockResolvedValueOnce(new Response("offline failure", { status: 503 }));

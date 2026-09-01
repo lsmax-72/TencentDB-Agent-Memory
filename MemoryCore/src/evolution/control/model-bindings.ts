@@ -13,6 +13,8 @@ export interface ReviewBinding {
   fingerprint: string;
   model: DiagnosisModel;
   createProposalRunner?: (context: ProposalRunnerContext) => LLMRunner;
+  /** Server-private config for the internal Wiki generator; never persisted in a record. */
+  createWikiModelConfig?: () => ReviewModelConfig;
 }
 export type ResolveReviewBinding = (profile: EvolutionProfile) => ReviewBinding | null;
 
@@ -36,6 +38,8 @@ export function fileReviewBindings(path: string | undefined, instanceId: string,
       // Rotating a credential is not a change to the experiment model/configuration.
       const { api_key: _secret, ...publicConfig } = binding.config;
       return { id: binding.id, fingerprint: contentHash({ id: binding.id, instance_id: instanceId, team_id: binding.team_id, agent_id: binding.agent_id, config: publicConfig }), model,
+        // A closure keeps the credential out of JSON/string inspection and all persisted evidence.
+        createWikiModelConfig: () => ({ ...binding.config } as ReviewModelConfig),
         createProposalRunner: context => createProposalRunner(binding.config as ReviewModelConfig, context, request),
       };
     } catch { throw new EvolutionError(503, "REVIEW_BINDING_INVALID"); }

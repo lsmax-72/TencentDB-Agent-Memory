@@ -52,7 +52,9 @@ export async function validateFrozenContent(deps: ValidationDependencies, candid
     if (!deps.validateWiki) return report("NEEDS_EVIDENCE", ["WIKI_FROZEN_VALIDATOR_BRIDGE_REQUIRED"]);
     const evidence = await deps.validateWiki(candidate, p as CandidatePayload);
     if (!await deps.canRead(candidate)) throw new EvolutionError(403, "VALIDATION_SOURCE_ACCESS_DENIED");
-    return report("PASS", ["WIKI_FROZEN_CONTENT_AND_INDEX_VALIDATED", "WIKI_SEMANTIC_CHANGE_REQUIRES_HUMAN_REVIEW"], {
+    const maintenanceOnly = evidence.maintenance_only === true;
+    return report("PASS", ["WIKI_FROZEN_CONTENT_AND_INDEX_VALIDATED", maintenanceOnly ? "WIKI_MECHANICAL_MAINTENANCE_ONLY" : "WIKI_SEMANTIC_CHANGE_REQUIRES_HUMAN_REVIEW"], {
+      auto_eligible: maintenanceOnly,
       checked: ["artifact_hash", "source_paths", "protected_pages", "base_snapshot", "index_rebuild"], ...evidence,
     });
   }

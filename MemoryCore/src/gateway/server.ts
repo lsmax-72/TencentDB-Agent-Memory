@@ -119,6 +119,7 @@ import { GovernedFrozenAssetWriter } from "../evolution/control/governed-writer.
 import { MemoryFrozenAssetHandler } from "../evolution/control/memory-adoption-handler.js";
 import { SkillFrozenAssetHandler } from "../evolution/control/skill-adoption-handler.js";
 import { WikiFrozenAssetHandler } from "../evolution/control/wiki-adoption-handler.js";
+import { WikiProposalBridge } from "../evolution/control/wiki-proposal-bridge.js";
 import { applyFrozenCandidate, type FrozenAssetWriter } from "../evolution/control/adoption.js";
 import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
@@ -467,6 +468,7 @@ export class TdaiGateway {
         const skillHandler = skillCore ? new SkillFrozenAssetHandler(skillCore) : undefined;
         const wikiUrl = process.env.EVOLUTION_KNOWLEDGE_URL, wikiToken = process.env.EVOLUTION_INTERNAL_TOKEN;
         const wikiHandler = wikiUrl && wikiToken ? new WikiFrozenAssetHandler({ baseUrl: wikiUrl, token: wikiToken, serviceId: instanceId }) : undefined;
+        const wikiProposal = wikiUrl && wikiToken ? new WikiProposalBridge({ baseUrl: wikiUrl, token: wikiToken, serviceId: instanceId }) : undefined;
         let adoptionWriter: FrozenAssetWriter | undefined;
         const dispatcher = new EvolutionDispatcher(store.getEvolutionStore(), {
           admitted: () => admitted,
@@ -476,6 +478,7 @@ export class TdaiGateway {
             store: store.getEvolutionStore(), metadata: store, permissions,
             getSkillCore: () => this.core.getSkillCore(), authorize: (record, grant) => service.authorizeDispatch(record, grant),
             snapshotMemory,
+            ...(wikiProposal ? { generateWiki: input => wikiProposal.generate(input.store, input.source, input.job, input.target.asset_id, input.binding, input.authorize) } : {}),
           }, source, job, profile, binding),
           validate: candidate => validateFrozenContent({ store: store.getEvolutionStore(), metadata: store, permissions,
             snapshotMemory, ...(wikiHandler ? { validateWiki: async (record, payload) => (await wikiHandler.snapshot(record, payload)).details ?? {} } : {}),
@@ -483,7 +486,8 @@ export class TdaiGateway {
           }, candidate),
           autoApply: async candidate => {
             const profile = store.getEvolutionStore().profile(candidate.team_id, candidate.agent_id);
-            if (!adoptionWriter || !profile?.enabled || !profile.auto_memory || candidate.payload.asset_kind !== "memory") throw new EvolutionError(409, "AUTO_ADOPTION_NOT_AUTHORIZED");
+            const allowed = candidate.payload.asset_kind === "memory" ? profile?.auto_memory : candidate.payload.asset_kind === "wiki" ? profile?.auto_wiki_maintenance : false;
+            if (!adoptionWriter || !profile?.enabled || !allowed) throw new EvolutionError(409, "AUTO_ADOPTION_NOT_AUTHORIZED");
             await applyFrozenCandidate(store.getEvolutionStore(), candidate.id, candidate.revision, profile.authorized_by, adoptionWriter);
           },
           onError: () => this.logger.error("[evolution] dispatcher failed; durable jobs retained"),

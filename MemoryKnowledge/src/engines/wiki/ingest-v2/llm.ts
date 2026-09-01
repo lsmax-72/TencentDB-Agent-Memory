@@ -93,10 +93,20 @@ export interface LlmClient {
   readonly config: NormalizedLlmConfig;
 }
 
+export interface LlmCallUsage {
+  label: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+export interface LlmClientHooks {
+  beforeCall?: (params: ChatParams) => void | Promise<void>;
+  afterCall?: (usage: LlmCallUsage) => void | Promise<void>;
+}
+
 /**
  * 基于 AI SDK 的真实客户端。纯文本输出（不挂任何 tool，避免弱模型幻觉 tool call）。
  */
-export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
+export function createLlmClient(raw: RawLlmConfig | undefined, hooks: LlmClientHooks = {}): LlmClient {
   const config = normalizeLlmConfig(raw);
   if (!config.apiKey) {
     throw new Error(
@@ -119,6 +129,7 @@ export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
   return {
     config,
     async chat(params: ChatParams): Promise<string> {
+      await hooks.beforeCall?.(params);
       const timeoutSignal = AbortSignal.timeout(config.timeoutMs);
       const signal = params.abortSignal
         ? AbortSignal.any([timeoutSignal, params.abortSignal])
@@ -155,7 +166,7 @@ export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
         // streamText 的 text/usage/finishReason 是 Promise,await 后形状与 generateText 一致。
         const { text, usage, finishReason } = config.stream
           ? await (async () => {
-              const r = streamText(callParams);
+              const r = streamText({ ...callParams, maxRetries: 0 });
               return {
                 text: ((await r.text) ?? "").trim(),
                 usage: await r.usage,
@@ -163,7 +174,7 @@ export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
               };
             })()
           : await (async () => {
-              const r = await generateText(callParams);
+              const r = await generateText({ ...callParams, maxRetries: 0 });
               return {
                 text: (r.text ?? "").trim(),
                 usage: r.usage,
@@ -180,6 +191,7 @@ export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
           finishReason: finishReason ?? null,
           outputChars: text.length,
         });
+        await hooks.afterCall?.({ label, input_tokens: u.inputTokens ?? null, output_tokens: u.outputTokens ?? null });
         if (!text) {
           log.warn(`LLM 返回空文本 [${label}]`, { finishReason: finishReason ?? null });
         }

@@ -2,6 +2,14 @@
 
 状态：IMPLEMENTATION_IN_PROGRESS；不能视为完整交付。2026-08-31。
 
+## 最新 Wiki 运行接线（2026-09-01 14:42）
+
+Wiki `wiki_gap` 已从持久 proposal job 接到固定 Core→Knowledge 私有 bridge。目标必须是 profile 中唯一、双方可读写的 `llm_wiki`；来源只能由 Knowledge 从该 Wiki 已登记的 `raw/sources/*` 派生，HTTP 不能指定任意来源路径。原生 extract+merge 在隔离副本完成，最终页面 bytes 冻结为统一候选，正式 Wiki 在采用前不变。
+
+Core 在调用前为最多8个 Wiki 内部模型步骤预留整个 token/model-call ceiling；Knowledge 强制 temperature=0、无 SDK retry、逐次 context/output/call-count上限和完整usage。丢失usage不填0且保留保守预留。模型secret不进入记录；步骤记录只保存model/label/usage/hash。
+
+Wiki 自动资格只限正文及其他metadata完全不变、来源无删除且来自现有导入材料的引用去重/补引用；所有新知识和正文/结论变化仍要求人工。此节157项Core与11项Knowledge测试及构建通过，传输和模型均为显式offline double；真实模型闭环仍未运行。
+
 ## 最新采用接线（2026-09-01 09:48）
 
 三类冻结资产已连接真实受治理 writer。采用前后均重验身份、profile 授权、目标 ACL、来源链、冻结内容和 base version；写入与旧入口共享全局 mutation boundary。Memory L1/L2/L3、SkillCore 及 MemoryKnowledge Wiki 均以冻结 bytes 写入，Wiki 采用不会再次调用模型。持久操作意图、readback 核对、重启 reconciliation、双击幂等和过期拒绝已实现。

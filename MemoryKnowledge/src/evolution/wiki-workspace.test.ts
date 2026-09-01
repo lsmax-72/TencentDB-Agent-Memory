@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prepareWikiProposal, applyWikiProposal, recoverWikiApply, snapshotWiki } from "./wiki-workspace.js";
+import { prepareWikiProposal, applyWikiProposal, isMechanicalWikiMaintenance, recoverWikiApply, snapshotWiki } from "./wiki-workspace.js";
 const roots: string[] = [];
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "wiki-evolution-test-")); roots.push(root);
@@ -42,6 +42,19 @@ describe("Wiki frozen publication", () => {
   it("refuses symlinks", async () => {
     const root = fixture(); symlinkSync(join(root, "raw"), join(root, "wiki/link"));
     expect(() => snapshotWiki(root)).toThrow("SYMLINK_REJECTED");
+  });
+  it("auto-classifies only source-list maintenance with byte-identical body", async () => {
+    const root = fixture();
+    writeFileSync(join(root, "raw/sources/second.md"), "source two");
+    writeFileSync(join(root, "wiki/page.md"), "---\ntitle: Page\ntype: source\nsources:\n  - manual.md\n  - manual.md\n---\n\nSame body.\n");
+    const maintenance = await prepareWikiProposal(root, join(root, "candidates"), ["raw/sources/manual.md"], async shadow => {
+      writeFileSync(join(shadow, "wiki/page.md"), "---\ntitle: Page\ntype: source\nsources:\n  - manual.md\n  - second.md\n---\n\nSame body.\n");
+    });
+    expect(isMechanicalWikiMaintenance(maintenance)).toBe(true);
+    const semantic = await prepareWikiProposal(root, join(root, "candidates"), ["raw/sources/manual.md"], async shadow => {
+      writeFileSync(join(shadow, "wiki/page.md"), "---\ntitle: Page\ntype: source\nsources:\n  - manual.md\n---\n\nChanged body.\n");
+    });
+    expect(isMechanicalWikiMaintenance(semantic)).toBe(false);
   });
   it("keeps unrelated edits and corrupted journals blocked before any recovery writes", async () => {
     const root = fixture();

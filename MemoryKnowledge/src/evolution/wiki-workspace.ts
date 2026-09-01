@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { basename } from "node:path";
+import { parseFrontmatter } from "../engines/wiki/ingest-v2/frontmatter.js";
 
 export interface WikiSnapshot { files: Record<string, string>; hash: string }
 export interface FrozenWikiProposal {
@@ -102,6 +104,25 @@ export function validateFrozenWikiProposal(root: string, proposal: FrozenWikiPro
     const decoded = Buffer.from(file.after, "base64");
     if (decoded.toString("base64") !== file.after || decoded.length > 512 * 1024) throw new Error("WIKI_INVALID_PAGE");
   }
+}
+
+/** True only for provenance-list normalization that leaves every page body and other metadata unchanged. */
+export function isMechanicalWikiMaintenance(proposal: FrozenWikiProposal): boolean {
+  try {
+    validateFrozenWikiProposal(".", proposal);
+    const known = new Set(Object.keys(proposal.base.files).filter(path => path.startsWith("raw/sources/")).map(path => basename(path)));
+    return proposal.files.every(file => {
+      if (file.before === null) return false;
+      const before = parseFrontmatter(Buffer.from(file.before, "base64").toString("utf8"));
+      const after = parseFrontmatter(Buffer.from(file.after, "base64").toString("utf8"));
+      if (!before.hasFrontmatter || !after.hasFrontmatter || before.body !== after.body) return false;
+      const beforeSources = Array.isArray(before.frontmatter.sources) ? before.frontmatter.sources.filter((v): v is string => typeof v === "string") : [];
+      const afterSources = Array.isArray(after.frontmatter.sources) ? after.frontmatter.sources.filter((v): v is string => typeof v === "string") : [];
+      const beforeMeta = { ...before.frontmatter, sources: undefined }, afterMeta = { ...after.frontmatter, sources: undefined };
+      return hash(beforeMeta) === hash(afterMeta) && afterSources.length === new Set(afterSources).size
+        && beforeSources.every(source => afterSources.includes(source)) && afterSources.every(source => known.has(source));
+    });
+  } catch { return false; }
 }
 
 /** Caller must hold the Wiki service's exclusive mutation boundary across this operation. */
