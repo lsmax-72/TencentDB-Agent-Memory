@@ -1,5 +1,15 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 20:10 完成审计：Memory 三层闭环和主 8125 r2
+
+- 最终审计发现并补齐一个真实缺口：先前 runtime task-complete 只生成 L1。提交 `8b0c865` 现把 L1/L2/L3 payload 放在同一候选额度与原子冻结批次内；正式 snapshot 不成熟时不提前运行高层，候选不能作为同轮下一层输入。候选额度不足以覆盖已触发层时在 proposal model 前阻止，不留下半批结果。
+- 新独立实例 `/Users/lsmax/Coder/phase6-artifacts/outputs/evolution-hub-20260901-r12`（Core 38920 / Hub 38725）setup/verify/full/restart PASS。三个独立 host task-complete 依次证明 L1、L2、L3 真实候选冻结、校验/人工分流、采用、正式 bytes 读回和重启 adoption 读回；Wiki 仍精确应用冻结页面，Skill 仍 `BLOCKED_EVALUATOR_CONFIGURATION`，v4 历史仍 FAIL。
+- 回归：Core **166 tests / 37 files PASS**、plugin build PASS、control strict 0 新错误（101 既有传递 diagnostics）；Panel **3 tests**、backend/web build PASS；Knowledge **11 tests / 4 files**、build PASS；脚本语法和 `git diff --check` PASS。没有调用或探测 vLLM。
+- 主 Hub 在第二份停服备份 `/Users/lsmax/Coder/phase6-artifacts/backups/memoryhub-main-20260901-2005-pre-r2` 后更新到冻结 runtime `/Users/lsmax/Coder/phase6-artifacts/runtime/memoryhub-main-20260901-r2`。原 volumes 没替换，8125/8420/8424 healthy。
+- 容器第一次重建遗漏原网络别名，真实浏览器发现 Team 列表 502；恢复 `memory-core` / `memory-hub` alias 后通过。浏览器重启后看到六个自进化页面、专用 Team、v4 FAIL，并确认 default-team 原 Chat Memory 的 L0/L1/L2/L3 仍可读。主证据在 `/Users/lsmax/Coder/phase6-artifacts/outputs/memoryhub-main-20260901-r2`。
+- 主环境 automation admission 仍关闭且无 review/evaluation binding；没有 profile 启用、模型运行、测试写入正式资产或 Promotion。浏览器留在 `http://localhost:8125/#/evolution/overview`。
+- 当前工程目标已达到本机 standalone 范围；真实 LLM 自进化效果、云 TencentDB、正式 Skill Promotion、push/PR/merge 都未执行，并作为下一阶段或人工 Gate，而不是本次完成项。
+
 ## 2026-09-01 15:45 本机 8125 交付完成
 
 - 主 MemoryCore / MemoryHub 已在原 named volumes 上更新并恢复健康：`http://localhost:8125`、8420、8424 均可用。现有 `default-team`、admin 登录及正式 Chat Memory 保留；Code Graph、Skill、Wiki 原页面通过浏览器回归。

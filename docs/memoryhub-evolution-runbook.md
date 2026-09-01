@@ -9,9 +9,10 @@
 - MemoryKnowledge：`http://localhost:8424`
 - 容器：`tdai-memory-core`、`tdai-memory-hub`
 - 数据卷：`tdai-memory-core-data`、`tdai-panel-data`
-- 冻结代码：`/Users/lsmax/Coder/phase6-artifacts/runtime/memoryhub-main-20260901-r1`
-- 一致性备份：`/Users/lsmax/Coder/phase6-artifacts/backups/memoryhub-main-20260901-1535`
-- 验收记录：`/Users/lsmax/Coder/phase6-artifacts/outputs/memoryhub-main-20260901-r1`
+- 冻结代码：`/Users/lsmax/Coder/phase6-artifacts/runtime/memoryhub-main-20260901-r2`
+- 初始一致性备份：`/Users/lsmax/Coder/phase6-artifacts/backups/memoryhub-main-20260901-1535`
+- r2 前备份：`/Users/lsmax/Coder/phase6-artifacts/backups/memoryhub-main-20260901-2005-pre-r2`
+- 验收记录：`/Users/lsmax/Coder/phase6-artifacts/outputs/memoryhub-main-20260901-r2`
 
 主环境保持 `EVOLUTION_AUTOMATION_ADMITTED=0`，未配置 review model 或 Skill evaluator。缺少这些配置时只允许查看历史和保存关闭状态，不调用模型或写正式候选。
 
@@ -63,6 +64,8 @@ docker volume inspect tdai-memory-core-data tdai-panel-data
 - 两者：原 `tdai-memory-stack` 网络和备份 env 文件。
 
 重建前先用 `docker inspect` 对照端口、network alias 和 image digest；不得临时改成 `latest` 或重新生成 admin key。
+
+`tdai-memory-stack` 上必须恢复原别名：Core 为 `memory-core`，Hub 为 `memory-hub`。缺少 `memory-core` 时 Hub 自身仍可能健康，但 Team/资产请求会返回 502；不能只看 `/health` 就宣布恢复成功。
 
 ## 数据恢复
 

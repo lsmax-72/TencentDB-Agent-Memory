@@ -2,7 +2,17 @@
 
 状态：LOCAL_STANDALONE_DELIVERED；主 8125 已交付，真实 LLM 效果仍明确 BLOCKED。2026-09-01。
 
-## 主 8125 交付（2026-09-01 15:45）
+## Memory L1/L2/L3 运行闭环补验与主 Hub r2（2026-09-01 20:10）
+
+最终完成审计发现，上一版 task-complete 运行路径只自动生成 L1，L2/L3 虽有隔离 proposal helper 和正式写屏障，却没有被同一运行任务调用。现已改为在正式 Memory 快照具备输入时，由同一个受预算 runner 构造 L1/L2/L3 payload，并在一个 SQLite transaction 中整批冻结或全部不冻结。L2 只消费运行开始时已有的正式 L1；L3 只消费已有正式 scene/index，避免同一轮候选互相喂入而绕过审查。
+
+新隔离实例 `evolution-hub-20260901-r12` 使用三个独立 task-complete 回执证明顺序闭环：L1 自动采用并读回；第二个任务产生 L2，内容校验后人工采用并读回 scene；第三个任务产生 L3，人工采用并读回 persona。三层 adoption、Wiki adoption、Skill evaluator 阻塞和 v4 历史 FAIL 均在服务重启后保持。fixture 是确定性离线 OpenAI-compatible transport，只证明编排与控制，不代表真实模型效果。
+
+主 8125 已在第二份停服备份后切换到冻结 runtime `memoryhub-main-20260901-r2`。重建初次遗漏原 Compose network alias，浏览器实际暴露 Team 列表 502；恢复 `memory-core` / `memory-hub` alias 后，六页、v4 FAIL、专用 Team、default-team 原 Memory 四层和顺序重启全部复验通过。主环境仍 `EVOLUTION_AUTOMATION_ADMITTED=0`，没有 review/evaluation binding，没有调用 vLLM，也没有测试写入正式资产。
+
+最终回归为 Core 166 tests / 37 files、Panel 3 tests、Knowledge 11 tests；三项目相关构建、控制代码 strict 检查和脚本语法均通过。
+
+## 主 8125 首次交付（2026-09-01 15:45）
 
 现有本机 MemoryHub 已在一致性备份后更新。原 Core/Hub volumes、管理员登录、default-team 和 Chat Memory 均保留；TencentDB / Tea 原生侧边栏现在包含六个自进化页面。专用 `自进化历史 / TEST ONLY` Team 展示真实 v4 `FAIL / NO_NEW_FIX` 和只读 frozen Candidate，不能审查或采用。
 
