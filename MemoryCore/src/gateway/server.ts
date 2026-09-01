@@ -120,6 +120,7 @@ import { MemoryFrozenAssetHandler } from "../evolution/control/memory-adoption-h
 import { SkillFrozenAssetHandler } from "../evolution/control/skill-adoption-handler.js";
 import { WikiFrozenAssetHandler } from "../evolution/control/wiki-adoption-handler.js";
 import { WikiProposalBridge } from "../evolution/control/wiki-proposal-bridge.js";
+import { fileSkillEvaluationBindings, persistSkillEvaluation } from "../evolution/control/skill-evaluation-executor.js";
 import { applyFrozenCandidate, type FrozenAssetWriter } from "../evolution/control/adoption.js";
 import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
@@ -469,10 +470,18 @@ export class TdaiGateway {
         const wikiUrl = process.env.EVOLUTION_KNOWLEDGE_URL, wikiToken = process.env.EVOLUTION_INTERNAL_TOKEN;
         const wikiHandler = wikiUrl && wikiToken ? new WikiFrozenAssetHandler({ baseUrl: wikiUrl, token: wikiToken, serviceId: instanceId }) : undefined;
         const wikiProposal = wikiUrl && wikiToken ? new WikiProposalBridge({ baseUrl: wikiUrl, token: wikiToken, serviceId: instanceId }) : undefined;
+        const evaluationBindings = skillCore ? fileSkillEvaluationBindings(process.env.EVOLUTION_EVALUATION_PROFILES_FILE, instanceId, store.getEvolutionStore(), skillCore) : undefined;
         let adoptionWriter: FrozenAssetWriter | undefined;
         const dispatcher = new EvolutionDispatcher(store.getEvolutionStore(), {
           admitted: () => admitted,
           resolveModel: fileReviewBindings(process.env.EVOLUTION_REVIEW_MODELS_FILE, instanceId),
+          ...(evaluationBindings ? { resolveEvaluation: evaluationBindings,
+            evaluate: async (candidate, job, profile) => {
+              const binding = evaluationBindings(profile);
+              if (!binding || binding.id !== job.payload.evaluation_profile_id || binding.fingerprint !== job.payload.evaluation_binding_hash) throw new EvolutionError(409, "EVALUATION_BINDING_CHANGED");
+              return persistSkillEvaluation(store.getEvolutionStore(), candidate, job, await binding.execute(candidate, job, profile));
+            },
+          } : {}),
           authorize: (source, profile) => service.authorizeDispatch(source, profile),
           generate: (source, job, profile, binding) => generateStandaloneProposals({
             store: store.getEvolutionStore(), metadata: store, permissions,

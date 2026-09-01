@@ -2,6 +2,14 @@
 
 状态：IMPLEMENTATION_IN_PROGRESS；不能视为完整交付。2026-08-31。
 
+## 最新 Skill 评测任务（2026-09-01 14:51）
+
+Skill 候选已接入持久受限 evaluation job。配置仅来自操作员0600文件，绑定instance/team/agent；浏览器只能提交候选ID，不能指定命令、路径、模型或Suite。首版只允许冻结的 AC_REGRESSION_V1 和其目标 `skl-workspace`，其他Skill显示没有匹配Suite，绝不临时修改考试。
+
+执行复用已有真实 nanobot adapter、MinimalEvaluationRunner、deterministic Oracle、Pair和Gate；Baseline精确读取正式base version，Candidate bytes/hash复核，每arm独立workspace/session。完整最大成本在执行前预留，INFRA或usage缺失保持保守计费。结果作为独立runtime Attempt保存，只有 Gate PASS、至少一项newly_fixed且零newly_broken才允许Skill人工审查；不自动Promotion。
+
+Core161 tests、control strict零新增错误、Panel/web构建通过。本节未调用vLLM，生产evaluation binding仍未启用；需要隔离环境用明确offline/fake transport先验收状态机，再在服务恢复后才可产生真实效果证据。
+
 ## 最新 Wiki 运行接线（2026-09-01 14:42）
 
 Wiki `wiki_gap` 已从持久 proposal job 接到固定 Core→Knowledge 私有 bridge。目标必须是 profile 中唯一、双方可读写的 `llm_wiki`；来源只能由 Knowledge 从该 Wiki 已登记的 `raw/sources/*` 派生，HTTP 不能指定任意来源路径。原生 extract+merge 在隔离副本完成，最终页面 bytes 冻结为统一候选，正式 Wiki 在采用前不变。

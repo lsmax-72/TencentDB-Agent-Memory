@@ -1,5 +1,14 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 14:51 续跑：受限 Skill 对照评测任务
+
+- 从 `2b640b9` 继续。新增持久 `evaluation` job：Skill 候选详情可请求 Baseline/Candidate 对照；重复请求幂等，retry建立独立任务，RUNNING重启时已有Attempt只核对完成、无结果标记RECONCILE_REQUIRED而不盲重跑。
+- 评测配置来自0600操作员文件并绑定instance/team/agent/profile；HTTP不能传suite、命令、Python、nanobot路径、模型或配置文件。当前只允许冻结的 `AC_REGRESSION_V1`，且仅目标`skl-workspace`，没有匹配Suite的Skill明确阻止，不会临时造考试。
+- 运行复用原 `MinimalEvaluationRunner / Oracle / Pair / Gate / NanobotAgentAdapter`，Baseline从正式Skill精确base_version读回，Candidate artifact/content/hash再次核验；每arm fresh session/workspace。执行前预留全套5case双arm最大token/model-call预算，INFRA/usage不完整保留保守预留。
+- 完整EvaluationAttempt作为只读runtime receipt保存，含每case、fingerprint、tool/usage、cost、classification与Gate。只有`Gate PASS + newly_fixed>=1 + newly_broken=0`才成为Skill审查证据；不会自动采用或Promotion。v4历史FAIL/旧Oracle/Pair/Gate均未修改。
+- 原生页面增加“运行 Baseline / Candidate 对照评测”和独立retry；Core161 tests/35files、plugin build、control strict 0新增错误（101既有传递diagnostics）；Panel3tests/build、web build PASS。
+- 当前vLLM规避中，生产评测配置未启用、未执行真实model run；下一步完成可操作配置UI与隔离三类E2E。
+
 ## 2026-09-01 14:42 续跑：Wiki 隔离生成与预算闭环
 
 - 从 `9a3b657` 继续。Wiki proposal job 现可选择唯一显式 `llm_wiki` 目标，经固定 Core→Knowledge 私有 bridge 从服务端注册的 `raw/sources/*` 读取可信材料；请求不能提供来源路径、endpoint之外的命令或文件系统能力。

@@ -22,7 +22,7 @@ const profileSchema = scopeSchema.extend({
   auto_memory: z.boolean(), auto_wiki_maintenance: z.boolean(),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
 
 export class EvolutionService {
   readonly dispatcher: EvolutionDispatcher;
@@ -149,6 +149,7 @@ export class EvolutionService {
         if (!asset || asset.team_id !== team_id || !(await this.permissions.checkAssetPermission({ asset_id, user_id: actor.id, action: "write" })).allowed) throw new EvolutionError(403, "TARGET_WRITE_DENIED");
       }
       if (input.enabled && (!input.daily_tokens || !input.daily_model_calls || !input.daily_candidates || !input.asset_kinds.length)) throw new EvolutionError(400, "BUDGET_AND_SCOPE_REQUIRED");
+      if (input.enabled && input.asset_kinds.includes("skill") && !input.evaluation_profile_id) throw new EvolutionError(400, "SKILL_EVALUATION_PROFILE_REQUIRED");
       if (input.enabled && !this.automationReady) throw new EvolutionError(409, "AUTOMATION_ADMISSION_REQUIRED");
       if (input.enabled && (!this.adoptionWriter || input.asset_kinds.some(assetKind => !this.adoptionWriter?.supports?.(assetKind)))) throw new EvolutionError(409, "ASSET_ADOPTION_PATH_UNAVAILABLE");
       return withLocalMutationBoundary(async () => {
@@ -209,7 +210,14 @@ export class EvolutionService {
       if (!job) throw new EvolutionError(503, "VALIDATOR_UNAVAILABLE");
       this.dispatcher.wake(); return job;
     }
-    if (action === "diagnosis/retry" || action === "generation/retry" || action === "validation/retry") {
+    if (action === "evaluation/request") {
+      const input = recordSchema.strict().parse(body), candidate = this.store.get(input.id);
+      if (!candidate || candidate.team_id !== team_id || !await this.mayRead(candidate, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      if (actor.id !== candidate.owner_user_id && !["admin", "reviewer"].includes(actor.role)) throw new EvolutionError(403, "REVIEWER_REQUIRED");
+      const job = this.dispatcher.enqueueEvaluation(candidate); if (!job) throw new EvolutionError(503, "EVALUATOR_UNAVAILABLE");
+      this.dispatcher.wake(); return job;
+    }
+    if (action === "diagnosis/retry" || action === "generation/retry" || action === "validation/retry" || action === "evaluation/retry") {
       const input = recordSchema.extend({ request_id: id }).strict().parse(body);
       const previous = this.store.get(input.id);
       if (!previous || previous.team_id !== team_id || !await this.mayRead(previous, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
@@ -217,6 +225,7 @@ export class EvolutionService {
       if (!source || source.team_id !== team_id || !await this.mayRead(source, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
       if (actor.id !== source.owner_user_id) throw new EvolutionError(403, "TASK_OWNER_REQUIRED");
       const job = action === "validation/retry" ? this.dispatcher.enqueueValidation(source, { previous, requestId: input.request_id })
+        : action === "evaluation/retry" ? this.dispatcher.enqueueEvaluation(source, { previous, requestId: input.request_id })
         : action === "generation/retry" ? this.dispatcher.retryProposal(source, previous, input.request_id) : this.dispatcher.enqueue(source, { previous, requestId: input.request_id });
       if (!job) throw new EvolutionError(503, "VALIDATOR_UNAVAILABLE");
       this.dispatcher.wake();

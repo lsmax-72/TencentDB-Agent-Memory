@@ -13,6 +13,8 @@ interface DispatcherOptions {
   validate?: (candidate: EvolutionRecord) => Promise<ValidationReport>;
   /** Runs only after an AUTO_AUTHORIZED transition; failures remain visible and never fall back to legacy writes. */
   autoApply?: (candidate: EvolutionRecord) => Promise<void>;
+  evaluate?: (candidate: EvolutionRecord, job: EvolutionRecord, profile: EvolutionProfile) => Promise<EvolutionRecord>;
+  resolveEvaluation?: (profile: EvolutionProfile) => { id: string; fingerprint: string } | null;
   onError?: () => void;
 }
 
@@ -61,6 +63,11 @@ export class EvolutionDispatcher {
       else this.store.jobTransition(job, "RECONCILE_REQUIRED", { reason: "INTERRUPTED_CALL_OUTCOME_UNKNOWN" });
     }
     for (const job of this.store.jobs(["RUNNING"], ["validation"])) this.store.jobTransition(job, "RECONCILE_REQUIRED", { reason: "VALIDATION_INTERRUPTED_NO_FORMAL_WRITE", model_calls: 0 });
+    for (const job of this.store.jobs(["RUNNING"], ["evaluation"])) {
+      const result = this.store.find(job.team_id, "attempt", job.id);
+      if (result) this.store.jobTransition(job, "COMPLETED", { result_id: result.id, result_hash: result.artifact_hash });
+      else this.store.jobTransition(job, "RECONCILE_REQUIRED", { reason: "INTERRUPTED_EVALUATION_OUTCOME_UNKNOWN" });
+    }
     this.wake();
   }
 
@@ -122,9 +129,31 @@ export class EvolutionDispatcher {
     }, key, candidate.owner_user_id);
   }
 
+  enqueueEvaluation(candidate: EvolutionRecord, retry?: { previous: EvolutionRecord; requestId: string }): EvolutionRecord | null {
+    if (!this.options.evaluate) return null;
+    if (candidate.kind !== "candidate" || candidate.origin !== "runtime" || candidate.payload.asset_kind !== "skill") throw new EvolutionError(409, "LIVE_SKILL_CANDIDATE_REQUIRED");
+    if (retry && (retry.previous.payload.job_type !== "evaluation" || retry.previous.payload.source_id !== candidate.id
+      || retry.previous.payload.source_hash !== candidate.artifact_hash || retry.previous.origin !== "runtime"
+      || !["COMPLETED", "INFRA_ERROR", "RECONCILE_REQUIRED"].includes(retry.previous.status) && !retry.previous.status.startsWith("BLOCKED_"))) throw new EvolutionError(409, "RETRY_REQUIRES_TERMINAL_EVALUATION");
+    const key = retry ? `${candidate.id}/evaluation/retry/${retry.previous.id}/${retry.requestId}` : `${candidate.id}/evaluation`;
+    const existing = this.store.find(candidate.team_id, "job", key); if (existing) return existing;
+    if (!["FROZEN", "NEEDS_EVIDENCE"].includes(candidate.status)) throw new EvolutionError(409, "CANDIDATE_NOT_EVALUATABLE");
+    const profile = this.store.profile(candidate.team_id, candidate.agent_id);
+    let binding: { id: string; fingerprint: string } | null = null;
+    try { binding = profile && this.options.resolveEvaluation ? this.options.resolveEvaluation(profile) : null; } catch { /* Persist configuration failure. */ }
+    const status = !profile?.enabled ? "BLOCKED_AUTOMATION_DISABLED" : !profile.evaluation_profile_id || !binding ? "BLOCKED_EVALUATOR_CONFIGURATION"
+      : !this.options.admitted() ? "BLOCKED_AUTOMATION_ADMISSION" : "QUEUED";
+    return this.store.append({ team_id: candidate.team_id, owner_user_id: candidate.owner_user_id, agent_id: candidate.agent_id,
+      kind: "job", origin: "runtime", title: `对照评测：${candidate.title}`, status, asset_ids: candidate.asset_ids, parent_id: candidate.id,
+      payload: { job_type: "evaluation", source_id: candidate.id, source_hash: candidate.artifact_hash,
+        profile_hash: profile ? contentHash(profile) : null, evaluation_profile_id: binding?.id ?? profile?.evaluation_profile_id ?? null,
+        evaluation_binding_hash: binding?.fingerprint ?? null, retry_of: retry?.previous.id ?? null },
+    }, key, candidate.owner_user_id);
+  }
+
   private async drain(): Promise<void> {
     while (!this.stopping) {
-      const job = this.store.jobs(["QUEUED"], ["diagnosis", "proposal", "validation"])[0];
+      const job = this.store.jobs(["QUEUED"], ["diagnosis", "proposal", "validation", "evaluation"])[0];
       if (!job) return;
       try { await this.execute(job); }
       catch (error) {
@@ -158,6 +187,26 @@ export class EvolutionDispatcher {
     if (!profile?.enabled) { block("BLOCKED_AUTOMATION_DISABLED", "AUTOMATION_NOT_ENABLED"); return; }
     if (!this.options.admitted()) { block("BLOCKED_AUTOMATION_ADMISSION", "AUTOMATION_ADMISSION_REQUIRED"); return; }
     if (contentHash(profile) !== job.payload.profile_hash) { block("BLOCKED_PROFILE_CHANGED", "RENEW_DISPATCH_REQUIRED"); return; }
+    if (job.payload.job_type === "evaluation") {
+      if (!this.options.evaluate) { block("BLOCKED_EVALUATOR_CONFIGURATION", "EVALUATOR_UNAVAILABLE"); return; }
+      try {
+        if (!await this.options.authorize(source, profile)) { block("BLOCKED_SOURCE_PERMISSION", "SOURCE_ACCESS_REVOKED"); return; }
+        const binding = this.options.resolveEvaluation?.(profile);
+        if (!binding || binding.id !== job.payload.evaluation_profile_id || binding.fingerprint !== job.payload.evaluation_binding_hash) {
+          block("BLOCKED_EVALUATOR_CONFIGURATION", "EVALUATION_BINDING_MISSING_OR_CHANGED"); return;
+        }
+      } catch { block("BLOCKED_SOURCE_PERMISSION", "ADMISSION_CHECK_FAILED"); return; }
+      const claimed = this.store.jobTransition(job, "RUNNING");
+      try {
+        const result = await this.options.evaluate(source, claimed, profile);
+        this.store.jobTransition(claimed, "COMPLETED", { result_id: result.id, result_hash: result.artifact_hash, outcome: result.status });
+      } catch (error) {
+        const known = error instanceof EvolutionError;
+        this.store.jobTransition(claimed, known && error.code === 429 ? "BLOCKED_BUDGET" : known && [403, 409].includes(error.code) ? "BLOCKED_EVALUATION" : "INFRA_ERROR",
+          { reason: known ? error.message : "EVALUATION_RUNNER_FAILED", usage: null });
+      }
+      return;
+    }
     let binding: ReturnType<ResolveReviewBinding>;
     try {
       if (!await this.options.authorize(source, profile)) { block("BLOCKED_SOURCE_PERMISSION", "SOURCE_ACCESS_REVOKED"); return; }

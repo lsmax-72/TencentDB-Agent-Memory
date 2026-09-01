@@ -91,7 +91,7 @@ function EvolutionPageBody({ section }: { section: Section }) {
   const candidate = detail?.record;
   const retryAction = candidate?.kind === 'job' && candidate.origin === 'runtime'
     && (['INFRA_ERROR', 'RECONCILE_REQUIRED', 'NEEDS_EVIDENCE'].includes(candidate.status) || candidate.status.startsWith('BLOCKED_'))
-    ? ({ diagnosis: 'diagnosis/retry', proposal: 'generation/retry', validation: 'validation/retry' } as Record<string, string>)[String(candidate.payload.job_type)] : undefined;
+    ? ({ diagnosis: 'diagnosis/retry', proposal: 'generation/retry', validation: 'validation/retry', evaluation: 'evaluation/retry' } as Record<string, string>)[String(candidate.payload.job_type)] : undefined;
   const reviewable = candidate?.kind === 'candidate' && candidate.origin === 'runtime' && ['admin', 'reviewer'].includes(role ?? '') && ['FROZEN', 'VALIDATED', 'NEEDS_EVIDENCE'].includes(candidate.status);
   const effectProof = candidate?.payload.asset_kind === 'skill' && detail?.related?.some(record => record.kind === 'attempt' && record.origin === 'runtime'
     && record.payload.candidate_hash === candidate.artifact_hash && ['paired_evaluation', 'skill_effect_evaluation'].includes(String(record.payload.attempt_type))
@@ -134,6 +134,7 @@ function EvolutionPageBody({ section }: { section: Section }) {
         <h4>操作审计</h4><pre>{json(detail.events)}</pre>
         {candidate?.kind === 'trace' && candidate.origin === 'runtime' && candidate.payload.completion === 'host_task_complete' && <Button disabled={acting} onClick={() => void act('diagnosis/request', {})}>请求诊断</Button>}
         {candidate?.kind === 'candidate' && candidate.origin === 'runtime' && ['FROZEN', 'NEEDS_EVIDENCE', 'VALIDATION_FAILED'].includes(candidate.status) && <Button disabled={acting} onClick={() => void act('validation/request', {})}>检查内容与来源</Button>}
+        {candidate?.kind === 'candidate' && candidate.origin === 'runtime' && candidate.payload.asset_kind === 'skill' && ['FROZEN', 'NEEDS_EVIDENCE'].includes(candidate.status) && <Button disabled={acting} onClick={() => void act('evaluation/request', {})}>运行 Baseline / Candidate 对照评测</Button>}
         {retryAction && <div className="evolution-review"><p>重试会保留原失败，创建独立任务；模型重试可能再次消耗预算。</p><Button disabled={acting} onClick={() => void act(retryAction, { request_id: crypto.randomUUID() })}>创建独立重试</Button></div>}
         {reviewable && <div className="evolution-review"><label>审查说明<Input multiline value={reason} onChange={setReason} maxLength={4000} /></label>{[['NEEDS_EVIDENCE', '要求补充证据'], ['REJECTED', '拒绝'], ['REVIEW_APPROVED', '审查通过（不采用）']].map(([decision, label]) => <Button key={decision} disabled={acting || !reason.trim() || (decision === 'REVIEW_APPROVED' && !canApprove)} onClick={() => void act('review/decide', { decision, reason, revision: candidate.revision })}>{label}</Button>)}</div>}
         {adoptable && <div className="evolution-review"><Alert type="warning">采用会修改正式资产。服务端会再次核验权限、冻结 hash、基础版本和校验/评测回执；内容变化后会拒绝。</Alert><Button disabled={acting} onClick={() => void act('adoption/apply', { revision: candidate.revision })}>采用冻结版本</Button></div>}

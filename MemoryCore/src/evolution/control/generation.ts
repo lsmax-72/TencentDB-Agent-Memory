@@ -29,7 +29,8 @@ export async function generateStandaloneProposals(deps: GenerationDependencies, 
   if (source.kind !== "diagnosis" || source.origin !== "runtime" || job.payload.source_hash !== source.artifact_hash) throw new EvolutionError(409, "LIVE_DIAGNOSIS_REQUIRED");
   const kind = job.payload.stage === "skill" ? "skill" : job.payload.stage === "memory_l1" ? "memory" : job.payload.stage === "wiki" ? "wiki" : null;
   if (!kind || !profile.asset_kinds.includes(kind)) throw new EvolutionError(403, "GENERATION_ASSET_SCOPE_DENIED");
-  if (kind !== "wiki" && !binding.createProposalRunner) throw new EvolutionError(503, "PROPOSAL_RUNNER_UNAVAILABLE");
+  const createRunner = binding.createProposalRunner;
+  if (kind !== "wiki" && !createRunner) throw new EvolutionError(503, "PROPOSAL_RUNNER_UNAVAILABLE");
   const trace = source.parent_id ? store.get(source.parent_id) : null;
   if (!trace || trace.kind !== "trace" || trace.origin !== "runtime" || trace.team_id !== source.team_id || trace.agent_id !== source.agent_id || trace.owner_user_id !== source.owner_user_id) throw new EvolutionError(409, "DIAGNOSIS_TRACE_MISSING");
   const targetType = kind === "memory" ? "chat_memory" : kind === "wiki" ? "llm_wiki" : "skill";
@@ -79,7 +80,7 @@ export async function generateStandaloneProposals(deps: GenerationDependencies, 
     }, `${job.id}/memory-snapshot`, source.owner_user_id);
     const authorizeSnapshot = async () => await authorize() && (await deps.snapshotMemory!(scope)).hash === snapshot.hash;
     const allocationId = store.allocateCandidateSlots(job.id);
-    const runner = binding.createProposalRunner({ store, source, jobId: job.id, allocationId, authorize: authorizeSnapshot });
+    const runner = createRunner!({ store, source, jobId: job.id, allocationId, authorize: authorizeSnapshot });
     // Only task input is offered as an L1 fact source; an assistant answer is not factual proof.
     return proposeL1({ store, source, allocationId, targetId: target.asset_id, snapshotRecord, snapshot: new Map(snapshot.files.map(file => [file.key, Buffer.from(file.content)])), runner }, [{
       id: `${trace.id}:input`, role: "user", content: String(trace.payload.task_input ?? ""), timestamp: Date.parse(trace.created_at),
@@ -108,7 +109,7 @@ export async function generateStandaloneProposals(deps: GenerationDependencies, 
     throw new EvolutionError(403, "FORMAL_SKILL_METHOD_NOT_AVAILABLE_TO_REVIEWER");
   } });
   const allocationId = store.allocateCandidateSlots(job.id);
-  const runner = binding.createProposalRunner({ store, source, jobId: job.id, allocationId, authorize });
+  const runner = createRunner!({ store, source, jobId: job.id, allocationId, authorize });
   return generateSkillProposals({ core: scoped, runner, prefixSkillsLimit: 0 }, {
     ...ids, task_id: String(trace.payload.task_id), session_id: String(trace.payload.session_id),
     messages: [{ role: "user", content: JSON.stringify({ diagnosis: source.payload, task_input: trace.payload.task_input, tool_events: trace.payload.tool_events, final_output: trace.payload.final_output }) }],

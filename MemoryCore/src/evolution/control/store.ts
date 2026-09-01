@@ -74,7 +74,7 @@ export class EvolutionStore {
 
   jobTransition(job: EvolutionRecord, status: string, evidence: Record<string, unknown> = {}): EvolutionRecord {
     return this.transaction(() => {
-      if (job.kind !== "job" || !["diagnosis", "proposal", "proposal_model_step", "proposal_tool_event", "validation"].includes(String(job.payload.job_type))) throw new EvolutionError(409, "EXECUTION_JOB_REQUIRED");
+      if (job.kind !== "job" || !["diagnosis", "proposal", "proposal_model_step", "proposal_tool_event", "validation", "evaluation"].includes(String(job.payload.job_type))) throw new EvolutionError(409, "EXECUTION_JOB_REQUIRED");
       const result = this.transition(job.id, job.revision, [job.status], status, "evolution-dispatcher");
       this.event(job.id, "evolution-dispatcher", "JOB_EVIDENCE", evidence);
       return result;

@@ -3,6 +3,7 @@ import { SqliteMetadataStore } from "../../metadata/store/sqlite-adapter.js";
 import { freezeCandidate } from "./proposals.js";
 import { contentHash } from "./store.js";
 import { GovernedFrozenAssetWriter, type FrozenAssetHandler } from "./governed-writer.js";
+import type { MetadataService } from "../../metadata/service/metadata-service.js";
 const stores: SqliteMetadataStore[] = [];
 afterEach(() => stores.splice(0).forEach(store => store.close()));
 
@@ -28,7 +29,7 @@ async function setup() {
     payload: { attempt_type: "content_validation", result: "PASS", demonstrates_improvement: false, candidate_hash: candidate.artifact_hash } }, "proof", owner.user_id);
   const handler: FrozenAssetHandler = { layers: () => ["L1"], snapshot: vi.fn(async () => ({ base_hash: contentHash(""), base_version: null })),
     write: vi.fn(async () => {}), verify: vi.fn(async () => true) };
-  const permissions = { checkAssetPermission: vi.fn(async ({ user_id, asset_id }: { user_id: string; asset_id: string }) => ({ allowed: user_id === owner.user_id && asset_id === asset.asset_id, reason: "test" })) };
+  const permissions: Pick<MetadataService, "checkAssetPermission"> = { checkAssetPermission: vi.fn(async ({ user_id, asset_id }) => ({ allowed: user_id === owner.user_id && asset_id === asset.asset_id, reason: "test" })) };
   const writer = new GovernedFrozenAssetWriter({ store, metadata, permissions,
     canRead: async (record, userId) => userId === owner.user_id && record.team_id === team.team_id, handlers: { memory: handler } });
   return { metadata, store, owner, candidate, handler, writer };
