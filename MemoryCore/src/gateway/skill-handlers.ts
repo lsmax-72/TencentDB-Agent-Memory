@@ -110,6 +110,8 @@ export interface SkillRouterDeps {
    * 一致（详见 v2-router.ts:648 及 metadata-service.ts:ensureSkillAsset）。
    */
   getMetadataService?: (instanceId: string) => Promise<import("../metadata/service/metadata-service.js").MetadataService>;
+  /** Standalone SkillCore hooks use this async request scope to select the same metadata instance as HTTP auth. */
+  withMetadataInstance?: <T>(instanceId: string, run: () => Promise<T>) => Promise<T>;
   /**
    * `POST /v3/skill/conversation/add` + `POST /v3/skill/extract`
    * 共用的 wired 结果提供者。返回一整套 { handler, trigger, buffer, ... }：
@@ -1138,7 +1140,7 @@ export type SkillHandler = (
 ) => Promise<ApiResponseEnvelope>;
 
 export function makeSkillRouteTable(): Record<string, SkillHandler> {
-  return {
+  const routes: Record<string, SkillHandler> = {
     "/v3/skill/create": handleCreate,
     "/v3/skill/update": handleUpdate,
     "/v3/skill/patch": handlePatch,
@@ -1157,4 +1159,9 @@ export function makeSkillRouteTable(): Record<string, SkillHandler> {
     "/v3/skill/conversation/add": handleConversationAdd,
     "/v3/skill/conversation/force-archive": handleForceArchive,
   };
+  return Object.fromEntries(Object.entries(routes).map(([path, handler]) => [path,
+    (body: unknown, auth: V2AuthContext, requestId: string, deps: SkillRouterDeps) => deps.withMetadataInstance
+      ? deps.withMetadataInstance(auth.serviceId, () => handler(body, auth, requestId, deps))
+      : handler(body, auth, requestId, deps),
+  ]));
 }

@@ -106,6 +106,7 @@ import { makeChatMemoryRouteTable, clearChatMemoryContentResilient } from "./cha
 import { makeMemoryPromptRouteTable } from "./memory-prompt-handlers.js";
 import { makeMemoryGenerationLogRouteTable } from "./memory-generation-log-handlers.js";
 import { makeEvolutionRouteTable } from "./evolution-handlers.js";
+import { currentSkillMetadataInstance, withSkillMetadataInstance } from "./skill-metadata-instance-context.js";
 import { EvolutionService } from "../evolution/control/service.js";
 import { EvolutionError } from "../evolution/control/types.js";
 import { EvolutionDispatcher } from "../evolution/control/dispatcher.js";
@@ -396,14 +397,14 @@ export class TdaiGateway {
         // handleCreate 兜底之外就是这里 —— 无论谁调 SkillCore.create 都能触发。
         onSkillCreated: async ({ skill_id, team_id, agent_id, name }) => {
           if (!team_id || !agent_id) return; // 无租户上下文 → 跳过（OpenClaw local scope 等）
-          const metaSvc = await gatewayRef.ensureMetadataService(skillAssetInstanceId);
+          const metaSvc = await gatewayRef.ensureMetadataService(currentSkillMetadataInstance(skillAssetInstanceId));
           await metaSvc.ensureSkillAsset({ skill_id, team_id, agent_id, name });
         },
         // 读时自愈：fire-and-forget，异常吞掉。补历史 / 迁移 / 误删产生的孤儿 skill。
         onSkillAccessed: async (skill) => {
           if (!skill.team_id || !skill.owner_agent_id) return;
           try {
-            const svc = await gatewayRef.ensureMetadataService(skillAssetInstanceId);
+            const svc = await gatewayRef.ensureMetadataService(currentSkillMetadataInstance(skillAssetInstanceId));
             await svc.ensureSkillAsset({
               skill_id: skill.skill_id,
               team_id: skill.team_id!,
@@ -417,7 +418,7 @@ export class TdaiGateway {
         },
         // 归档级联：fire-and-forget，异常吞掉。二次 delete 会重触发钩子，最终收敛。
         onSkillArchived: async ({ skill_id, team_id }) => {
-          try { await (await gatewayRef.ensureMetadataService(skillAssetInstanceId)).deleteAssets([skill_id]); }
+          try { await (await gatewayRef.ensureMetadataService(currentSkillMetadataInstance(skillAssetInstanceId))).deleteAssets([skill_id]); }
           catch (err) { gatewayRef.logger.warn(`[skill-asset-sync] deleteAssets(archive) failed for ${skill_id}`
             + ` (team=${team_id ?? "-"}): ` + (err instanceof Error ? err.message : String(err))); }
         },
@@ -1023,6 +1024,7 @@ export class TdaiGateway {
         // 并绑定到 agent。首次写入触发 create + bind；后续同 (team, agent) 走
         // MetadataService 的进程内 LRU 短路。
         getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
+        withMetadataInstance: withSkillMetadataInstance,
       };
 
       // Skill module deps — composed alongside V2RouterDeps so v2-router.ts
