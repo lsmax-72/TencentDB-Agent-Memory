@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { MetadataStoreConfig } from "../../metadata/store/factory.js";
 import { DEFAULT_METADATA_DB_PREFIX } from "../../metadata/store/db-name.js";
 import { GovernedMutationError, type LegacyMutationGuard } from "../../core/legacy-mutation-guard.js";
+import { permitsFormalMutation } from "../../core/local-mutation-boundary.js";
 
 const identity = z.string().min(1);
 const guardProfile = z.object({ team_id: identity, agent_id: identity, enabled: z.boolean() });
@@ -22,6 +23,7 @@ export function localLegacyMutationGuard(config: MetadataStoreConfig): LegacyMut
   return async scope => {
     const known = (value?: string) => value && !["default", "__legacy__"].includes(value) ? value : undefined;
     const teamId = known(scope.teamId), agentId = known(scope.agentId);
+    if (teamId && agentId && permitsFormalMutation({ ...scope, teamId, agentId })) return;
     let entries;
     try { entries = readdirSync(base, { withFileTypes: true }); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }

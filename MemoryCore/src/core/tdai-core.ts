@@ -107,8 +107,8 @@ export interface SkillAssetHooks {
     name: string;
     description: string;
   }) => Promise<void>;
-  onSkillAccessed?: (skill: Skill) => void;
-  onSkillArchived?: (params: { skill_id: string; team_id?: string }) => void;
+  onSkillAccessed?: (skill: Skill) => void | Promise<void>;
+  onSkillArchived?: (params: { skill_id: string; team_id?: string }) => void | Promise<void>;
 }
 
 // ============================

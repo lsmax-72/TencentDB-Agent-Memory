@@ -28,6 +28,7 @@ import { SkillResourceStore, type SkillResourcePayload } from "./skill-resource-
 import type { ISkillStore, SkillSearchResult } from "./skill-store.interface.js";
 import { SkillVersioning } from "./skill-versioning.js";
 import { randomBase62 } from "../../utils/short-id.js";
+import { withLegacyMutation } from "../local-mutation-boundary.js";
 import { strToU8, zipSync } from "fflate";
 import {
   SkillPermissionError,
@@ -116,7 +117,7 @@ export interface SkillCoreOptions {
    * 与 `SkillVersioning.onSkillCreated` 成对：一个负责 v1 登记，一个
    * 负责整 skill 归档，二者共同覆盖 asset 生命周期两端。
    */
-  onSkillArchived?: (params: { skill_id: string; team_id?: string }) => void;
+  onSkillArchived?: (params: { skill_id: string; team_id?: string }) => void | Promise<void>;
   /**
    * 读路径自愈补登记钩子。
    *
@@ -130,7 +131,7 @@ export interface SkillCoreOptions {
    *  - 用途：兜底修复 asset 缺失（历史数据 / 迁移遗漏 / 人工误删），
    *    保证下次前端管控页能看到这个 skill
    */
-  onSkillAccessed?: (skill: Skill) => void;
+  onSkillAccessed?: (skill: Skill) => void | Promise<void>;
 }
 
 // 各 action 入参类型（四个 ID 全部可选）
@@ -252,10 +253,16 @@ export class SkillCore {
     if (!this.onSkillAccessed) return;
     if (this.legacyMutationGuard) {
       // A read may not recreate official asset registration for a governed Agent.
-      void this.guardHeadMutation(skill).then(() => this.onSkillAccessed?.(skill)).catch(() => {});
+      void withLegacyMutation(this.legacyMutationGuard, async () => {
+        await this.guardHeadMutation(skill); await this.onSkillAccessed?.(skill);
+      }).catch(() => {});
       return;
     }
-    try { this.onSkillAccessed(skill); } catch { /* swallow */ }
+    try { void Promise.resolve(this.onSkillAccessed(skill)).catch(() => {}); } catch { /* swallow */ }
+  }
+
+  private cleanupVersions(skillId: string): void {
+    void withLegacyMutation(this.legacyMutationGuard, () => this.versioning.cleanupExpiredVersionsForSkill(skillId, this.versionTtlSeconds)).catch(() => {});
   }
 
   // ───────────────────────────────────────────────────────────────────
@@ -263,6 +270,9 @@ export class SkillCore {
   // ───────────────────────────────────────────────────────────────────
 
   async create(input: CreateInput): Promise<Skill> {
+    return withLegacyMutation(this.legacyMutationGuard, () => this.createLocked(input));
+  }
+  private async createLocked(input: CreateInput): Promise<Skill> {
     await this.legacyMutationGuard?.({ teamId: input.team_id, agentId: input.agent_id, userId: input.user_id, layer: "skill" });
     // 1) parse + validate
     const file = this.parseAndValidate(input.content);
@@ -322,6 +332,9 @@ export class SkillCore {
   }
 
   async update(input: UpdateInput): Promise<Skill> {
+    return withLegacyMutation(this.legacyMutationGuard, () => this.updateLocked(input));
+  }
+  private async updateLocked(input: UpdateInput): Promise<Skill> {
     const head = await this.requireHead(input.skill_id, input.team_id);
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
@@ -338,9 +351,7 @@ export class SkillCore {
         name: head.name,
         description: file.frontmatter.description,
       });
-      void this.versioning.cleanupExpiredVersionsForSkill(
-        head.skill_id, this.versionTtlSeconds,
-      ).catch(() => { /* fire-and-forget */ });
+      this.cleanupVersions(head.skill_id);
       return result;
     } catch (e) {
       toCoreError(e);
@@ -348,6 +359,9 @@ export class SkillCore {
   }
 
   async patch(input: PatchInput): Promise<Skill> {
+    return withLegacyMutation(this.legacyMutationGuard, () => this.patchLocked(input));
+  }
+  private async patchLocked(input: PatchInput): Promise<Skill> {
     const head = await this.requireHead(input.skill_id, input.team_id);
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
@@ -378,9 +392,7 @@ export class SkillCore {
         name: head.name,
         description: file.frontmatter.description,
       });
-      void this.versioning.cleanupExpiredVersionsForSkill(
-        head.skill_id, this.versionTtlSeconds,
-      ).catch(() => { /* fire-and-forget */ });
+      this.cleanupVersions(head.skill_id);
       return result;
     } catch (e) {
       toCoreError(e);
@@ -388,6 +400,9 @@ export class SkillCore {
   }
 
   async delete(input: DeleteInput): Promise<{ skill_id: string; archived: boolean }> {
+    return withLegacyMutation(this.legacyMutationGuard, () => this.deleteLocked(input));
+  }
+  private async deleteLocked(input: DeleteInput): Promise<{ skill_id: string; archived: boolean }> {
     // 语义：物理真删除（2026-07 变更，原为软删）。
     // - head 不存在（skill 不存在 / 已被删）→ SKILL_NOT_FOUND
     // - 用 getHeadIncludingArchived 兼容历史遗留 archived 行：老数据里可能还有
@@ -406,7 +421,10 @@ export class SkillCore {
     // fire-and-forget：asset 状态同步失败不回滚 delete
     // deleted > 0 才触发 —— 与 store.deleteAllVersions 语义对齐
     if (deleted > 0 && this.onSkillArchived) {
-      try { this.onSkillArchived({ skill_id: input.skill_id, team_id: input.team_id }); }
+      try {
+        if (this.legacyMutationGuard) await this.onSkillArchived({ skill_id: input.skill_id, team_id: input.team_id });
+        else void Promise.resolve(this.onSkillArchived({ skill_id: input.skill_id, team_id: input.team_id })).catch(() => {});
+      }
       catch { /* swallow */ }
     }
 
@@ -415,6 +433,9 @@ export class SkillCore {
   }
 
   async writeFiles(input: WriteFilesInput): Promise<Skill> {
+    return withLegacyMutation(this.legacyMutationGuard, () => this.writeFilesLocked(input));
+  }
+  private async writeFilesLocked(input: WriteFilesInput): Promise<Skill> {
     const head = await this.requireHead(input.skill_id, input.team_id);
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
@@ -427,9 +448,7 @@ export class SkillCore {
         description: head.description,
         resourcesToWrite: input.files,
       });
-      void this.versioning.cleanupExpiredVersionsForSkill(
-        head.skill_id, this.versionTtlSeconds,
-      ).catch(() => { /* fire-and-forget */ });
+      this.cleanupVersions(head.skill_id);
       return result;
     } catch (e) {
       toCoreError(e);
@@ -437,6 +456,9 @@ export class SkillCore {
   }
 
   async removeFiles(input: RemoveFilesInput): Promise<Skill> {
+    return withLegacyMutation(this.legacyMutationGuard, () => this.removeFilesLocked(input));
+  }
+  private async removeFilesLocked(input: RemoveFilesInput): Promise<Skill> {
     const head = await this.requireHead(input.skill_id, input.team_id);
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
@@ -457,9 +479,7 @@ export class SkillCore {
         description: head.description,
         resourcesToRemove: toRemove,
       });
-      void this.versioning.cleanupExpiredVersionsForSkill(
-        head.skill_id, this.versionTtlSeconds,
-      ).catch(() => { /* fire-and-forget */ });
+      this.cleanupVersions(head.skill_id);
       return result;
     } catch (e) {
       toCoreError(e);

@@ -5,6 +5,7 @@ import { EvolutionStore } from "./store.js";
 import { EvolutionError, type EvolutionRecord, type EvolutionProfile } from "./types.js";
 import { redactEvidence } from "./evidence.js";
 import { EvolutionDispatcher } from "./dispatcher.js";
+import { withLocalMutationBoundary } from "../../core/local-mutation-boundary.js";
 
 const id = z.string().min(1).max(180).regex(/^[\w.:-]+$/);
 const scopeSchema = z.object({ team_id: id });
@@ -146,7 +147,15 @@ export class EvolutionService {
       }
       if (input.enabled && (!input.daily_tokens || !input.daily_model_calls || !input.daily_candidates || !input.asset_kinds.length)) throw new EvolutionError(400, "BUDGET_AND_SCOPE_REQUIRED");
       if (input.enabled && !this.automationReady) throw new EvolutionError(409, "AUTOMATION_ADMISSION_REQUIRED");
-      return this.store.saveProfile({ ...input, authorized_by: actor.id }, revision);
+      return withLocalMutationBoundary(async () => {
+        // A request queued behind an old write may have lost its permissions while waiting.
+        const refreshed = await this.actor(userKey, team_id);
+        if (refreshed.role !== "admin") throw new EvolutionError(403, "ADMIN_REQUIRED");
+        for (const asset_id of input.asset_ids) {
+          if (!(await this.permissions.checkAssetPermission({ asset_id, user_id: actor.id, action: "write" })).allowed) throw new EvolutionError(403, "TARGET_WRITE_DENIED");
+        }
+        return this.store.saveProfile({ ...input, authorized_by: actor.id }, revision);
+      });
     }
     if (action === "task/complete") {
       const input = scopeSchema.extend({

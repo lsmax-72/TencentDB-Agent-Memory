@@ -16,6 +16,7 @@ import path from "node:path";
 import type { MemoryTdaiConfig } from "../config.js";
 import { MemoryPipelineManager } from "./pipeline-manager.js";
 import type { L2Runner, L3Runner } from "./pipeline-manager.js";
+import { withLegacyMutation } from "../core/local-mutation-boundary.js";
 import { SessionFilter } from "./session-filter.js";
 import { extractL1Memories } from "../core/record/l1-extractor.js";
 import { readConversationMessagesGroupedBySessionId } from "../core/conversation/l0-recorder.js";
@@ -404,7 +405,7 @@ export function createL1Runner(opts: {
   const { pluginDataDir, cfg, openclawConfig, vectorStore, embeddingService, logger, getInstanceId, llmRunner, storage, checkpointLock } = opts;
   const config = openclawConfig as Record<string, unknown> | undefined;
 
-  return async ({ sessionKey }) => {
+  const run = async ({ sessionKey }: { sessionKey: string }) => {
     if (!config && !llmRunner) {
       logger.debug?.(`${TAG} [l1] No OpenClaw config and no LLM runner, skipping L1 extraction`);
       return { processedCount: 0, storedCount: 0, hasMore: false, hasFullBacklog: false, profileScopes: [] };
@@ -659,6 +660,7 @@ export function createL1Runner(opts: {
       throw err;
     }
   };
+  return params => withLegacyMutation(opts.legacyMutationGuard, () => run(params));
 }
 
 // ============================
@@ -714,7 +716,7 @@ export function createL2Runner(opts: {
   const { pluginDataDir, cfg, openclawConfig, vectorStore, logger, instanceId, llmRunner, storage, checkpointLock } = opts;
   let profileBaseline = new Map<string, { version: number; contentMd5: string; createdAtMs: number }>();
 
-  return async (sessionKey: string, cursor?: string) => {
+  const run: L2Runner = async (sessionKey: string, cursor?: string) => {
     const profileFilter = parseProfileL2Key(sessionKey);
     logger.debug?.(
       `${TAG} [L2] session=${sessionKey}, profile=${profileFilter ? buildIsolationScope(profileFilter) : "(legacy-session)"}, updatedAfter=${cursor ?? "(full)"}`,
@@ -929,6 +931,7 @@ export function createL2Runner(opts: {
     }
     if (anyEmptyExtraction) return { skipped: true };
   };
+  return (sessionKey, cursor) => withLegacyMutation(opts.legacyMutationGuard, () => run(sessionKey, cursor));
 }
 
 // ============================
@@ -956,7 +959,7 @@ export function createL3Runner(opts: {
 }): L3Runner {
   const { pluginDataDir, cfg, openclawConfig, vectorStore, logger, instanceId, llmRunner, storage } = opts;
 
-  return async () => {
+  const run: L3Runner = async () => {
     const scopes = await discoverProfileScopes(pluginDataDir, storage, logger);
     const executionScopes = scopes.length > 0 ? scopes : [DEFAULT_PROFILE_SCOPE];
     let generatedAny = false;
@@ -1105,6 +1108,7 @@ export function createL3Runner(opts: {
       logger.debug?.(`${TAG} [L3] No scoped persona generated`);
     }
   };
+  return () => withLegacyMutation(opts.legacyMutationGuard, run);
 }
 
 // ============================

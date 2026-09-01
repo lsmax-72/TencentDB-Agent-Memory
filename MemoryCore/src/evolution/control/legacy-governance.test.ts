@@ -11,6 +11,8 @@ import { createL1Runner, createL2Runner, createL3Runner } from "../../utils/pipe
 import { parseConfig } from "../../config.js";
 import { buildProfileIsolationScope } from "../../core/profile/profile-sync.js";
 import { handleV2Route } from "../../gateway/v2-router.js";
+import { withFormalMutationPermit } from "../../core/local-mutation-boundary.js";
+import { handleChatMemoryClear } from "../../gateway/chat-memory-handlers.js";
 
 const roots: string[] = [];
 const databases: DatabaseSync[] = [];
@@ -46,6 +48,15 @@ describe("standalone legacy governance follows real Hub instance", () => {
     await expect(guard({ ...scope, agentId: undefined })).rejects.toThrow("EVOLUTION_TASK_COMPLETE_REQUIRED");
     const disabled = setup(false);
     await expect(disabled.guard(disabled.scope)).resolves.toBeUndefined();
+  });
+  it("allows only an exact, short-lived formal adoption permit", async () => {
+    const { guard, scope } = setup();
+    const permit = { operationId: "operation", candidateHash: "a".repeat(64), teamId: "team", agentId: "agent", layers: ["L1"] as const };
+    await expect(withFormalMutationPermit(permit, () => guard(scope))).resolves.toBeUndefined();
+    await expect(withFormalMutationPermit(permit, () => guard({ ...scope, layer: "L2" }))).rejects.toThrow("EVOLUTION_TASK_COMPLETE_REQUIRED");
+    await expect(withFormalMutationPermit(permit, () => guard({ ...scope, agentId: "other" }))).resolves.toBeUndefined();
+    await expect(guard(scope)).rejects.toThrow("EVOLUTION_TASK_COMPLETE_REQUIRED");
+    await expect(withFormalMutationPermit({ ...permit, candidateHash: "bad" }, () => guard(scope))).rejects.toThrow("FORMAL_MUTATION_PERMIT_INVALID");
   });
   it("fails closed on linked catalogs instead of interpreting them as disabled", async () => {
     const { root, guard, scope } = setup(false);
@@ -131,5 +142,15 @@ describe("legacy HTTP Memory writes are governed too", () => {
       }
     }
     expect(write).not.toHaveBeenCalled(); expect(embed).not.toHaveBeenCalled();
+  });
+  it("preflights an entire chat-memory clear batch before the first destructive call", async () => {
+    const { guard } = setup(); const clear = vi.fn();
+    const result = handleChatMemoryClear({ memory_ids: ["first", "second"] }, { serviceId: "hub-instance" } as never, "request", {
+      legacyMutationGuard: guard, getStore: () => ({ clearMemoryContent: clear }), getStorage: () => ({}),
+      getMetadataService: async () => ({ resolveChatMemoryTargets: async () => [
+        { asset_id: "first", team_id: "team", agent_id: "agent" }, { asset_id: "second", team_id: "team", agent_id: "other" },
+      ] }), logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    } as never);
+    await expect(result).rejects.toThrow("EVOLUTION_TASK_COMPLETE_REQUIRED"); expect(clear).not.toHaveBeenCalled();
   });
 });

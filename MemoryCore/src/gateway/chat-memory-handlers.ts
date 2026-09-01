@@ -94,6 +94,7 @@ export interface ChatMemoryClearData {
 // ═════════════════════════════════════════════════════════════
 
 export interface ChatMemoryRouterDeps {
+  legacyMutationGuard?: import("../core/legacy-mutation-guard.js").LegacyMutationGuard;
   getStore: () => IMemoryStore | undefined;
   getStorage: () => StorageAdapter | undefined;
   getMetadataService?: (instanceId: string) => Promise<MetadataService>;
@@ -398,6 +399,8 @@ async function handleChatMemoryClear(
 
   // ── 逐个清空内容。校验已全部通过，这里的失败只可能是存储/VDB 故障，
   //    所以带整体重试（清空幂等，重跑安全）。 ──
+  // Preflight the ENTIRE batch before deleting any content; mixed scopes cannot partially clear.
+  for (const target of targets) await deps.legacyMutationGuard?.({ teamId: target.team_id, agentId: target.agent_id, layer: "L1" });
   const items: ChatMemoryClearItem[] = [];
   for (const target of targets) {
     try {

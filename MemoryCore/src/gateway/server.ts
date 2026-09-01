@@ -114,6 +114,7 @@ import { localLegacyMutationGuard } from "../evolution/control/legacy-governance
 import { generateStandaloneProposals } from "../evolution/control/generation.js";
 import { localMemorySnapshot } from "../evolution/control/memory-snapshot.js";
 import { validateFrozenContent } from "../evolution/control/validation.js";
+import { withLegacyMutation } from "../core/local-mutation-boundary.js";
 import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
 import type { OffloadV2Deps } from "../offload_server/router.js";
@@ -392,35 +393,26 @@ export class TdaiGateway {
           await metaSvc.ensureSkillAsset({ skill_id, team_id, agent_id, name });
         },
         // 读时自愈：fire-and-forget，异常吞掉。补历史 / 迁移 / 误删产生的孤儿 skill。
-        onSkillAccessed: (skill) => {
+        onSkillAccessed: async (skill) => {
           if (!skill.team_id || !skill.owner_agent_id) return;
-          gatewayRef
-            .ensureMetadataService(skillAssetInstanceId)
-            .then((svc) => svc.ensureSkillAsset({
+          try {
+            const svc = await gatewayRef.ensureMetadataService(skillAssetInstanceId);
+            await svc.ensureSkillAsset({
               skill_id: skill.skill_id,
               team_id: skill.team_id!,
               agent_id: skill.owner_agent_id!,
               name: skill.name,
-            }))
-            .catch((err: unknown) => {
-              gatewayRef.logger.warn(
-                `[skill-asset-sync] ensureSkillAsset(access) failed for ${skill.skill_id}: `
-                  + (err instanceof Error ? err.message : String(err)),
-              );
             });
+          } catch (err) {
+            gatewayRef.logger.warn(`[skill-asset-sync] ensureSkillAsset(access) failed for ${skill.skill_id}: `
+              + (err instanceof Error ? err.message : String(err)));
+          }
         },
         // 归档级联：fire-and-forget，异常吞掉。二次 delete 会重触发钩子，最终收敛。
-        onSkillArchived: ({ skill_id, team_id }) => {
-          gatewayRef
-            .ensureMetadataService(skillAssetInstanceId)
-            .then((svc) => svc.deleteAssets([skill_id]))
-            .catch((err: unknown) => {
-              gatewayRef.logger.warn(
-                `[skill-asset-sync] deleteAssets(archive) failed for ${skill_id}`
-                  + ` (team=${team_id ?? "-"}): `
-                  + (err instanceof Error ? err.message : String(err)),
-              );
-            });
+        onSkillArchived: async ({ skill_id, team_id }) => {
+          try { await (await gatewayRef.ensureMetadataService(skillAssetInstanceId)).deleteAssets([skill_id]); }
+          catch (err) { gatewayRef.logger.warn(`[skill-asset-sync] deleteAssets(archive) failed for ${skill_id}`
+            + ` (team=${team_id ?? "-"}): ` + (err instanceof Error ? err.message : String(err))); }
         },
       },
     });
@@ -520,9 +512,10 @@ export class TdaiGateway {
       // 必须按 instanceId 解析 store/storage：service 模式下每个实例有独立的
       // TCVDB + COS，用全局单例会清到错误的库。
       rawSvc.setChatMemoryContentCleaner(async ({ teamId, agentId }) => {
-        const { store: memoryStore, storage } = await this.resolveMemoryContentTargets(instanceId);
-        await clearChatMemoryContentResilient({
-          store: memoryStore, storage, teamId, agentId, logger: this.logger,
+        await withLegacyMutation(this.legacyMutationGuard, async () => {
+          await this.legacyMutationGuard?.({ teamId, agentId, layer: "L1" });
+          const { store: memoryStore, storage } = await this.resolveMemoryContentTargets(instanceId);
+          await clearChatMemoryContentResilient({ store: memoryStore, storage, teamId, agentId, logger: this.logger });
         });
       });
 

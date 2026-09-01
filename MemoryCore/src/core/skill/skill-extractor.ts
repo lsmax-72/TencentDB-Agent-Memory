@@ -11,6 +11,7 @@
  */
 
 import type { ExtractMessage } from "./types.js";
+import { withLegacyMutation } from "../local-mutation-boundary.js";
 import type { SkillCore } from "./skill-core.js";
 import {
   createSkillTools,
@@ -138,6 +139,9 @@ export class SkillExtractor {
   }
 
   async extract(input: ExtractInput): Promise<ExtractResult> {
+    return withLegacyMutation(this.legacyMutationGuard, () => this.extractLocked(input));
+  }
+  private async extractLocked(input: ExtractInput): Promise<ExtractResult> {
     await this.legacyMutationGuard?.({ teamId: input.team_id, agentId: input.agent_id, userId: input.user_id, layer: "skill_review" });
     const { messages } = input;
     if (!Array.isArray(messages) || messages.length === 0) {

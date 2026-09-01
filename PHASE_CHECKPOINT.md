@@ -262,3 +262,13 @@
 - UI 仍待登录许可；v4/研究协议/正式服务不变，用户 deployment 修改保留。
 - 已验证代码本地 commit：`e9db7389ad3058270874af23007fd969ddc5217c`。报告与操作说明随后单独提交；未 push。
 - 一次性 `tencentdb` heartbeat 已于本轮检查/续跑后删除（工具确认 deleted），不创建后续调度；待权限项不会被自动反复尝试。
+
+## 2026-09-01 MemoryHub 自进化治理并发边界
+
+- 分支仍为 `feat/evolution-candidate-refinement`；本节基线 HEAD `f96ced7`。用户 deployment 脚本改动仍排除在本轮提交之外。
+- standalone Core 的原生 Skill、Skill Review、L1/L2/L3、Memory 删除及元数据归档写路径已接入同一进程内的可重入 mutation boundary；开启治理配置会等待已开始的旧写入结束，之后的新旧直写由 profile 拦截。
+- 正式采用使用与持久化 operation id、冻结 candidate hash、Team/Agent/layer 精确匹配的短期 permit；permit 只在共享边界内生效，不能关闭治理或扩大作用域。
+- 批量清空在首个删除前预检全部目标；异步版本清理和 Skill 资产钩子纳入同一 lease，避免配置切换后尾部任务越过治理。
+- 限制：这是当前本地 standalone 的单进程边界，不是云端/多副本分布式锁；不能据此宣称生产部署完成。
+- 验证：MemoryCore 28 files / 146 tests PASS，plugin build PASS，新增并发与正式 permit 定向测试 15 PASS；`git diff --check` PASS。
+- 下一自主动作：小步提交本边界；继续实现三类冻结候选的生产采用 port、运行时授权/基线/hash/校验证据核验、幂等写入与只读恢复，然后再做独立实例和 8125 主 Hub 验收。自动化仍默认关闭；没有调用 vLLM、没有采用正式资产。

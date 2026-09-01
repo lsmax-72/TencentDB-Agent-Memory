@@ -20,6 +20,7 @@ import { classifyError } from "./error-handler.js";
 import type { IMemoryStore, L0Record, ProfileSyncRecord } from "../core/store/types.js";
 import type { EmbeddingService } from "../core/store/embedding.js";
 import { createScopedStorageAdapter, type StorageAdapter } from "../core/storage/adapter.js";
+import { withLegacyMutation } from "../core/local-mutation-boundary.js";
 import { StoragePaths } from "../core/storage/types.js";
 import type { Logger } from "../core/types.js";
 import type { IStateBackend } from "../core/state/types.js";
@@ -632,9 +633,9 @@ export async function handleV2Route(
     };
 
     const handlerStart = Date.now();
-    const envelope = handler
-      ? await handler(body, auth, requestId, depsWithIsolation)
-      : await extra!(body, auth, requestId, depsWithIsolation as unknown);
+    const invokeHandler = () => handler ? handler(body, auth, requestId, depsWithIsolation) : extra!(body, auth, requestId, depsWithIsolation as unknown);
+    const mutatesGovernedMemory = /\/(?:atomic\/(?:update|delete)|scenario\/(?:write|rm)|core\/write|chat-memory\/clear)$/.test(pathname);
+    const envelope = mutatesGovernedMemory ? await withLegacyMutation(depsWithIsolation.legacyMutationGuard, invokeHandler) : await invokeHandler();
     perfMark("handler", `dur=${Date.now() - handlerStart}ms envelope_code=${envelope.code}`);
     const httpStatus = envelope.code === 0 ? 200 : envelope.code >= 400 && envelope.code < 600 ? envelope.code : 200;
     const sendStart = Date.now();
