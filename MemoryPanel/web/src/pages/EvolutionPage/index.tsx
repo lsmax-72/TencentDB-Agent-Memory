@@ -19,7 +19,7 @@ export const EVOLUTION_SECTIONS = {
 } as const;
 type Section = keyof typeof EVOLUTION_SECTIONS;
 const origins = { runtime: '运行记录', historical: '历史证据 · 只读', offline_test: '离线测试 · 非真实运行' };
-const statusNames: Record<string, string> = { FROZEN: '已冻结', VALIDATED: '内容校验通过 · 待审查', VALIDATION_FAILED: '内容校验失败', STALE: '已过期 · 需新版本', DUPLICATE_NO_CHANGE: '重复新增已跳过', SNAPSHOT: '来源快照', QUEUED: '等待执行', RUNNING: '执行中', COMPLETED: '执行完成', RECONCILE_REQUIRED: '中断待核对', FAIL: '失败', PASS: '通过', INFRA_ERROR: '基础设施异常', RECORDED: '已记录', NEEDS_EVIDENCE: '待补证据', REVIEW_APPROVED: '审查通过 · 未采用', REJECTED: '已拒绝', APPLIED: '已采用', BLOCKED_AUTOMATION_DISABLED: '自动化未启用', BLOCKED_EXECUTOR_UNAVAILABLE: '执行器不可用', BLOCKED_BUDGET: '预算不足', BLOCKED_GENERATION: '生成阻塞', BLOCKED_MODEL_CONFIGURATION: '复盘模型未配置', BLOCKED_SOURCE_PERMISSION: '来源权限不足' };
+const statusNames: Record<string, string> = { FROZEN: '已冻结', VALIDATED: '内容校验通过 · 待审查', VALIDATION_FAILED: '内容校验失败', STALE: '已过期 · 需新版本', DUPLICATE_NO_CHANGE: '重复新增已跳过', SNAPSHOT: '来源快照', QUEUED: '等待执行', RUNNING: '执行中', COMPLETED: '执行完成', RECONCILE_REQUIRED: '中断待核对', FAIL: '失败', PASS: '通过', INFRA_ERROR: '基础设施异常', RECORDED: '已记录', NEEDS_EVIDENCE: '待补证据', REVIEW_APPROVED: '审查通过 · 未采用', AUTO_AUTHORIZED: '已按限定授权通过 · 未采用', APPLYING: '采用中', REJECTED: '已拒绝', APPLIED: '已采用', BLOCKED_AUTOMATION_DISABLED: '自动化未启用', BLOCKED_EXECUTOR_UNAVAILABLE: '执行器不可用', BLOCKED_BUDGET: '预算不足', BLOCKED_GENERATION: '生成阻塞', BLOCKED_MODEL_CONFIGURATION: '复盘模型未配置', BLOCKED_SOURCE_PERMISSION: '来源权限不足' };
 function statusText(status: string) { return statusNames[status] ?? status; }
 function recordStatus(record: EvolutionRecord) { return record.payload.attempt_type === 'content_validation' && record.status === 'PASS' ? '内容合格 · 非效果证明' : statusText(record.status); }
 function recordOrigin(record: EvolutionRecord) { return record.payload.evidence_mode === 'offline_test' ? origins.offline_test : origins[record.origin]; }
@@ -60,7 +60,7 @@ function EvolutionPageBody({ section }: { section: Section }) {
     try {
       const [summary, list] = await Promise.all([
         evolutionPost<EvolutionOverview>('overview', { team_id: activeTeamId }),
-        evolutionPost<{ items: EvolutionRecord[]; total: number }>('records/list', { team_id: activeTeamId, kind: listKind, ...(filter ? { asset_kind: filter } : {}), ...(section === 'reviews' && subview !== 'history' ? { statuses: ['FROZEN', 'VALIDATED', 'NEEDS_EVIDENCE'], origin: 'runtime' } : {}), offset: page * 30, limit: 30 }),
+        evolutionPost<{ items: EvolutionRecord[]; total: number }>('records/list', { team_id: activeTeamId, kind: listKind, ...(filter ? { asset_kind: filter } : {}), ...(section === 'reviews' && subview !== 'history' ? { statuses: ['FROZEN', 'VALIDATED', 'NEEDS_EVIDENCE', 'REVIEW_APPROVED', 'AUTO_AUTHORIZED', 'APPLYING'], origin: 'runtime' } : {}), offset: page * 30, limit: 30 }),
       ]);
       if (generation.current !== current) return;
       setOverview(summary); setRecords(list.items); setTotal(list.total);
@@ -93,6 +93,13 @@ function EvolutionPageBody({ section }: { section: Section }) {
     && (['INFRA_ERROR', 'RECONCILE_REQUIRED', 'NEEDS_EVIDENCE'].includes(candidate.status) || candidate.status.startsWith('BLOCKED_'))
     ? ({ diagnosis: 'diagnosis/retry', proposal: 'generation/retry', validation: 'validation/retry' } as Record<string, string>)[String(candidate.payload.job_type)] : undefined;
   const reviewable = candidate?.kind === 'candidate' && candidate.origin === 'runtime' && ['admin', 'reviewer'].includes(role ?? '') && ['FROZEN', 'VALIDATED', 'NEEDS_EVIDENCE'].includes(candidate.status);
+  const effectProof = candidate?.payload.asset_kind === 'skill' && detail?.related?.some(record => record.kind === 'attempt' && record.origin === 'runtime'
+    && record.payload.candidate_hash === candidate.artifact_hash && ['paired_evaluation', 'skill_effect_evaluation'].includes(String(record.payload.attempt_type))
+    && record.status === 'PASS' && (record.payload.gate_result === 'PASS' || (record.payload.gate as Record<string, unknown> | undefined)?.result === 'PASS')
+    && Number(record.payload.newly_fixed) >= 1 && Number(record.payload.newly_broken) === 0);
+  const canApprove = candidate?.status === 'VALIDATED' || (candidate?.status === 'NEEDS_EVIDENCE' && effectProof);
+  const adoptable = candidate?.kind === 'candidate' && candidate.origin === 'runtime' && role === 'admin' && ['REVIEW_APPROVED', 'AUTO_AUTHORIZED'].includes(candidate.status);
+  const reconcilable = candidate?.kind === 'adoption' && candidate.origin === 'runtime' && role === 'admin' && candidate.status === 'RECONCILE_REQUIRED';
 
   return <div className="evolution-page">
     <header className="evolution-header"><div><h2>{info.title}</h2><p>{info.description}</p></div><Button onClick={() => void load()} loading={loading}>刷新</Button></header>
@@ -128,7 +135,9 @@ function EvolutionPageBody({ section }: { section: Section }) {
         {candidate?.kind === 'trace' && candidate.origin === 'runtime' && candidate.payload.completion === 'host_task_complete' && <Button disabled={acting} onClick={() => void act('diagnosis/request', {})}>请求诊断</Button>}
         {candidate?.kind === 'candidate' && candidate.origin === 'runtime' && ['FROZEN', 'NEEDS_EVIDENCE', 'VALIDATION_FAILED'].includes(candidate.status) && <Button disabled={acting} onClick={() => void act('validation/request', {})}>检查内容与来源</Button>}
         {retryAction && <div className="evolution-review"><p>重试会保留原失败，创建独立任务；模型重试可能再次消耗预算。</p><Button disabled={acting} onClick={() => void act(retryAction, { request_id: crypto.randomUUID() })}>创建独立重试</Button></div>}
-        {reviewable && <div className="evolution-review"><label>审查说明<Input multiline value={reason} onChange={setReason} maxLength={4000} /></label>{[['NEEDS_EVIDENCE', '要求补充证据'], ['REJECTED', '拒绝'], ['REVIEW_APPROVED', '审查通过（不采用）']].map(([decision, label]) => <Button key={decision} disabled={acting || !reason.trim() || (decision === 'REVIEW_APPROVED' && candidate.status !== 'VALIDATED')} onClick={() => void act('review/decide', { decision, reason, revision: candidate.revision })}>{label}</Button>)}</div>}
+        {reviewable && <div className="evolution-review"><label>审查说明<Input multiline value={reason} onChange={setReason} maxLength={4000} /></label>{[['NEEDS_EVIDENCE', '要求补充证据'], ['REJECTED', '拒绝'], ['REVIEW_APPROVED', '审查通过（不采用）']].map(([decision, label]) => <Button key={decision} disabled={acting || !reason.trim() || (decision === 'REVIEW_APPROVED' && !canApprove)} onClick={() => void act('review/decide', { decision, reason, revision: candidate.revision })}>{label}</Button>)}</div>}
+        {adoptable && <div className="evolution-review"><Alert type="warning">采用会修改正式资产。服务端会再次核验权限、冻结 hash、基础版本和校验/评测回执；内容变化后会拒绝。</Alert><Button disabled={acting} onClick={() => void act('adoption/apply', { revision: candidate.revision })}>采用冻结版本</Button></div>}
+        {reconcilable && <div className="evolution-review"><p>上次写入结果未知。这里只做只读核对，不会再次写入或创建重复版本。</p><Button disabled={acting} onClick={() => void act('adoption/reconcile', {})}>核对采用结果</Button></div>}
       </section>}
     </>}
   </div>;

@@ -6,7 +6,7 @@ export interface FormalMutationPermit {
   candidateHash: string;
   teamId: string;
   agentId: string;
-  layers: ReadonlyArray<"skill" | "L1" | "L2" | "L3">;
+  layers: ReadonlyArray<"skill" | "L1" | "L2" | "L3" | "wiki">;
 }
 interface Lease { active: boolean; children: Set<Promise<unknown>>; permit?: FormalMutationPermit }
 const context = new AsyncLocalStorage<Lease>();

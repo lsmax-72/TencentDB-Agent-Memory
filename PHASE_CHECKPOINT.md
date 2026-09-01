@@ -1,5 +1,15 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-01 09:48 续跑：三类冻结资产的受治理采用
+
+- 从 `6ac85a3` 继续。Core 已接入统一受治理 writer：每次采用重新核验管理员/授权人、Team/Agent/目标写权限、递归来源读取权限、profile 范围、冻结 hash 与目标 base version；写入仅在全局 mutation boundary 内取得正式 permit，避免与旧 Skill/Memory 写入口并发穿透。
+- Memory L1 只追加确定记录；L2/L3 按冻结文件 bundle 精确写入并核对。Skill 按冻结 Candidate artifact 精确 create/update。Wiki 通过固定私有 Knowledge bridge 做 snapshot/validate/apply/verify，浏览器不能传任意 URL/路径/命令；采用阶段不再次调用模型生成内容。
+- 采用操作先持久化意图，写后必须 readback 核验才显示 APPLIED；重启 reconciliation 只核对，不盲目重复写。Skill 必须关联原 paired effect PASS（至少一项 newly_fixed、零 newly_broken）；Memory/Wiki 内容校验不冒充效果提升。
+- 新增极窄 Memory 自动采用资格：只允许 owner task input 中逐字出现、长度不超过300、类型为 persona/work_fact、无指令/凭证特征的 L1 事实。资格由服务端规则决定，不使用模型置信度；auto_memory/profile/grant/权限任一不满足即转人工或阻止。自动采用失败不回退旧正式写。
+- 原生 TencentDB/Tea 页面增加采用与只读恢复核对动作，仍未部署8125。自动化 admission 默认关闭；Skill 不自动采用，Wiki 语义变化仍人工。
+- 验证：Core **155 tests / 32 files PASS**、plugin build PASS；Knowledge **9 tests / 4 files PASS**、typecheck/build PASS；Panel 3 tests/build、web build PASS（保留既有依赖和 bundle 警告）。
+- **仍未完成**：Wiki 从真实来源到隔离候选的运行生成 bridge、受限 Skill 评测执行任务、完整三类生成/评测/审查/采用隔离 E2E、主8125备份更新与浏览器验收。下一步继续，不把本节点当完整交付。
+
 ## 2026-09-01 03:19 续跑：来源快照、内容校验与 Hub 操作
 
 - 从 `829effc` 继续。Standalone Memory快照读取真实Team/Agent/user的L1及对应profile目录，不回退global；拒绝链接、错误scope、过大内容。L1生成前持久化源快照，模型前后复查变化。

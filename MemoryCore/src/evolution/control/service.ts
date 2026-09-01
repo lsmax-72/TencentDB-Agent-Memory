@@ -6,6 +6,8 @@ import { EvolutionError, type EvolutionRecord, type EvolutionProfile } from "./t
 import { redactEvidence } from "./evidence.js";
 import { EvolutionDispatcher } from "./dispatcher.js";
 import { withLocalMutationBoundary } from "../../core/local-mutation-boundary.js";
+import { applyFrozenCandidate, reconcileApplication, type FrozenAssetWriter } from "./adoption.js";
+import { adoptionProof } from "./adoption-proof.js";
 
 const id = z.string().min(1).max(180).regex(/^[\w.:-]+$/);
 const scopeSchema = z.object({ team_id: id });
@@ -20,7 +22,7 @@ const profileSchema = scopeSchema.extend({
   auto_memory: z.boolean(), auto_wiki_maintenance: z.boolean(),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "review/decide"] as const;
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
 
 export class EvolutionService {
   readonly dispatcher: EvolutionDispatcher;
@@ -31,6 +33,7 @@ export class EvolutionService {
     /** Set only after governed legacy writers, executor and adoption admission pass. */
     private readonly automationReady = false,
     dispatcher?: EvolutionDispatcher,
+    private readonly adoptionWriter?: FrozenAssetWriter,
   ) {
     this.dispatcher = dispatcher ?? new EvolutionDispatcher(store, {
       admitted: () => this.automationReady, resolveModel: () => null,
@@ -147,6 +150,7 @@ export class EvolutionService {
       }
       if (input.enabled && (!input.daily_tokens || !input.daily_model_calls || !input.daily_candidates || !input.asset_kinds.length)) throw new EvolutionError(400, "BUDGET_AND_SCOPE_REQUIRED");
       if (input.enabled && !this.automationReady) throw new EvolutionError(409, "AUTOMATION_ADMISSION_REQUIRED");
+      if (input.enabled && (!this.adoptionWriter || input.asset_kinds.some(assetKind => !this.adoptionWriter?.supports?.(assetKind)))) throw new EvolutionError(409, "ASSET_ADOPTION_PATH_UNAVAILABLE");
       return withLocalMutationBoundary(async () => {
         // A request queued behind an old write may have lost its permissions while waiting.
         const refreshed = await this.actor(userKey, team_id);
@@ -224,8 +228,26 @@ export class EvolutionService {
       const candidate = this.store.get(input.id);
       if (!candidate || candidate.team_id !== team_id || !await this.mayRead(candidate, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
       if (candidate.kind !== "candidate" || candidate.origin !== "runtime") throw new EvolutionError(409, "LIVE_CANDIDATE_REQUIRED");
-      if (input.decision === "REVIEW_APPROVED" && candidate.status !== "VALIDATED") throw new EvolutionError(409, "VALIDATION_REQUIRED");
+      if (input.decision === "REVIEW_APPROVED") {
+        const proof = adoptionProof(this.store, candidate);
+        if (!proof || !await this.mayRead(proof, actor.id)) throw new EvolutionError(409, candidate.payload.asset_kind === "skill" ? "EFFECT_EVALUATION_REQUIRED" : "VALIDATION_REQUIRED");
+      }
       return this.store.review(candidate.id, input.revision, input.decision, input.reason, actor.id);
+    }
+    if (action === "adoption/apply") {
+      if (actor.role !== "admin") throw new EvolutionError(403, "ADMIN_REQUIRED");
+      if (!this.adoptionWriter) throw new EvolutionError(503, "ADOPTION_UNAVAILABLE");
+      const input = recordSchema.extend({ revision: z.number().int().positive() }).strict().parse(body);
+      const candidate = this.store.get(input.id);
+      if (!candidate || candidate.team_id !== team_id || !await this.mayRead(candidate, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      return applyFrozenCandidate(this.store, candidate.id, input.revision, actor.id, this.adoptionWriter);
+    }
+    if (action === "adoption/reconcile") {
+      if (actor.role !== "admin") throw new EvolutionError(403, "ADMIN_REQUIRED");
+      if (!this.adoptionWriter) throw new EvolutionError(503, "ADOPTION_UNAVAILABLE");
+      const input = recordSchema.strict().parse(body), operation = this.store.get(input.id);
+      if (!operation || operation.team_id !== team_id || operation.kind !== "adoption" || !await this.mayRead(operation, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      return reconcileApplication(this.store, operation.id, actor.id, this.adoptionWriter);
     }
     throw new EvolutionError(404, "UNKNOWN_EVOLUTION_ACTION");
   }

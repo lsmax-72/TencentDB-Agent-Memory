@@ -87,7 +87,7 @@ function durableWrite(file: string, bytes: Buffer): void {
 
 export interface WikiApplyJournal { proposal: FrozenWikiProposal; status: "APPLYING" | "APPLIED" | "RECOVERY_REQUIRED" | "ROLLED_BACK" }
 
-function validateFrozen(root: string, proposal: FrozenWikiProposal): void {
+export function validateFrozenWikiProposal(root: string, proposal: FrozenWikiProposal): void {
   const { hash: expected, ...payload } = proposal;
   if (proposal.revision !== 1 || hash(payload) !== expected || hash(proposal.base.files) !== proposal.base.hash) throw new Error("WIKI_ARTIFACT_MISMATCH");
   if (!proposal.files.length || !proposal.source_paths.length || proposal.source_paths.some(path => !path.startsWith("raw/sources/") || !Object.hasOwn(proposal.base.files, path))) throw new Error("WIKI_SOURCE_REQUIRED");
@@ -106,7 +106,7 @@ function validateFrozen(root: string, proposal: FrozenWikiProposal): void {
 
 /** Caller must hold the Wiki service's exclusive mutation boundary across this operation. */
 export async function applyWikiProposal(root: string, proposal: FrozenWikiProposal, journalPath: string, syncAndVerifyIndex: () => Promise<void>): Promise<void> {
-  validateFrozen(root, proposal);
+  validateFrozenWikiProposal(root, proposal);
   if (existsSync(journalPath)) throw new Error("WIKI_APPLY_ALREADY_STARTED");
   if (snapshotWiki(root).hash !== proposal.base.hash) throw new Error("WIKI_BASE_STALE");
   const journal: WikiApplyJournal = { proposal, status: "APPLYING" };
@@ -128,7 +128,7 @@ export async function applyWikiProposal(root: string, proposal: FrozenWikiPropos
 export async function recoverWikiApply(root: string, journalPath: string, syncAndVerifyIndex: () => Promise<void>): Promise<void> {
   const journal = JSON.parse(readFileSync(journalPath, "utf8")) as WikiApplyJournal;
   if (!["APPLYING", "RECOVERY_REQUIRED"].includes(journal.status)) throw new Error("WIKI_NOT_RECOVERABLE");
-  validateFrozen(root, journal.proposal);
+  validateFrozenWikiProposal(root, journal.proposal);
   // Check the whole snapshot before restoring any byte, not only the proposed pages.
   const currentSnapshot = snapshotWiki(root);
   const proposedPaths = new Set(journal.proposal.files.map(file => file.path));
@@ -149,4 +149,14 @@ export async function recoverWikiApply(root: string, journalPath: string, syncAn
   if (snapshotWiki(root).hash !== journal.proposal.base.hash) throw new Error("WIKI_RECOVERY_READBACK_MISMATCH");
   journal.status = "ROLLED_BACK";
   durableWrite(journalPath, Buffer.from(JSON.stringify(journal)));
+}
+
+/** Read-only verification for a Core reconciliation. It never repairs or rewrites content. */
+export function verifyWikiApply(root: string, journalPath: string, proposal: FrozenWikiProposal): boolean {
+  try {
+    validateFrozenWikiProposal(root, proposal);
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as WikiApplyJournal;
+    if (journal.status !== "APPLIED" || journal.proposal.hash !== proposal.hash) return false;
+    return proposal.files.every(file => existsSync(safePath(root, file.path)) && readFileSync(safePath(root, file.path)).toString("base64") === file.after);
+  } catch { return false; }
 }

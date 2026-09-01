@@ -11,6 +11,8 @@ interface DispatcherOptions {
   authorize: (source: EvolutionRecord, profile: EvolutionProfile) => Promise<boolean>;
   generate?: (source: EvolutionRecord, job: EvolutionRecord, profile: EvolutionProfile, binding: ReviewBinding) => Promise<EvolutionRecord[]>;
   validate?: (candidate: EvolutionRecord) => Promise<ValidationReport>;
+  /** Runs only after an AUTO_AUTHORIZED transition; failures remain visible and never fall back to legacy writes. */
+  autoApply?: (candidate: EvolutionRecord) => Promise<void>;
   onError?: () => void;
 }
 
@@ -143,7 +145,13 @@ export class EvolutionDispatcher {
     if (job.payload.job_type === "validation") {
       if (!this.options.validate) { block("BLOCKED_VALIDATOR_CONFIGURATION", "VALIDATOR_UNAVAILABLE"); return; }
       const claimed = this.store.jobTransition(job, "RUNNING", { model_calls: 0 });
-      try { this.store.completeValidation(claimed, source, await this.options.validate(source)); }
+      try {
+        this.store.completeValidation(claimed, source, await this.options.validate(source));
+        const candidate = this.store.get(source.id);
+        if (candidate?.status === "AUTO_AUTHORIZED" && this.options.autoApply) {
+          try { await this.options.autoApply(candidate); } catch { this.options.onError?.(); }
+        }
+      }
       catch (error) { this.store.jobTransition(claimed, error instanceof EvolutionError && error.code === 403 ? "BLOCKED_SOURCE_PERMISSION" : "INFRA_ERROR", { reason: error instanceof EvolutionError ? error.message : "VALIDATION_FAILED_TO_RUN", model_calls: 0 }); }
       return;
     }

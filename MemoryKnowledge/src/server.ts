@@ -26,6 +26,7 @@ import { createToolsRoutes } from "./routes/tools.js";
 import { createHealthRoutes } from "./routes/health.js";
 import { createLlmBindingRoutes } from "./routes/llm-binding.js";
 import { createAutoSyncRoutes } from "./routes/auto-sync.js";
+import { createEvolutionWikiRoutes } from "./routes/evolution-wiki.js";
 import { accessLog } from "./middleware/response-envelope.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { createLogger } from "./logger.js";
@@ -86,6 +87,7 @@ export function createApp() {
   api.route("/internal/llm-binding", createLlmBindingRoutes({
     llmBindingStore: knowledgeModule.llmBindingStore,
   }));
+  api.route("/internal/evolution/wiki", createEvolutionWikiRoutes({ wikiService: knowledgeModule.wikiService, wikiMgr: knowledgeModule.wikiMgr }));
 
   // auto-sync admin — 定时同步调度器状态查询 + 手动触发
   api.route("/", createAutoSyncRoutes({

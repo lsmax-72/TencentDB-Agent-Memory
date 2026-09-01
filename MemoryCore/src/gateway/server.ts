@@ -115,6 +115,11 @@ import { generateStandaloneProposals } from "../evolution/control/generation.js"
 import { localMemorySnapshot } from "../evolution/control/memory-snapshot.js";
 import { validateFrozenContent } from "../evolution/control/validation.js";
 import { withLegacyMutation } from "../core/local-mutation-boundary.js";
+import { GovernedFrozenAssetWriter } from "../evolution/control/governed-writer.js";
+import { MemoryFrozenAssetHandler } from "../evolution/control/memory-adoption-handler.js";
+import { SkillFrozenAssetHandler } from "../evolution/control/skill-adoption-handler.js";
+import { WikiFrozenAssetHandler } from "../evolution/control/wiki-adoption-handler.js";
+import { applyFrozenCandidate, type FrozenAssetWriter } from "../evolution/control/adoption.js";
 import { SqliteMetadataStore } from "../metadata/store/sqlite-adapter.js";
 import { handleOffloadV2Route } from "../offload_server/router.js";
 import type { OffloadV2Deps } from "../offload_server/router.js";
@@ -451,9 +456,18 @@ export class TdaiGateway {
         this.evolutionStoreReleases.set(instanceId, lease.release);
         const store = lease.store as SqliteMetadataStore;
         const permissions = await this.ensureMetadataService(instanceId);
-        // Do not admit automation before legacy writer governance and adoption are fully connected.
-        const admitted = false;
+        // Default-off admission: enabling requires an explicit operator flag after isolated acceptance.
+        const admitted = process.env.EVOLUTION_AUTOMATION_ADMITTED === "1";
         let service: EvolutionService;
+        const snapshotMemory = localMemorySnapshot(resolve(this.config.data.baseDir), async () => (await this.resolveMemoryContentTargets(instanceId)).store);
+        const memoryHandler = new MemoryFrozenAssetHandler({ snapshotMemory, resolveTargets: async () => ({
+          ...(await this.resolveMemoryContentTargets(instanceId)), embedding: this.core.getEmbeddingService(),
+        }) });
+        const skillCore = this.core.getSkillCore();
+        const skillHandler = skillCore ? new SkillFrozenAssetHandler(skillCore) : undefined;
+        const wikiUrl = process.env.EVOLUTION_KNOWLEDGE_URL, wikiToken = process.env.EVOLUTION_INTERNAL_TOKEN;
+        const wikiHandler = wikiUrl && wikiToken ? new WikiFrozenAssetHandler({ baseUrl: wikiUrl, token: wikiToken, serviceId: instanceId }) : undefined;
+        let adoptionWriter: FrozenAssetWriter | undefined;
         const dispatcher = new EvolutionDispatcher(store.getEvolutionStore(), {
           admitted: () => admitted,
           resolveModel: fileReviewBindings(process.env.EVOLUTION_REVIEW_MODELS_FILE, instanceId),
@@ -461,15 +475,24 @@ export class TdaiGateway {
           generate: (source, job, profile, binding) => generateStandaloneProposals({
             store: store.getEvolutionStore(), metadata: store, permissions,
             getSkillCore: () => this.core.getSkillCore(), authorize: (record, grant) => service.authorizeDispatch(record, grant),
-            snapshotMemory: localMemorySnapshot(resolve(this.config.data.baseDir), async () => (await this.resolveMemoryContentTargets(instanceId)).store),
+            snapshotMemory,
           }, source, job, profile, binding),
           validate: candidate => validateFrozenContent({ store: store.getEvolutionStore(), metadata: store, permissions,
-            snapshotMemory: localMemorySnapshot(resolve(this.config.data.baseDir), async () => (await this.resolveMemoryContentTargets(instanceId)).store),
+            snapshotMemory, ...(wikiHandler ? { validateWiki: async (record, payload) => (await wikiHandler.snapshot(record, payload)).details ?? {} } : {}),
             canRead: record => service.canReadRecord(record, candidate.owner_user_id),
           }, candidate),
+          autoApply: async candidate => {
+            const profile = store.getEvolutionStore().profile(candidate.team_id, candidate.agent_id);
+            if (!adoptionWriter || !profile?.enabled || !profile.auto_memory || candidate.payload.asset_kind !== "memory") throw new EvolutionError(409, "AUTO_ADOPTION_NOT_AUTHORIZED");
+            await applyFrozenCandidate(store.getEvolutionStore(), candidate.id, candidate.revision, profile.authorized_by, adoptionWriter);
+          },
           onError: () => this.logger.error("[evolution] dispatcher failed; durable jobs retained"),
         });
-        service = new EvolutionService(store.getEvolutionStore(), store, permissions, admitted, dispatcher);
+        adoptionWriter = new GovernedFrozenAssetWriter({ store: store.getEvolutionStore(), metadata: store, permissions,
+          canRead: (record, userId) => service.canReadRecord(record, userId),
+          handlers: { memory: memoryHandler, ...(skillHandler ? { skill: skillHandler } : {}), ...(wikiHandler ? { wiki: wikiHandler } : {}) },
+        });
+        service = new EvolutionService(store.getEvolutionStore(), store, permissions, admitted, dispatcher, adoptionWriter);
         dispatcher.recover();
         return service;
       })().catch(error => {

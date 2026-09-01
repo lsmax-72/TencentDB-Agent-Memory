@@ -13,7 +13,7 @@ afterEach(() => stores.splice(0).forEach(store => store.close()));
 const completion = { team_id: "team", agent_id: "agent", task_id: "task", session_id: "session", run_id: "run", completion: "host_task_complete", asset_ids: [],
   task_input: "我正在整理项目文档和任务证据，请记录当前工作的背景。", final_output: "offline test task output", tool_events: [],
   usage: { input_tokens: null, output_tokens: null, model_calls: 0, tool_calls: 0 }, actual_model: "OFFLINE_FIXTURE", outcome: "PASS", used_asset_versions: {} };
-function setup(route = "memory_gap", assetOwner = "owner", enableValidation = false) {
+function setup(route = "memory_gap", assetOwner = "owner", enableValidation = false, autoMemory = false, exactFact = false) {
   const metadata = new SqliteMetadataStore(":memory:"); metadata.init(); stores.push(metadata);
   metadata.createUser({ user_id: "owner", auth_provider: "local", external_id: "owner", username: "test-owner", default_key_value: "test-key" });
   metadata.createTeam({ team_id: "team", name: "TEST ONLY", owner_user_id: "owner" });
@@ -21,7 +21,7 @@ function setup(route = "memory_gap", assetOwner = "owner", enableValidation = fa
   metadata.createTask({ task_id: "task", team_id: "team", creator_user_id: "owner", title: "offline end-to-end test" });
   metadata.createAsset({ asset_id: "chat_memory-team-agent", team_id: "team", asset_type: "chat_memory", name: "test memory", owner_user_id: assetOwner, source_type: "offline_fixture", visibility: "private", status: "approved" });
   const store = metadata.getEvolutionStore();
-  const profile = store.saveProfile({ team_id: "team", agent_id: "agent", enabled: true, asset_kinds: ["skill", "memory", "wiki"], asset_ids: ["chat_memory-team-agent"], daily_tokens: 300000, daily_model_calls: 10, daily_candidates: 50, evaluation_profile_id: null, auto_memory: false, auto_wiki_maintenance: false, authorized_by: "owner", review_model_id: "review" }, 0);
+  const profile = store.saveProfile({ team_id: "team", agent_id: "agent", enabled: true, asset_kinds: ["skill", "memory", "wiki"], asset_ids: ["chat_memory-team-agent"], daily_tokens: 300000, daily_model_calls: 10, daily_candidates: 50, evaluation_profile_id: null, auto_memory: autoMemory, auto_wiki_maintenance: false, authorized_by: "owner", review_model_id: "review" }, 0);
   const permissions = new MetadataService(metadata, "offline-instance");
   const complete = vi.fn(async (input: { system: string; evidence: string }) => {
     const [trace] = JSON.parse(input.evidence);
@@ -29,7 +29,7 @@ function setup(route = "memory_gap", assetOwner = "owner", enableValidation = fa
   });
   const request = vi.fn(async () => {
     const trace = store.list("team", "trace").find(record => record.payload.completion === "host_task_complete")!;
-    return Response.json({ id: "offline", object: "chat.completion", created: 1, model: "offline-review", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: JSON.stringify([{ scene_name: "项目", memories: [{ content: "用户正在整理项目文档和任务证据。", type: "episodic", source_message_ids: [`${trace.id}:input`] }] }]) } }], usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 } });
+    return Response.json({ id: "offline", object: "chat.completion", created: 1, model: "offline-review", choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: JSON.stringify([{ scene_name: "项目", memories: [{ content: exactFact ? completion.task_input : "用户正在整理项目文档和任务证据。", type: exactFact ? "persona" : "episodic", source_message_ids: [`${trace.id}:input`] }] }]) } }], usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 } });
   });
   const binding: ReviewBinding = { id: "review", fingerprint: "offline-binding", model: { modelId: "offline-review", tokenCeiling: 1000, complete },
     createProposalRunner: context => createProposalRunner({ provider: "openai-compatible", base_url: "http://offline.invalid/v1", api_key: "offline-only", model: "offline-review", max_output_tokens: 1000, token_ceiling: 64000, timeout_ms: 1000, temperature: 0, fallback: false }, context, request) };
@@ -39,12 +39,13 @@ function setup(route = "memory_gap", assetOwner = "owner", enableValidation = fa
   const authorize = (source: Parameters<EvolutionService["authorizeDispatch"]>[0], grant: typeof profile) => service.authorizeDispatch(source, grant);
   const validate = vi.fn((candidate: Parameters<typeof validateFrozenContent>[1]) => validateFrozenContent({ store, metadata, permissions, snapshotMemory,
     canRead: record => service.canReadRecord(record, candidate.owner_user_id) }, candidate));
+  const autoApply = vi.fn(async () => {});
   const dispatcher = new EvolutionDispatcher(store, { admitted: () => true, resolveModel: () => binding, authorize,
     generate: (source, job, grant, model) => generateStandaloneProposals({ store, metadata, permissions, authorize, snapshotMemory, getSkillCore: () => undefined }, source, job, grant, model),
-    ...(enableValidation ? { validate } : {}),
+    ...(enableValidation ? { validate, autoApply } : {}),
   });
   service = new EvolutionService(store, metadata, permissions, true, dispatcher);
-  return { metadata, store, profile, service, dispatcher, complete, request, snapshotMemory, validate };
+  return { metadata, store, profile, service, dispatcher, complete, request, snapshotMemory, validate, autoApply };
 }
 describe("explicit completion to real extraction pipeline with offline model responses", () => {
   it("continues diagnosis into one frozen Memory candidate without a second user command", async () => {
@@ -128,6 +129,13 @@ describe("explicit completion to real extraction pipeline with offline model res
     await test.service.invoke("review/decide", { team_id: "team", id: candidate.id, revision: candidate.revision, decision: "REVIEW_APPROVED", reason: "offline test reviewer has checked source and conflicting facts" }, "test-key");
     expect(test.store.get(candidate.id)?.status).toBe("REVIEW_APPROVED"); expect(test.store.list("team", "adoption")).toHaveLength(0);
   });
+  it("auto-authorizes only an exact benign owner fact when the administrator enabled Memory auto adoption", async () => {
+    const test = setup("memory_gap", "owner", true, true, true);
+    await test.service.invoke("task/complete", completion, "test-key"); await test.dispatcher.idle();
+    const [candidate] = test.store.list("team", "candidate"), [attempt] = test.store.list("team", "attempt");
+    expect(candidate.status).toBe("AUTO_AUTHORIZED"); expect(attempt.payload).toMatchObject({ auto_eligible: true, demonstrates_improvement: false });
+    expect(test.autoApply).toHaveBeenCalledWith(expect.objectContaining({ id: candidate.id, status: "AUTO_AUTHORIZED" }));
+  });
   it("a changed target becomes stale; validation retries never rewrite the frozen candidate", async () => {
     const test = setup("memory_gap", "owner", true), validate = test.validate.getMockImplementation()!;
     test.validate.mockImplementationOnce(async candidate => {
@@ -157,7 +165,10 @@ describe("explicit completion to real extraction pipeline with offline model res
     const [good] = test.store.list("team", "candidate");
     const invalid = test.store.append({ team_id: good.team_id, agent_id: good.agent_id, owner_user_id: good.owner_user_id, asset_ids: good.asset_ids,
       parent_id: good.parent_id, kind: "candidate", origin: "runtime", status: "FROZEN", title: "offline forged provenance negative case",
-      payload: { ...good.payload, extracted_memory: { content: good.payload.after, source_message_ids: ["assistant-answer-is-not-proof"] } },
+      payload: { ...good.payload, extracted_memory: {
+        ...(good.payload.extracted_memory as Record<string, unknown>),
+        source_message_ids: ["assistant-answer-is-not-proof"],
+      } },
     }, "invalid-provenance", "owner");
     await test.service.invoke("validation/request", { team_id: "team", id: invalid.id }, "test-key"); await test.dispatcher.idle();
     expect(test.store.get(invalid.id)?.status).toBe("VALIDATION_FAILED");

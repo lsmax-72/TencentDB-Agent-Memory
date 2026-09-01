@@ -146,6 +146,8 @@ export interface UpdateInput extends IdFields {
   skill_id: string;
   expected_version: number;
   content: string;
+  /** Server-side audit metadata for governed publication; ordinary callers may omit it. */
+  metadata?: Record<string, unknown>;
 }
 
 export interface PatchInput extends IdFields {
@@ -350,6 +352,7 @@ export class SkillCore {
         content: input.content,
         name: head.name,
         description: file.frontmatter.description,
+        metadata_json: input.metadata ? JSON.stringify(input.metadata) : undefined,
       });
       this.cleanupVersions(head.skill_id);
       return result;

@@ -2,6 +2,14 @@
 
 状态：IMPLEMENTATION_IN_PROGRESS；不能视为完整交付。2026-08-31。
 
+## 最新采用接线（2026-09-01 09:48）
+
+三类冻结资产已连接真实受治理 writer。采用前后均重验身份、profile 授权、目标 ACL、来源链、冻结内容和 base version；写入与旧入口共享全局 mutation boundary。Memory L1/L2/L3、SkillCore 及 MemoryKnowledge Wiki 均以冻结 bytes 写入，Wiki 采用不会再次调用模型。持久操作意图、readback 核对、重启 reconciliation、双击幂等和过期拒绝已实现。
+
+Skill 仍需真实 paired effect receipt 才能审批；Memory/Wiki 的 content validation 不会展示为能力提升。Memory 仅对 owner 输入中逐字出现的低风险 persona/work_fact L1 事实提供服务端 auto eligibility，且仍要求管理员预授权、预算、完整权限及正式 writer；模型自报置信度不起作用。自动采用失败不回退旧写。
+
+Core155 tests、Knowledge9 tests及三项目构建通过。自动化仍默认关闭，8125 尚未更新；Wiki运行生成、受限 Skill evaluator、完整隔离E2E和主Hub浏览器交付继续作为未完成项。
+
 ## 最新运行接线（2026-09-01 03:04）
 
 03:19补充：Memory实际来源快照、生成后自动内容校验job、版本过期/重复新增/伪造引用拒绝已接入。自然语言冲突不冒充已确定，保持人工审查、auto_eligible=false；界面单列内容校验并支持来源链与独立retry。Core141tests/Panel3tests及构建通过。新隔离r4（30920/30725）真实HTTP的validation/review/幂等/重启通过；候选为明确OFFLINE FIXTURE、零模型且不采用，不是业务效果证据。后续真实采用和8125交付仍未完成。

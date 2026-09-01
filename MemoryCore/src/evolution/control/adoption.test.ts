@@ -18,7 +18,8 @@ function setup() {
   const writer: FrozenAssetWriter = {
     withTargetLock: (_candidate, run) => { const result = tail.then(run); tail = result.catch(() => {}); return result; },
     authorizeAndPrepare: vi.fn(async () => ({ validated_hash: candidate.artifact_hash })),
-    writeFrozen: vi.fn(async () => {}), verifyApplied: vi.fn(async () => true),
+    writeFrozen: vi.fn(async (_operationId, frozen) => { expect(frozen.id).toBe(candidate.id); }),
+    verifyApplied: vi.fn(async (_operationId, frozen) => frozen.artifact_hash === candidate.artifact_hash),
   };
   return { store, candidate, writer, metadata };
 }
