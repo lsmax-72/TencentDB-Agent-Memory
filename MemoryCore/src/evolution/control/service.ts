@@ -22,7 +22,33 @@ const profileSchema = scopeSchema.extend({
   auto_memory: z.boolean(), auto_wiki_maintenance: z.boolean(),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "observation/ingest", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
+const nullableCount = z.number().int().nonnegative().nullable();
+const benchmarkRunSummary = z.object({
+  status: z.enum(["TASK_PASS", "TASK_FAIL", "INFRA_ERROR"]), reward: z.number().min(0).max(1),
+  usage: z.object({ total_tokens: nullableCount, model_call_count: nullableCount, tool_call_count: nullableCount }).passthrough(),
+}).strict();
+const benchmarkPair = z.object({
+  case_ref: z.object({ id: id, trial: z.number().int().positive() }).strict(),
+  baseline: benchmarkRunSummary, candidate: benchmarkRunSummary,
+  classification: z.enum(["newly_fixed", "newly_broken", "unchanged_success", "unchanged_failure", "incomparable"]),
+}).strict();
+const benchmarkComparison = z.object({
+  pairs: z.array(benchmarkPair).max(300),
+  counts: z.object({ newly_fixed: z.number().int().nonnegative(), newly_broken: z.number().int().nonnegative(), unchanged_success: z.number().int().nonnegative(), unchanged_failure: z.number().int().nonnegative(), incomparable: z.number().int().nonnegative() }).strict(),
+  transfer_gain: z.number().min(-1).max(1).nullable(), paired_bootstrap_95_ci: z.tuple([z.number(), z.number()]).nullable(),
+  pass_at_1: z.number().min(0).max(1).nullable(), token_cost_change: z.number().nullable(),
+}).strict();
+const benchmarkIngestSchema = scopeSchema.extend({
+  agent_id: id, attempt_id: id, protocol_id: z.literal("tdai-evoagentbench-code-v1"),
+  protocol_hash: z.string().regex(/^[a-f0-9]{64}$/), source_hash: z.string().regex(/^[a-f0-9]{64}$/),
+  phase: z.enum(["development", "test_checkpoint", "test"]), status: z.enum(["PASS", "FAIL", "INFRA_ERROR"]),
+  comparisons: z.object({ memory: benchmarkComparison, skill: benchmarkComparison }).strict(),
+  cost_summary: z.record(z.enum(["vanilla", "memory", "skill"]), z.object({ total_tokens: nullableCount, model_call_count: nullableCount, tool_call_count: nullableCount, elapsed_ms: z.number().int().nonnegative() }).strict()),
+  candidate_hash: z.string().regex(/^[a-f0-9]{64}$/).nullable(), retrieval_coverage: z.record(z.string(), z.number().min(0).max(1)),
+  evidence_limitations: z.array(z.string().max(500)).max(20), contamination_findings: z.array(z.string().max(300)).max(100),
+}).strict();
+
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "observation/ingest", "benchmark/attempt/ingest", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
 
 interface EvolutionConfiguration {
   reviewBindingIds(teamId: string, agentId: string): string[];
@@ -243,6 +269,28 @@ export class EvolutionService {
         title: `Codex · ${titleText}`, status: input.terminal_event === "STOP" ? "OBSERVED" : "INTERRUPTED",
         asset_ids: [], payload,
       }, `${actor.id}/codex/${input.event_id}`, actor.id);
+    }
+    if (action === "benchmark/attempt/ingest") {
+      const input = benchmarkIngestSchema.parse(body);
+      const agent = await this.metadata.getAgentById(input.agent_id);
+      if (!agent || agent.team_id !== team_id || agent.status !== "active" || agent.owner_user_id !== actor.id) {
+        throw new EvolutionError(403, "AGENT_OWNER_REQUIRED");
+      }
+      // Benchmark evidence is research-only. It is not an adoption proof and never dispatches diagnosis.
+      return this.store.append({
+        team_id, owner_user_id: actor.id, agent_id: input.agent_id, kind: "attempt", origin: "runtime",
+        title: `EvoAgentBench · ${input.phase} · ${input.attempt_id}`, status: input.status, asset_ids: [],
+        payload: {
+          attempt_type: "benchmark_transfer_evaluation", benchmark: "EvoAgentBench-compatible",
+          protocol_id: input.protocol_id, protocol_hash: input.protocol_hash, source_hash: input.source_hash,
+          phase: input.phase, comparisons: input.comparisons, cost_summary: input.cost_summary,
+          pairs: input.comparisons.skill.pairs, comparison_summary: {
+            memory: input.comparisons.memory.counts, skill: input.comparisons.skill.counts,
+          }, candidate_hash: input.candidate_hash, retrieval_coverage: input.retrieval_coverage,
+          contamination_findings: input.contamination_findings, evidence_limitations: input.evidence_limitations,
+          research_only: true, promotion_allowed: false, test_traces_candidate_eligible: false,
+        },
+      }, `${actor.id}/evoagentbench/${input.attempt_id}/${input.source_hash}`, actor.id);
     }
     if (action === "task/complete") {
       const input = scopeSchema.extend({

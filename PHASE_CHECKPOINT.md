@@ -347,3 +347,14 @@
 - 限制：这是当前本地 standalone 的单进程边界，不是云端/多副本分布式锁；不能据此宣称生产部署完成。
 - 验证：MemoryCore 28 files / 146 tests PASS，plugin build PASS，新增并发与正式 permit 定向测试 15 PASS；`git diff --check` PASS。
 - 下一自主动作：小步提交本边界；继续实现三类冻结候选的生产采用 port、运行时授权/基线/hash/校验证据核验、幂等写入与只读恢复，然后再做独立实例和 8125 主 Hub 验收。自动化仍默认关闭；没有调用 vLLM、没有采用正式资产。
+## 2026-09-09 EvoAgentBench Algorithmic Reasoning（进行中）
+
+- 用户已批准独立研究协议 `tdai-evoagentbench-code-v1`：官方 Algorithmic Reasoning 数据，三组 `Vanilla / Memory-only / Refined Skill`，结果仅作为 `EvoAgentBench-compatible`，不进入生产 Gate、不自动 Promotion。
+- 冻结协议 hash：`d3bcb0ee7bd7b056e54471227ecd401de71a88b86376f8ad2d71c71fd27871e3`；固定 smoke 为 `abc301_a`、`3193`，experience 24、development 12、held-out test 86，分区互斥。
+- 外部源码只读检出：EvoAgentBench `948a17288782d5120778da16b4cf1cad9305d8b4`，LiveCodeBench `28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24`；独立 Python 3.12 环境使用 `nanobot-ai==0.1.4.post3`，未修改现有 dirty nanobot checkout。
+- 8125 专用隔离对象：Team `team-cfvqkn808z`（EvoAgentBench / Algorithmic Reasoning），Agent `agt-cfvqjm66tk`（nanobot-evoagentbench-code）。正式自动化仍关闭，Candidate evaluation-only。
+- 已实现窄 Benchmark Adapter、固定协议/划分、MemoryProxy loopback bridge、官方 runner 编排、attempt ingest、三组汇总/transfer gain/bootstrap CI、原生 MemoryHub 证据展示；浏览器不暴露命令执行。
+- 首次 smoke 因 Hugging Face 官方数据源不可达保留为独立 `INFRA_ERROR`：`/Users/lsmax/Coder/evoagentbench-artifacts/code-v1/runs/smoke-abc301_a-vanilla-trial-1`，不得覆盖。
+- 独立 `infrastructure-retry-1` 正在使用可达镜像首次下载并生成 LiveCodeBench 数据集；尚未进入模型推理，不能宣称 smoke 已通过。完成后先核对真实 model/usage/tool/verifier/Hub evidence，再运行第二个固定 smoke。
+- 当前验证：Python 9 tests PASS、Python compile PASS、Core 定向 5 tests PASS、Core plugin build PASS、Panel 与 web build PASS、`git diff --check` PASS。用户 deployment 三个文件仍不暂存、不修改。
+- 下一自主动作：等待当前下载/生成完成并保存 retry 结果；若成功完成两个 smoke，则实现可恢复批量调度、跑 24 个 experience、冻结 Memory/Skill，再跑 12 个 development 三组 Pilot。失败均保留为独立 Attempt，不挑最好结果。

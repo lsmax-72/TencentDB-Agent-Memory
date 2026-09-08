@@ -14,7 +14,21 @@ export function EvaluationEvidence({ payload }: { payload: Record<string, unknow
   const cost = object(payload.cost_summary);
   const gate = object(payload.gate);
   const pairs = Array.isArray(payload.pairs) ? payload.pairs.map(object) : [];
+  const benchmark = payload.attempt_type === 'benchmark_transfer_evaluation';
+  const comparisons = object(payload.comparisons);
   return <div>
+    {benchmark && <>
+      <Alert type="info">这是 EvoAgentBench-compatible 研究评测，不是官方排行榜成绩，也不能直接授权正式 Skill Promotion。</Alert>
+      <Table records={['memory', 'skill'].map(arm => { const row = object(comparisons[arm]); return { arm, ...row, counts: object(row.counts) }; })} recordKey="arm" columns={[
+        { key: 'arm', header: '进化条件' },
+        { key: 'gain', header: 'Transfer gain', render: (row: Record<string, unknown>) => display(row.transfer_gain) },
+        { key: 'fixed', header: 'Newly fixed', render: (row: Record<string, unknown>) => display(object(row.counts).newly_fixed) },
+        { key: 'broken', header: 'Newly broken', render: (row: Record<string, unknown>) => display(object(row.counts).newly_broken) },
+        { key: 'ci', header: '95% CI', render: (row: Record<string, unknown>) => JSON.stringify(row.paired_bootstrap_95_ci ?? null) },
+        { key: 'cost', header: 'Token 成本变化', render: (row: Record<string, unknown>) => display(row.token_cost_change) },
+      ]} />
+      <p>检索覆盖率：{JSON.stringify(payload.retrieval_coverage ?? {})}　污染检查：{JSON.stringify(payload.contamination_findings ?? [])}</p>
+    </>}
     {gate.status !== undefined && <p><strong>Gate：{display(gate.status)}</strong>　{JSON.stringify(gate.reasons ?? [])}</p>}
     {Object.keys(cost).length > 0 && <Table records={['baseline', 'candidate'].map(arm => ({ arm, ...object(cost[arm]) }))} recordKey="arm" columns={[
       { key: 'arm', header: '对照条件' },
