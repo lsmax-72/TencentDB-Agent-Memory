@@ -88,6 +88,21 @@ docker volume create tdai-panel-data-recovery-20260901
 
 在后者的「评测中心」应看到 `FAIL / NO_NEW_FIX`，在「候选资产」应看到 `HISTORICAL_FROZEN / 历史证据·只读`；「进化概览」应显示 0 adoption 和运行准入关闭。若这些条件不一致，先停止自动化配置操作并检查 Core/Panel 日志。
 
+## Codex 全局观测
+
+Codex 用户级 Hooks 位于 `/Users/lsmax/.codex/hooks.json`，固定调用仓库内 `scripts/codex-observation/observer.py`。非敏感连接配置位于 `/Users/lsmax/.codex/tencentdb-observer.json`；user key 仅通过其中的 `user_key_file` 路径读取，不应复制到配置或日志。
+
+观测数据在 `Codex Observation` Team 的「自进化 → 运行轨迹」。新窗口首次加载 Hooks 时如出现 trust 提示，应检查路径后在 Codex 中信任。旧窗口不会保证热加载配置。
+
+临时停止采集时，将 observer 配置中的 `enabled` 改为 `false`；恢复时改回 `true`。不要删除 outbox。主 Hub 恢复后，下一次终止事件会按顺序补传。健康检查可使用：
+
+```bash
+docker ps --filter name=tdai-memory --format '{{.Names}}\t{{.Status}}'
+find /Users/lsmax/.codex/tencentdb-observer-state/outbox -maxdepth 1 -type f -print
+```
+
+`OBSERVED` 只表示 Codex turn 已记录，不代表业务任务完成，也不能触发自动诊断或正式资产写入。
+
 ## 当前明确限制
 
 - 未运行真实复盘模型；离线 fixture 只证明工程控制流。

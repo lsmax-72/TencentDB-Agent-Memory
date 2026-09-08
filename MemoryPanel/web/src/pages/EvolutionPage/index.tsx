@@ -19,7 +19,7 @@ export const EVOLUTION_SECTIONS = {
 } as const;
 type Section = keyof typeof EVOLUTION_SECTIONS;
 const origins = { runtime: '运行记录', historical: '历史证据 · 只读', offline_test: '离线测试 · 非真实运行' };
-const statusNames: Record<string, string> = { FROZEN: '已冻结', VALIDATED: '内容校验通过 · 待审查', VALIDATION_FAILED: '内容校验失败', STALE: '已过期 · 需新版本', DUPLICATE_NO_CHANGE: '重复新增已跳过', SNAPSHOT: '来源快照', QUEUED: '等待执行', RUNNING: '执行中', COMPLETED: '执行完成', RECONCILE_REQUIRED: '中断待核对', FAIL: '失败', PASS: '通过', INFRA_ERROR: '基础设施异常', RECORDED: '已记录', NEEDS_EVIDENCE: '待补证据', REVIEW_APPROVED: '审查通过 · 未采用', AUTO_AUTHORIZED: '已按限定授权通过 · 未采用', APPLYING: '采用中', REJECTED: '已拒绝', APPLIED: '已采用', BLOCKED_AUTOMATION_DISABLED: '自动化未启用', BLOCKED_EXECUTOR_UNAVAILABLE: '执行器不可用', BLOCKED_BUDGET: '预算不足', BLOCKED_GENERATION: '生成阻塞', BLOCKED_MODEL_CONFIGURATION: '复盘模型未配置', BLOCKED_SOURCE_PERMISSION: '来源权限不足' };
+const statusNames: Record<string, string> = { FROZEN: '已冻结', VALIDATED: '内容校验通过 · 待审查', VALIDATION_FAILED: '内容校验失败', STALE: '已过期 · 需新版本', DUPLICATE_NO_CHANGE: '重复新增已跳过', SNAPSHOT: '来源快照', QUEUED: '等待执行', RUNNING: '执行中', COMPLETED: '执行完成', RECONCILE_REQUIRED: '中断待核对', FAIL: '失败', PASS: '通过', INFRA_ERROR: '基础设施异常', RECORDED: '已记录', OBSERVED: 'Codex 回合已观测', INTERRUPTED: 'Codex 回合已中断', NEEDS_EVIDENCE: '待补证据', REVIEW_APPROVED: '审查通过 · 未采用', AUTO_AUTHORIZED: '已按限定授权通过 · 未采用', APPLYING: '采用中', REJECTED: '已拒绝', APPLIED: '已采用', BLOCKED_AUTOMATION_DISABLED: '自动化未启用', BLOCKED_EXECUTOR_UNAVAILABLE: '执行器不可用', BLOCKED_BUDGET: '预算不足', BLOCKED_GENERATION: '生成阻塞', BLOCKED_MODEL_CONFIGURATION: '复盘模型未配置', BLOCKED_SOURCE_PERMISSION: '来源权限不足' };
 function statusText(status: string) { return statusNames[status] ?? status; }
 function recordStatus(record: EvolutionRecord) { return record.payload.attempt_type === 'content_validation' && record.status === 'PASS' ? '内容合格 · 非效果证明' : statusText(record.status); }
 function recordOrigin(record: EvolutionRecord) { return record.payload.evidence_mode === 'offline_test' ? origins.offline_test : origins[record.origin]; }
@@ -126,6 +126,7 @@ function EvolutionPageBody({ section }: { section: Section }) {
       {detail && <section className="evolution-detail"><div className="evolution-header"><h3>{detail.record.title}</h3><Button onClick={() => setParams({})}>关闭详情</Button></div>
         <p>{recordOrigin(detail.record)} · {recordStatus(detail.record)} · revision {detail.record.revision}</p>
         <p className="evolution-hash">artifact hash：{detail.record.artifact_hash}</p>
+        {detail.record.payload.evidence_mode === 'observation' && <Alert type="info">这是 Codex 回合观测，不代表业务任务已经完成，也不会自动触发诊断或候选生成。</Alert>}
         {detail.record.kind === 'attempt' && <EvaluationEvidence payload={detail.record.payload} />}
         {detail.record.parent_id && <Button type="link" onClick={() => setParams({ record: detail.record.parent_id! })}>查看来源记录</Button>}
         {!!detail.related?.length && <div className="evolution-toolbar"><span>后续记录：</span>{detail.related.map(record => <Button className="evolution-record-link" key={record.id} type="link" onClick={() => setParams({ record: record.id })}>{record.title} · {recordStatus(record)}</Button>)}</div>}

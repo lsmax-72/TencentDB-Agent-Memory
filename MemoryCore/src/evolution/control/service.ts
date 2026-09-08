@@ -22,7 +22,7 @@ const profileSchema = scopeSchema.extend({
   auto_memory: z.boolean(), auto_wiki_maintenance: z.boolean(),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "observation/ingest", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
 
 interface EvolutionConfiguration {
   reviewBindingIds(teamId: string, agentId: string): string[];
@@ -202,6 +202,48 @@ export class EvolutionService {
         return this.store.saveProfile({ ...input, authorized_by: actor.id }, revision);
       });
     }
+    if (action === "observation/ingest") {
+      const input = scopeSchema.extend({
+        agent_id: id, event_id: id, session_id: id, turn_id: id,
+        source: z.literal("codex"), terminal_event: z.enum(["STOP", "INTERRUPT"]),
+        task_input: z.string().max(100_000), final_output: z.string().max(100_000),
+        tool_events: z.array(z.object({
+          tool_use_id: z.string().min(1).max(200), name: z.string().min(1).max(120),
+          arguments: z.string().max(20_000), result: z.string().max(40_000),
+          success: z.boolean(), sequence: z.number().int().nonnegative(),
+        })).max(100),
+        usage: z.object({
+          input_tokens: z.number().int().nonnegative().nullable(), output_tokens: z.number().int().nonnegative().nullable(),
+          model_calls: z.number().int().nonnegative().nullable(), tool_calls: z.number().int().nonnegative().nullable(),
+        }),
+        actual_model: z.string().max(200), cwd: z.string().max(4_000), permission_mode: z.string().max(80),
+      }).strict().parse(body);
+      const agent = await this.metadata.getAgentById(input.agent_id);
+      if (!agent || agent.team_id !== team_id || agent.status !== "active" || agent.owner_user_id !== actor.id) {
+        throw new EvolutionError(403, "AGENT_OWNER_REQUIRED");
+      }
+      const inputText = redactEvidence(input.task_input), outputText = redactEvidence(input.final_output), cwd = redactEvidence(input.cwd);
+      const toolEvidence = input.tool_events.map(event => ({ event, args: redactEvidence(event.arguments), result: redactEvidence(event.result) }));
+      const payload = {
+        ...input,
+        evidence_mode: "observation", completion: input.terminal_event === "STOP" ? "codex_turn_stopped" : "codex_turn_interrupted",
+        task_input: inputText.text, final_output: outputText.text, cwd: cwd.text,
+        tool_events: toolEvidence.map(({ event, args, result }) => ({ ...event, arguments: args.text, result: result.text })),
+        redaction: {
+          policy: "credential-patterns-v1", task_input_hash: inputText.original_sha256, final_output_hash: outputText.original_sha256,
+          cwd_hash: cwd.original_sha256,
+          replacements: inputText.replacements + outputText.replacements + cwd.replacements
+            + toolEvidence.reduce((sum, item) => sum + item.args.replacements + item.result.replacements, 0),
+          tool_original_hashes: toolEvidence.map(({ event, args, result }) => ({ sequence: event.sequence, tool_use_id: event.tool_use_id, arguments: args.original_sha256, result: result.original_sha256 })),
+        },
+      };
+      const titleText = inputText.text.trim().split(/\r?\n/, 1)[0]?.slice(0, 120) || `Codex turn ${input.turn_id.slice(0, 12)}`;
+      return this.store.append({
+        team_id, owner_user_id: actor.id, agent_id: input.agent_id, kind: "trace", origin: "runtime",
+        title: `Codex · ${titleText}`, status: input.terminal_event === "STOP" ? "OBSERVED" : "INTERRUPTED",
+        asset_ids: [], payload,
+      }, `${actor.id}/codex/${input.event_id}`, actor.id);
+    }
     if (action === "task/complete") {
       const input = scopeSchema.extend({
         agent_id: id, task_id: id, session_id: id, run_id: id,
@@ -238,6 +280,7 @@ export class EvolutionService {
       const source = this.store.get(input.id);
       if (!source || source.team_id !== team_id || !await this.mayRead(source, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
       if (source.kind !== "trace" || source.origin !== "runtime") throw new EvolutionError(409, "LIVE_TRACE_REQUIRED");
+      if (source.payload.completion !== "host_task_complete") throw new EvolutionError(409, "HOST_TASK_COMPLETION_REQUIRED");
       const job = this.dispatcher.enqueue(source);
       this.dispatcher.wake();
       return job;

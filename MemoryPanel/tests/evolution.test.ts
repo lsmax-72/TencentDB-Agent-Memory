@@ -24,6 +24,15 @@ describe('evolution proxy', () => {
     const response = await api.request('/evolution/overview', { method: 'POST', headers: { 'X-Tdai-Service-Id': 'test' }, body: '{}' });
     expect(response.status).toBe(400); expect(postEnvelope).not.toHaveBeenCalled();
   });
+  it('forwards the fixed Codex observation endpoint without exposing Core credentials', async () => {
+    const { api, postEnvelope } = setup();
+    const body = { team_id: 'team', source: 'codex', event_id: 'event' };
+    const response = await api.request('/evolution/observation/ingest', { method: 'POST', headers, body: JSON.stringify(body) });
+    expect(response.status).toBe(200);
+    expect(postEnvelope.mock.calls[0]?.[0]).toBe('/v3/evolution/observation/ingest');
+    expect(postEnvelope.mock.calls[0]?.[1]).toEqual(body);
+    expect(JSON.stringify(await response.json())).not.toContain('secret');
+  });
   it('rejects arbitrary execution and malformed bodies', async () => {
     const { api, postEnvelope } = setup();
     expect((await api.request('/evolution/exec', { method: 'POST', headers, body: '{}' })).status).toBe(404);

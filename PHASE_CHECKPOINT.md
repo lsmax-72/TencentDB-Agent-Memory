@@ -1,5 +1,14 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-08 Codex 全局 capture-only 接入完成
+
+- 本机用户级 Codex Hooks 已接到主 8125：所有新 Codex 会话采集 `SessionStart / UserPromptSubmit / PostToolUse / Stop / Interrupt / SessionEnd`，写入独立 private `Codex Observation` Team/`codex-global` Agent。
+- 新 Core `observation/ingest` 仅生成 `OBSERVED / INTERRUPTED` trace。`Stop` 不映射为 `host_task_complete`，Core 明确拒绝将 observation trace 送入 diagnosis；未启用 Memory 召回、候选、评测、采用或 Promotion。
+- 客户端和 Core 双层脱敏、0600 state/outbox、loopback-only endpoint、幂等 event id 已实现。主 Hub 短暂不可用时只保留 outbox，不影响 Codex。
+- 主服务更新前已做停服备份：`/Users/lsmax/Coder/phase6-artifacts/backups/memoryhub-main-20260908-pre-codex-observation`。Core/Hub 当前 healthy，原 volumes、历史 Attempt 和 v4 FAIL 均保留。
+- 合成 Hook 和真实 `gpt-5.4-mini` Codex turn 均成功进入 8125；真实记录 `evo-2d113502-76ff-4291-946e-b259dcf4fecf`。Core 169/38、Panel 4、Hook 4 tests，以及相关 build/typecheck 均通过。
+- 下一步不是立即自动进化：先收集约 10–20 个真实任务，审计脱敏和证据质量；再设计明确 task-complete 信号并有限启用诊断。详见 `docs/codex-observation-integration-report.md`。
+
 ## 2026-09-01 20:10 完成审计：Memory 三层闭环和主 8125 r2
 
 - 最终审计发现并补齐一个真实缺口：先前 runtime task-complete 只生成 L1。提交 `8b0c865` 现把 L1/L2/L3 payload 放在同一候选额度与原子冻结批次内；正式 snapshot 不成熟时不提前运行高层，候选不能作为同轮下一层输入。候选额度不足以覆盖已触发层时在 proposal model 前阻止，不留下半批结果。
