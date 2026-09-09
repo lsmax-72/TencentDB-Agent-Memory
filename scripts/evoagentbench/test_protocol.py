@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from scripts.evoagentbench.adapter import adapt_trial, candidate_contamination
+from scripts.evoagentbench.batch import experience_state
 from scripts.evoagentbench.metrics import compare
 from scripts.evoagentbench.nanobot_cli_compat import prepare_invocation
 from scripts.evoagentbench.protocol import build_protocol, sha256_json
@@ -32,6 +33,17 @@ class ProtocolTests(unittest.TestCase):
     def test_wrong_split_size_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "PINNED_SPLIT_SIZE_MISMATCH"):
             build_protocol({"train": [], "test": []})
+
+    def test_experience_resume_reuses_valid_smoke_and_stops_on_incomplete_primary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            smoke = root / "runs/smoke-tr-1-vanilla-trial-1-infra-retry-3"
+            smoke.mkdir(parents=True)
+            (smoke / "evidence.json").write_text(json.dumps({"status": "TASK_PASS"}))
+            self.assertEqual(experience_state(root, "tr-1", {"tr-1"})[0], "complete")
+            primary = root / "runs/experience-tr-2-vanilla-trial-1"
+            primary.mkdir(parents=True)
+            self.assertEqual(experience_state(root, "tr-2", set())[0], "incomplete")
 
 
 class AdapterTests(unittest.TestCase):

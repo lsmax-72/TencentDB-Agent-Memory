@@ -26,6 +26,12 @@ python3 -m scripts.evoagentbench.driver connectivity
 python3 -m scripts.evoagentbench.driver run --phase smoke --arm vanilla --task abc301_a
 ```
 
+After both frozen smoke tasks pass, collect the remaining experience tasks with a resumable sequential runner. Valid smoke results are reused for the two overlapping train IDs; infrastructure failures stop the batch and require an explicitly numbered retry:
+
+```bash
+python3 -m scripts.evoagentbench.batch experience
+```
+
 Each official task gets a fresh Hub Task, nanobot workspace, session and loopback identity bridge. The bridge permits only OpenAI-compatible chat completions to the existing MemoryProxy and stores usage/model hashes without retaining request or response bodies.
 
 After all three arms of a frozen phase exist, build and ingest one immutable comparison:
