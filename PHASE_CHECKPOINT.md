@@ -358,4 +358,5 @@
 - 独立 `infrastructure-retry-1` 在生成 LiveCodeBench 数据集时随 Codex turn 中断，其目录原样保留且不是有效结果；`infrastructure-retry-2` 得到 `INFRA_ERROR / AGENT_RUNNER_ERROR`，证实官方 adapter 使用了固定 nanobot 版本不支持的 `--workspace/--config` CLI 参数。
 - 项目侧新增窄 CLI compatibility wrapper，不修改固定 EvoAgentBench/nanobot 源码或 grader。`infrastructure-retry-3` 的 `abc301_a` 与 `3193` 主 Attempt 均真实 PASS：前者 30,810 tokens / 3 model calls / 2 tool calls / 54.8s，后者 30,712 / 3 / 2 / 40.7s；实际模型均为 `qwen3.8-27b`，官方 verifier reward 均为 1.0，`host_task_complete` 与 Hub Task evidence 完整。
 - Smoke 后正式资产计数与 preflight 一致：Skill 0、Chat Memory 1、Wiki 0、Code Graph 0；Candidate 没有进入正式资产。当前验证：Python 10 tests PASS、Python compile PASS、Core 定向 5 tests PASS、Core plugin build PASS、Panel 与 web build PASS、`git diff --check` PASS。用户 deployment 三个文件仍不暂存、不修改。
-- 下一自主动作：实现可恢复批量调度与冻结资产注入，完成剩余 22 个 experience task；只使用 train evidence 生成/冻结 Memory 与至少双来源支持的通用 Skill，再跑 12 个 development 三组 Pilot。失败均保留为独立 Attempt，不挑最好结果。
+- 可恢复批量调度已完成全部 24 个 frozen experience task（两个 smoke 作为相同 train ID 的有效 experience evidence 复用）：22 PASS、2 TASK_FAIL、0 INFRA_ERROR；合计 1,015,948 tokens、92 model calls、69 tool calls、2,689.7s。失败任务保留并参与诊断，不挑选或重跑业务结果。
+- 下一自主动作：只使用这 24 个 train evidence 生成并冻结 Memory 与至少双来源支持的通用 Skill，记录生成成本和来源/hash；随后生成固定 top-2 注入 cache，跑 12 个 development 三组 Pilot。失败均保留为独立 Attempt，不挑最好结果。
