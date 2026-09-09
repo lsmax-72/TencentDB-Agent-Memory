@@ -355,6 +355,7 @@
 - 8125 专用隔离对象：Team `team-cfvqkn808z`（EvoAgentBench / Algorithmic Reasoning），Agent `agt-cfvqjm66tk`（nanobot-evoagentbench-code）。正式自动化仍关闭，Candidate evaluation-only。
 - 已实现窄 Benchmark Adapter、固定协议/划分、MemoryProxy loopback bridge、官方 runner 编排、attempt ingest、三组汇总/transfer gain/bootstrap CI、原生 MemoryHub 证据展示；浏览器不暴露命令执行。
 - 首次 smoke 因 Hugging Face 官方数据源不可达保留为独立 `INFRA_ERROR`：`/Users/lsmax/Coder/evoagentbench-artifacts/code-v1/runs/smoke-abc301_a-vanilla-trial-1`，不得覆盖。
-- 独立 `infrastructure-retry-1` 正在使用可达镜像首次下载并生成 LiveCodeBench 数据集；尚未进入模型推理，不能宣称 smoke 已通过。完成后先核对真实 model/usage/tool/verifier/Hub evidence，再运行第二个固定 smoke。
-- 当前验证：Python 9 tests PASS、Python compile PASS、Core 定向 5 tests PASS、Core plugin build PASS、Panel 与 web build PASS、`git diff --check` PASS。用户 deployment 三个文件仍不暂存、不修改。
-- 下一自主动作：等待当前下载/生成完成并保存 retry 结果；若成功完成两个 smoke，则实现可恢复批量调度、跑 24 个 experience、冻结 Memory/Skill，再跑 12 个 development 三组 Pilot。失败均保留为独立 Attempt，不挑最好结果。
+- 独立 `infrastructure-retry-1` 在生成 LiveCodeBench 数据集时随 Codex turn 中断，其目录原样保留且不是有效结果；`infrastructure-retry-2` 得到 `INFRA_ERROR / AGENT_RUNNER_ERROR`，证实官方 adapter 使用了固定 nanobot 版本不支持的 `--workspace/--config` CLI 参数。
+- 项目侧新增窄 CLI compatibility wrapper，不修改固定 EvoAgentBench/nanobot 源码或 grader。`infrastructure-retry-3` 的 `abc301_a` 与 `3193` 主 Attempt 均真实 PASS：前者 30,810 tokens / 3 model calls / 2 tool calls / 54.8s，后者 30,712 / 3 / 2 / 40.7s；实际模型均为 `qwen3.8-27b`，官方 verifier reward 均为 1.0，`host_task_complete` 与 Hub Task evidence 完整。
+- Smoke 后正式资产计数与 preflight 一致：Skill 0、Chat Memory 1、Wiki 0、Code Graph 0；Candidate 没有进入正式资产。当前验证：Python 10 tests PASS、Python compile PASS、Core 定向 5 tests PASS、Core plugin build PASS、Panel 与 web build PASS、`git diff --check` PASS。用户 deployment 三个文件仍不暂存、不修改。
+- 下一自主动作：实现可恢复批量调度与冻结资产注入，完成剩余 22 个 experience task；只使用 train evidence 生成/冻结 Memory 与至少双来源支持的通用 Skill，再跑 12 个 development 三组 Pilot。失败均保留为独立 Attempt，不挑最好结果。

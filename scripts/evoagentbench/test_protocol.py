@@ -5,6 +5,7 @@ from pathlib import Path
 
 from scripts.evoagentbench.adapter import adapt_trial, candidate_contamination
 from scripts.evoagentbench.metrics import compare
+from scripts.evoagentbench.nanobot_cli_compat import prepare_invocation
 from scripts.evoagentbench.protocol import build_protocol, sha256_json
 from scripts.evoagentbench.report import build as build_report
 
@@ -83,6 +84,21 @@ class AdapterTests(unittest.TestCase):
                 adapt_trial(path, arm="skill", phase="development", protocol_hash="h", expected_model="qwen3.8-27b", injected_assets=[{"id": str(i), "hash": "x"} for i in range(3)])
         finally:
             root.cleanup()
+
+    def test_nanobot_compat_translates_workspace_and_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            config = workspace / "config.json"
+            config.write_text(json.dumps({"agents": {"defaults": {"workspace": str(workspace)}}}))
+            command, env = prepare_invocation([
+                "agent", "--session", "s", "--message", "hello", "--workspace", str(workspace),
+                "--config", str(config), "--no-markdown",
+            ])
+            self.assertNotIn("--workspace", command)
+            self.assertNotIn("--config", command)
+            self.assertEqual(command[-1], "--no-markdown")
+            self.assertEqual(Path(env["HOME"]), workspace / ".tdai-nanobot-home")
+            self.assertTrue((Path(env["HOME"]) / ".nanobot/config.json").is_file())
 
 
 class MetricsTests(unittest.TestCase):

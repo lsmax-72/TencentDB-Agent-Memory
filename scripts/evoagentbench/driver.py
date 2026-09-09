@@ -27,6 +27,7 @@ EVO_REPO = Path("/Users/lsmax/Coder/EvoAgentBench")
 LCB_REPO = Path("/Users/lsmax/Coder/LiveCodeBench")
 PYTHON = EVO_REPO / ".venv-tdai/bin/python"
 NANOBOT = EVO_REPO / ".venv-tdai/bin/nanobot"
+NANOBOT_COMPAT = REPO / "scripts/evoagentbench/nanobot_cli_compat.py"
 DEFAULT_ROOT = Path("/Users/lsmax/Coder/evoagentbench-artifacts/code-v1")
 CORE_URL = "http://127.0.0.1:8420"
 PROXY_URL = "http://127.0.0.1:8096/proxy/default/v1/chat/completions"
@@ -232,7 +233,7 @@ def run_trial(root: Path, phase: str, arm: str, task_id: str, trial: int, infras
         }
         write_new(home / ".nanobot/config.json", global_config, private=True)
         agent_yaml = f"""name: nanobot
-command: {NANOBOT}
+command: {NANOBOT_COMPAT}
 model: {protocol['agent']['model']}
 provider: custom
 providers:
