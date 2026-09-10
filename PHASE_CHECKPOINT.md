@@ -1,5 +1,14 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-10 EvoAgentBench train-only refinement：Memory 冻结，Skill 两版拒绝
+
+- 固定协议与 24 条 experience 轨迹未变；此前结果仍为 22 PASS / 2 FAIL / 0 INFRA。新增真实 train-only 提炼：最终干净 attempt `r1-a7` 经 MemoryProxy auxiliary 路径调用 `qwen3.8-27b`，明确跳过 session-init、正式资产注入、L0 写入和自动抽取，冻结 24 条 Memory 与 6 条初始 Skill。成本 38,708 tokens / 25 model calls，artifact `83e9edeb31163c130a50ef5eee7f11c20b8aabfdbc62d82f76f85b96b00f65a6`。
+- `r1` 的 train-only 证据审计发现两个 Skill 伪造/混淆跨任务支持，未进入 development。最终允许的语义 revision `r2` 增加逐字 support evidence 与概念一致性校验，复用冻结 Memory、不重复调用模型；artifact `dec832c91da7590498d5b085e24a855447812071e0cd88bb20a83cdc46282eba`。
+- `r2` 仍有一个 Skill 把 parity-tracked fixed-window flip 与 stack cancellation 合并，因此同样 `REJECTED_BEFORE_DEVELOPMENT`。两版 review receipt 均附加在 frozen artifact 目录；没有使用 development/test 结果、没有 Promotion，也没有运行官方 test。按 frozen Pilot 的“Skill 最多两个 revision”规则，当前不能生成 r3，三组 development 对照尚未开始。
+- `r1-a1` 至 `r1-a6` 历史失败全部保留。审计发现它们走主 Proxy 路径，曾受到正式 Skill/长期记忆注入并触发自动 Skill 抽取，已统一标记 `INVALIDATED_FOR_CANDIDATE_FREEZE`。由这些调用误生成的 `skl-mWVxWw23LiC1`（version 7）已在专用 benchmark Team 精确归档；复核 SkillCore active=0、metadata active=0。历史 Chat Memory/L0 未删除；未来 Pilot 必须使用 fresh Agent scope，避免旧高层记忆污染 Vanilla。
+- 提炼脚本现支持逐条 checkpoint、独立 infra/format attempt、JSON/长度/测试特征校验、严格来源证据、跨 revision Memory provenance 与 auxiliary 隔离。Python 15 tests、全脚本 py_compile、`git diff --check` PASS；用户三个 deployment 改动保持不碰。
+- 下一步需要人工决定是否放宽“最多两个 Skill revision”以允许修正生成器后产生 r3。未获授权前可以继续完善离线 BenchmarkAdapter/retrieval/fresh-scope 代码，但不能把被拒绝的 r2 用于 Skill arm，也不能打开官方 test。
+
 ## 2026-09-08 Codex 全局 capture-only 接入完成
 
 - 本机用户级 Codex Hooks 已接到主 8125：所有新 Codex 会话采集 `SessionStart / UserPromptSubmit / PostToolUse / Stop / Interrupt / SessionEnd`，写入独立 private `Codex Observation` Team/`codex-global` Agent。

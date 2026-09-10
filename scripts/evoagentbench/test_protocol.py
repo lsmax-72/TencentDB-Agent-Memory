@@ -9,6 +9,7 @@ from scripts.evoagentbench.metrics import compare
 from scripts.evoagentbench.nanobot_cli_compat import prepare_invocation
 from scripts.evoagentbench.protocol import build_protocol, sha256_json
 from scripts.evoagentbench.report import build as build_report
+from scripts.evoagentbench.refine import _response_json, _skill_response_format, _validate_memory, _validate_skills
 
 
 class ProtocolTests(unittest.TestCase):
@@ -111,6 +112,49 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(command[-1], "--no-markdown")
             self.assertEqual(Path(env["HOME"]), workspace / ".tdai-nanobot-home")
             self.assertTrue((Path(env["HOME"]) / ".nanobot/config.json").is_file())
+
+    def test_refinement_rejects_single_source_or_case_specific_skill(self):
+        quote_a = "Use bitmask dynamic programming to evaluate every subset transition."
+        quote_b = "Apply bitmask dynamic programming over subset states and valid moves."
+        memories = {
+            "train-a": {"approach": quote_a, "key_insight": "subset transitions are bounded"},
+            "train-b": {"approach": quote_b, "key_insight": "subset states encode remaining items"},
+        }
+        valid_skill = {
+            "name": "Bitmask Dynamic Programming", "description": "Use bitmask dynamic programming for subset transitions.",
+            "content": "Trigger on subset states. Procedure: enumerate transitions. Verification: compare small states. Stop when all states are resolved.",
+            "support_task_ids": ["train-a", "train-b"],
+            "support_evidence": [{"task_id": "train-a", "quote": quote_a}, {"task_id": "train-b", "quote": quote_b}],
+        }
+        single_skill = json.loads(json.dumps(valid_skill))
+        single_skill["support_task_ids"] = ["train-a"]
+        single_skill["support_evidence"] = [{"task_id": "train-a", "quote": quote_a}]
+        single = {"skills": [single_skill, valid_skill]}
+        with self.assertRaisesRegex(ValueError, "SKILL_SUPPORT_INVALID"):
+            _validate_skills(single, memories)
+        specific = {"skills": [json.loads(json.dumps(valid_skill)), {**json.loads(json.dumps(valid_skill)), "name": "Second Bitmask Skill"}]}
+        specific["skills"][0]["content"] = "Use train-a's answer"
+        with self.assertRaisesRegex(ValueError, "SKILL_CASE_SPECIFIC_CONTENT"):
+            _validate_skills(specific, memories)
+        too_long = json.loads(json.dumps(specific))
+        too_long["skills"][0]["content"] = "x" * 2001
+        with self.assertRaisesRegex(ValueError, "SKILL_TEXT_TOO_LONG"):
+            _validate_skills(too_long, memories)
+
+    def test_refinement_accepts_plain_or_fenced_json(self):
+        self.assertEqual(_response_json('{"ok":true}'), {"ok": True})
+        self.assertEqual(_response_json('```json\n{"ok":true}\n```'), {"ok": True})
+
+    def test_refinement_memory_rejects_case_specific_content(self):
+        value = {"task_intent": "solve train-a", "approach": "general", "key_insight": "general", "applicability": "general"}
+        with self.assertRaisesRegex(ValueError, "MEMORY_CASE_SPECIFIC_CONTENT"):
+            _validate_memory(value, {"train-a", "train-b"})
+
+    def test_refinement_skill_schema_freezes_source_ids(self):
+        schema = _skill_response_format({"train-b", "train-a"})
+        item = schema["json_schema"]["schema"]["properties"]["skills"]["items"]
+        self.assertFalse(item["additionalProperties"])
+        self.assertEqual(item["properties"]["support_task_ids"]["items"]["enum"], ["train-a", "train-b"])
 
 
 class MetricsTests(unittest.TestCase):

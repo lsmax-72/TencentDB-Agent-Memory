@@ -32,6 +32,16 @@ After both frozen smoke tasks pass, collect the remaining experience tasks with 
 python3 -m scripts.evoagentbench.batch experience
 ```
 
+Freeze one train-only Memory/Skill revision after all 24 experience outcomes exist:
+
+```bash
+python3 -m scripts.evoagentbench.refine --revision 1 --attempt 1
+```
+
+Infrastructure or response-format retries increment `--attempt` without consuming the two semantic Skill revision slots. A frozen semantic revision is immutable.
+Validated per-case checkpoints from a failed attempt may be reused explicitly with `--resume-from-attempt`; the frozen manifest retains both attempt numbers and the original generation usage.
+When only the Skill synthesis is revised from train evidence, `--reuse-memories-from-revision` carries forward the frozen Memory content and provenance without another model call.
+
 Each official task gets a fresh Hub Task, nanobot workspace, session and loopback identity bridge. The bridge permits only OpenAI-compatible chat completions to the existing MemoryProxy and stores usage/model hashes without retaining request or response bodies.
 
 After all three arms of a frozen phase exist, build and ingest one immutable comparison:
