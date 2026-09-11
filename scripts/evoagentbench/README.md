@@ -42,6 +42,23 @@ Infrastructure or response-format retries increment `--attempt` without consumin
 Validated per-case checkpoints from a failed attempt may be reused explicitly with `--resume-from-attempt`; the frozen manifest retains both attempt numbers and the original generation usage.
 When only the Skill synthesis is revised from train evidence, `--reuse-memories-from-revision` carries forward the frozen Memory content and provenance without another model call.
 
+The original protocol still records a two-revision refinement ceiling. If both
+revisions are rejected because one item in the batch is invalid, do not edit or
+regenerate either artifact. The separately hashed refinement policy v2 permits
+one mechanical repair revision: remove only Skill IDs explicitly named by the
+source review, revalidate every retained Skill against its grounded train
+quotes, and make zero model calls.
+
+```bash
+python3 -m scripts.evoagentbench.repair_candidate \
+  --source-revision 2 --target-revision 3
+```
+
+This changes candidate refinement provenance only. It does not change the task
+selection, model, budget, development gate, official test gate, or promotion
+rules. The repair receipt can authorize development evaluation, never test
+access or production adoption.
+
 Each official task gets a fresh Hub Task, nanobot workspace, session and loopback identity bridge. The bridge permits only OpenAI-compatible chat completions to the existing MemoryProxy and stores usage/model hashes without retaining request or response bodies.
 
 After all three arms of a frozen phase exist, build and ingest one immutable comparison:

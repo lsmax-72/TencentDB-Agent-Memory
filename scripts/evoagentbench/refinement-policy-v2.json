@@ -1,0 +1,19 @@
+{
+  "schema": "tdai-evoagentbench-refinement-policy-v1",
+  "policy_id": "tdai-evoagentbench-code-refinement-v2",
+  "policy_revision": 2,
+  "source_protocol_id": "tdai-evoagentbench-code-v1",
+  "source_protocol_hash": "d3bcb0ee7bd7b056e54471227ecd401de71a88b86376f8ad2d71c71fd27871e3",
+  "max_skill_revisions": 3,
+  "change_scope": "candidate_refinement_only",
+  "evaluation_protocol_unchanged": true,
+  "repair_strategy": "remove_review_rejected_skills_without_regeneration",
+  "requirements": {
+    "source_review_status": "REJECTED_BEFORE_DEVELOPMENT",
+    "retain_only_unflagged_skills": true,
+    "revalidate_retained_skill_evidence": true,
+    "model_calls": 0,
+    "development_or_test_results_used": false
+  },
+  "policy_hash": "4e3c9866b388c62218fdcac602e3763489decf6e99a4aa1f59e82c6f91d82a92"
+}

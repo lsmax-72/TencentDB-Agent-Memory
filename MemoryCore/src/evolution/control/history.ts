@@ -20,6 +20,8 @@ type HistoricalCandidate = {
   derived_from_candidate_id?: string;
   support_evidence?: unknown[];
   generation_usage?: Record<string, unknown>;
+  active_model_calls?: number;
+  repair_model_calls?: number;
   review_reason?: string;
   review_findings?: unknown[];
   review_action?: string;
@@ -41,7 +43,7 @@ function importRefinementBundle(store: EvolutionStore, data: Record<string, any>
   return (data.candidates as HistoricalCandidate[]).map(candidate => {
     if (!candidate || !["memory", "skill"].includes(candidate.asset_kind) || typeof candidate.candidate_id !== "string" || candidate.candidate_id.length > 160
       || !Number.isSafeInteger(candidate.candidate_revision) || candidate.candidate_revision < 1
-      || !["TRAIN_ONLY_FROZEN", "REJECTED_BEFORE_DEVELOPMENT"].includes(candidate.status)
+      || !["TRAIN_ONLY_FROZEN", "REJECTED_BEFORE_DEVELOPMENT", "APPROVED_FOR_DEVELOPMENT"].includes(candidate.status)
       || !candidate.content || typeof candidate.content !== "object" || Array.isArray(candidate.content)
       || !hashPattern.test(candidate.content_hash) || contentHash(candidate.content) !== candidate.content_hash
       || !hashPattern.test(candidate.artifact_hash) || !artifactHashes.has(candidate.artifact_hash)
@@ -66,7 +68,8 @@ function importRefinementBundle(store: EvolutionStore, data: Record<string, any>
         after, frozen_content: candidate.content, source_task_ids: candidate.source_task_ids,
         source_evidence_hashes: candidate.source_evidence_hashes, source_status: candidate.source_status,
         derived_from_candidate_id: candidate.derived_from_candidate_id, support_evidence: candidate.support_evidence,
-        generation_usage: candidate.generation_usage, review_reason: candidate.review_reason,
+        generation_usage: candidate.generation_usage, active_model_calls: candidate.active_model_calls, repair_model_calls: candidate.repair_model_calls,
+        review_reason: candidate.review_reason,
         review_findings: candidate.review_findings, review_action: candidate.review_action,
         protocol_id: data.protocol_id, protocol_hash: data.protocol_hash,
         source_name: sourceName, source_hash: sourceHash, import_format: data.schema,

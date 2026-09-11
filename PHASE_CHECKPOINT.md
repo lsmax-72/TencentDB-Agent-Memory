@@ -1,5 +1,13 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-11 Skill refinement 阻塞修复：r3 可进入 development
+
+- 用户明确要求先修复“两版 Skill 均被拒绝且旧 revision 上限阻断继续”的问题。原 benchmark protocol v1、r1/r2 artifact/review 和所有历史结果保持不变；新增独立 hash 的 `tdai-evoagentbench-code-refinement-v2`，只把候选修复上限扩到 r3，不改变 Case、split、模型、budget、检索、development/test Gate 或 Promotion 标准。
+- 根因不是需要再调一轮提示词，而是 r2 批次中 `skill-r2-02` 把 fixed-window parity flip 与 stack cancellation 错误合并。新机械 repair 按原 review 的精确 Skill ID 删除该项，并用既有 grounded multi-source validator 重验剩余内容；不读取 development/test 结果、不调用模型。
+- 冻结 r3 只保留由 3193/3446 两条独立 train 证据支持的 pair-enumeration Skill。artifact `789d040f5fbaba0b2561e05a9070a9ec2a1d32ed10c786e8a397cbe68fe5e181`，policy `4e3c9866b388c62218fdcac602e3763489decf6e99a4aa1f59e82c6f91d82a92`，repair model calls=0；review 为 `APPROVED_FOR_DEVELOPMENT`，明确不授权 test 或 Promotion。
+- 8125 已导入 r3 只读记录；EvoAgentBench Team 候选总数 33，页面实际显示“允许进入开发集评测·只读”、来源生成成本和本次修复模型调用 0。主 Hub runtime 为 `/Users/lsmax/Coder/phase6-artifacts/runtime/memoryhub-main-20260911-r4`，更新前备份为 `/Users/lsmax/Coder/phase6-artifacts/backups/memoryhub-main-20260911-pre-r4`，8420/8125/8424 healthy。
+- 当前下一步已从协议阻塞变为运行 development 的 Vanilla / Memory-r3 / Skill-r3 三组对照。只有 development Gate PASS 才能打开 official test；r3 本身仍不是收益证明。
+
 ## 2026-09-11 MemoryHub 真实 benchmark 证据可见性交付
 
 - 根因已确认：25 条 run trace 已在 Core，但 24 条冻结 Memory 和 r1/r2 Skill 只存在于 benchmark 文件系统，过去从未导入 8125；因此用户看到候选数 0，不是生成失败。

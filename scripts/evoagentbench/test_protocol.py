@@ -13,6 +13,7 @@ from scripts.evoagentbench.retrieval import injection_text, select_assets
 from scripts.evoagentbench.report import build as build_report
 from scripts.evoagentbench.refine import _response_json, _skill_response_format, _validate_memory, _validate_skills
 from scripts.evoagentbench.hub_export import build_bundle
+from scripts.evoagentbench.repair_candidate import repair
 
 
 class ProtocolTests(unittest.TestCase):
@@ -64,6 +65,41 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(sum(row["asset_kind"] == "memory" for row in bundle["candidates"]), 1)
             self.assertEqual(sum(row["asset_kind"] == "skill" for row in bundle["candidates"]), 3)
             self.assertTrue(all(row["promotion_allowed"] is False for row in bundle["candidates"]))
+
+    def test_review_repair_prunes_only_flagged_skill_without_model_calls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            protocol = json.loads(Path("scripts/evoagentbench/protocol-code-v1.json").read_text())
+            directory = root / "frozen/refinement-r2"
+            directory.mkdir(parents=True)
+            quote_a = "Use bitmask dynamic programming to evaluate every subset transition."
+            quote_b = "Apply bitmask dynamic programming over subset states and valid moves."
+            memories = [
+                {"id": "memory-r2-01", "source_task_id": "train-a", "source_status": "TASK_PASS", "source_evidence_hash": "a" * 64, "task_intent": "subset game", "approach": quote_a, "key_insight": "subset transitions are bounded", "applicability": "small subsets"},
+                {"id": "memory-r2-02", "source_task_id": "train-b", "source_status": "TASK_PASS", "source_evidence_hash": "b" * 64, "task_intent": "subset search", "approach": quote_b, "key_insight": "subset states encode remaining items", "applicability": "small subsets"},
+            ]
+            for memory in memories:
+                memory["content_hash"] = sha256_json({key: memory[key] for key in ("task_intent", "approach", "key_insight", "applicability")})
+            public = {"name": "Bitmask Dynamic Programming", "description": "Use bitmask dynamic programming for subset transitions.", "content": "Trigger on subset states. Procedure: enumerate transitions. Verification: compare small states. Stop when all states are resolved."}
+            valid = {**public, "id": "skill-r2-01", "support_task_ids": ["train-a", "train-b"], "support_evidence": [{"task_id": "train-a", "quote": quote_a}, {"task_id": "train-b", "quote": quote_b}], "content_hash": sha256_json(public)}
+            invalid = {**valid, "id": "skill-r2-02", "name": "Merged mechanisms"}
+            invalid["content_hash"] = sha256_json({key: invalid[key] for key in ("name", "description", "content")})
+            skills = [valid, invalid]
+            manifest = {"schema": "tdai-evoagentbench-refinement-v1", "revision": 2, "protocol_hash": protocol["protocol_hash"], "source_manifest_hash": "s" * 64, "memory_count": 2, "skill_count": 2, "generation_usage": {"input_tokens": 8, "output_tokens": 2, "total_tokens": 10, "model_calls": 3}, "generation_attempts": [1], "generation_sources": ["r2-a1"], "active_attempt_model_calls": 3, "reused_model_calls": 0, "reused_memories_from_revision": 1, "model": "qwen3.8-27b", "temperature": 0, "fallback": "disabled", "train_only": True, "created_at": "now"}
+            manifest["artifact_hash"] = sha256_json({"manifest": manifest, "memories": memories, "skills": skills})
+            (directory / "manifest.json").write_text(json.dumps(manifest))
+            (directory / "memories.json").write_text(json.dumps(memories))
+            (directory / "skills.json").write_text(json.dumps(skills))
+            (directory / "review.json").write_text(json.dumps({"status": "REJECTED_BEFORE_DEVELOPMENT", "artifact_hash": manifest["artifact_hash"], "findings": [{"skill_id": "skill-r2-02", "finding": "mixed"}]}))
+            policy = {"schema": "tdai-evoagentbench-refinement-policy-v1", "policy_id": "test-policy", "source_protocol_id": protocol["protocol_id"], "source_protocol_hash": protocol["protocol_hash"], "max_skill_revisions": 3, "evaluation_protocol_unchanged": True, "repair_strategy": "remove_review_rejected_skills_without_regeneration", "requirements": {"source_review_status": "REJECTED_BEFORE_DEVELOPMENT"}}
+            policy["policy_hash"] = sha256_json(policy)
+            policy_path = root / "policy.json"; policy_path.write_text(json.dumps(policy))
+            result = repair(root, 2, 3, policy_path)
+            self.assertEqual([row["derived_from_skill_id"] for row in result["skills"]], ["skill-r2-01"])
+            self.assertEqual(result["manifest"]["repair_model_calls"], 0)
+            self.assertEqual(result["review"]["status"], "APPROVED_FOR_DEVELOPMENT")
+            with self.assertRaisesRegex(FileExistsError, "REFINEMENT_REVISION_ALREADY_EXISTS"):
+                repair(root, 2, 3, policy_path)
 
     def test_experience_resume_reuses_valid_smoke_and_stops_on_incomplete_primary(self):
         with tempfile.TemporaryDirectory() as tmp:

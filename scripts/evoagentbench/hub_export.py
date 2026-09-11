@@ -38,29 +38,32 @@ def _validated_revision(root: Path, revision: int, protocol_hash: str) -> tuple[
     return manifest, memories, skills, review
 
 
-def build_bundle(root: Path) -> dict[str, Any]:
+def build_bundle(root: Path, revisions: tuple[int, ...] = (1, 2), include_memories: bool = True) -> dict[str, Any]:
     protocol = _read(PROTOCOL_FILE)
     protocol_hash = protocol["protocol_hash"]
-    revisions = [_validated_revision(root, revision, protocol_hash) for revision in (1, 2)]
+    if not revisions or len(set(revisions)) != len(revisions) or any(revision < 1 for revision in revisions):
+        raise ValueError("REFINEMENT_EXPORT_REVISIONS_INVALID")
+    frozen_revisions = [_validated_revision(root, revision, protocol_hash) for revision in revisions]
 
-    # r2 is the final Memory snapshot. Importing r1 as another 24 logical
-    # memories would duplicate the same train evidence in the Hub.
-    r2_manifest, r2_memories, _, _ = revisions[1]
     candidates: list[dict[str, Any]] = []
-    for memory in r2_memories:
-        public = {key: memory[key] for key in ("task_intent", "approach", "key_insight", "applicability")}
-        if canonical_hash(public) != memory.get("content_hash"):
-            raise ValueError("MEMORY_CONTENT_HASH_MISMATCH")
-        candidates.append({
-            "asset_kind": "memory", "candidate_id": memory["id"], "candidate_revision": 2,
-            "status": "TRAIN_ONLY_FROZEN", "content": public, "content_hash": memory["content_hash"],
-            "source_task_ids": [memory["source_task_id"]], "source_evidence_hashes": [memory["source_evidence_hash"]],
-            "source_status": memory["source_status"], "derived_from_candidate_id": memory.get("derived_from_memory_id"),
-            "artifact_hash": r2_manifest["artifact_hash"], "generation_usage": r2_manifest["generation_usage"],
-            "train_only": True, "research_only": True, "promotion_allowed": False,
-        })
+    if include_memories:
+        # Only the newest requested Memory snapshot is logical state. Importing
+        # every inherited copy would duplicate the same train evidence.
+        final_manifest, final_memories, _, _ = frozen_revisions[-1]
+        for memory in final_memories:
+            public = {key: memory[key] for key in ("task_intent", "approach", "key_insight", "applicability")}
+            if canonical_hash(public) != memory.get("content_hash"):
+                raise ValueError("MEMORY_CONTENT_HASH_MISMATCH")
+            candidates.append({
+                "asset_kind": "memory", "candidate_id": memory["id"], "candidate_revision": final_manifest["revision"],
+                "status": "TRAIN_ONLY_FROZEN", "content": public, "content_hash": memory["content_hash"],
+                "source_task_ids": [memory["source_task_id"]], "source_evidence_hashes": [memory["source_evidence_hash"]],
+                "source_status": memory["source_status"], "derived_from_candidate_id": memory.get("derived_from_memory_id"),
+                "artifact_hash": final_manifest["artifact_hash"], "generation_usage": final_manifest["generation_usage"],
+                "train_only": True, "research_only": True, "promotion_allowed": False,
+            })
 
-    for manifest, _, skills, review in revisions:
+    for manifest, _, skills, review in frozen_revisions:
         for skill in skills:
             public = {key: skill[key] for key in ("name", "description", "content")}
             if canonical_hash(public) != skill.get("content_hash"):
@@ -70,7 +73,8 @@ def build_bundle(root: Path) -> dict[str, Any]:
                 "status": review["status"], "content": public, "content_hash": skill["content_hash"],
                 "source_task_ids": skill["support_task_ids"], "support_evidence": skill.get("support_evidence", []),
                 "artifact_hash": manifest["artifact_hash"], "generation_usage": manifest["generation_usage"],
-                "review_reason": review["reason"], "review_findings": review["findings"], "review_action": review["action"],
+                "active_model_calls": manifest.get("active_attempt_model_calls"), "repair_model_calls": manifest.get("repair_model_calls"),
+                "review_reason": review["reason"], "review_findings": review.get("findings", []), "review_action": review["action"],
                 "train_only": True, "research_only": True, "promotion_allowed": False,
             })
 
@@ -81,7 +85,7 @@ def build_bundle(root: Path) -> dict[str, Any]:
             "revision": manifest["revision"], "artifact_hash": manifest["artifact_hash"],
             "review_status": review["status"], "generation_usage": manifest["generation_usage"],
             "memory_count": manifest["memory_count"], "skill_count": manifest["skill_count"],
-        } for manifest, _, _, review in revisions],
+        } for manifest, _, _, review in frozen_revisions],
         "candidate_count": len(candidates), "candidates": candidates,
         "evidence_limitations": [
             "Only train-derived frozen research assets are included.",
@@ -97,8 +101,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--revisions", type=int, nargs="+", default=[1, 2])
+    parser.add_argument("--skip-memories", action="store_true")
     args = parser.parse_args()
-    bundle = build_bundle(args.root)
+    bundle = build_bundle(args.root, tuple(args.revisions), not args.skip_memories)
     write_new(args.output, bundle)
     print(json.dumps({"output": str(args.output), "bundle_hash": bundle["bundle_hash"], "candidates": bundle["candidate_count"]}))
 
