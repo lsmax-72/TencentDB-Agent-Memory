@@ -95,8 +95,10 @@ function EvolutionPageBody({ section }: { section: Section }) {
   const [acting, setActing] = useState(false);
   const [reason, setReason] = useState('');
   const generation = useRef(0);
+  const detailRef = useRef<HTMLElement | null>(null);
   const info = EVOLUTION_SECTIONS[section];
   const selectedId = params.get('record');
+  const detailId = detail?.record.id;
   const listKind = section === 'diagnoses' && subview === 'playbook' ? 'playbook' : section === 'reviews' && subview !== 'history' ? 'candidate' : info.kind;
 
   const load = useCallback(async () => {
@@ -120,6 +122,15 @@ function EvolutionPageBody({ section }: { section: Section }) {
 
   useEffect(() => { void load(); return () => { ++generation.current; }; }, [load]);
   useEffect(() => { setPage(0); setFilter(''); setReason(''); setSubview(''); }, [activeTeamId, section]);
+  useEffect(() => {
+    if (!detailId) return;
+    // Record details follow the table, so reveal and focus them after an explicit selection.
+    const frame = window.requestAnimationFrame(() => {
+      detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      detailRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [detailId]);
   useEffect(() => {
     if (!overview || !(overview.statuses.QUEUED || overview.statuses.RUNNING) || acting) return;
     const timer = window.setTimeout(() => void load(), 5000); return () => window.clearTimeout(timer);
@@ -160,6 +171,7 @@ function EvolutionPageBody({ section }: { section: Section }) {
       {section === 'diagnoses' && <div className="evolution-toolbar"><Button onClick={() => { setSubview(''); setPage(0); }}>诊断</Button><Button onClick={() => { setSubview('playbook'); setPage(0); }}>进化经验 Playbook</Button></div>}
       {section === 'reviews' && <div className="evolution-toolbar"><Button onClick={() => { setSubview(''); setPage(0); }}>待审候选</Button><Button onClick={() => { setSubview('history'); setPage(0); }}>审查记录</Button></div>}
       <div className="evolution-toolbar"><span>共 {total} 条记录</span>{section === 'candidates' && <label>资产类型 <Select value={filter} onChange={value => { setFilter(value); setPage(0); }} options={[{ value: '', text: '全部' }, { value: 'skill', text: 'Skill' }, { value: 'memory', text: 'Memory' }, { value: 'wiki', text: 'Wiki' }]} /></label>}</div>
+      {selectedId && loading && <Alert type="info">正在打开记录详情…</Alert>}
       <Table records={visible} recordKey="id" columns={[
         { key: 'title', header: '记录', render: record => <Button className="evolution-record-link" type="link" onClick={() => setParams({ record: record.id })}>{record.title}</Button> },
         { key: 'kind', header: '类型', render: record => String(record.payload.asset_kind ?? record.kind) },
@@ -169,7 +181,7 @@ function EvolutionPageBody({ section }: { section: Section }) {
       ]} />
       {!loading && !records.length && <div className="evolution-empty"><h3>当前团队暂无可见{info.title}记录</h3><p>这不代表任务全部通过。其他团队或没有读取权限的证据不会在这里显示。</p><p>历史资料需要通过受控导入接入；新记录需要真实任务完成信号。</p></div>}
       <div className="evolution-pagination"><Button disabled={page === 0 || loading} onClick={() => setPage(value => value - 1)}>上一页</Button><span>第 {page + 1} 页</span><Button disabled={(page + 1) * 30 >= total || loading} onClick={() => setPage(value => value + 1)}>下一页</Button></div>
-      {detail && <section className="evolution-detail"><div className="evolution-header"><h3>{detail.record.title}</h3><Button onClick={() => setParams({})}>关闭详情</Button></div>
+      {detail && <section ref={detailRef} className="evolution-detail" tabIndex={-1} aria-live="polite"><div className="evolution-header"><h3>{detail.record.title}</h3><Button onClick={() => setParams({})}>关闭详情</Button></div>
         <p>{recordOrigin(detail.record)} · {recordStatus(detail.record)} · revision {detail.record.revision}</p>
         <p className="evolution-hash">artifact hash：{detail.record.artifact_hash}</p>
         {detail.record.payload.evidence_mode === 'observation' && <Alert type="info">这是 Codex 回合观测，不代表业务任务已经完成，也不会自动触发诊断或候选生成。</Alert>}

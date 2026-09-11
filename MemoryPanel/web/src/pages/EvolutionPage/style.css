@@ -13,6 +13,7 @@
 .evolution-metrics span { display: block; color: #666; }
 .evolution-metrics strong { display: block; font-size: 28px; margin-top: 12px; font-weight: 500; }
 .evolution-policy, .evolution-detail { background: white; border: 1px solid #e5e8ed; padding: 20px; margin: 20px 0; }
+.evolution-detail { scroll-margin-top: 20px; outline: none; }
 .evolution-toolbar, .evolution-pagination { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin: 16px 0; }
 .evolution-toolbar select { padding: 6px 12px; border: 1px solid #ddd; background: white; }
 .evolution-empty { text-align: center; padding: 40px 20px; border: 1px solid #e5e8ed; background: white; }
