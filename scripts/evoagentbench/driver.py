@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .adapter import adapt_trial
+from .adapter import adapt_trial, sha256_file
 from .protocol import validate_frozen_protocol
 
 
@@ -170,6 +170,29 @@ def _phase_tasks(protocol: dict[str, Any], phase: str) -> set[str]:
     return set(protocol["selection"][mapping[phase]])
 
 
+def _candidate_assets(root: Path, revision: int, arm: str, protocol_hash: str) -> tuple[list[dict[str, Any]], str]:
+    frozen = root / "frozen" / f"refinement-r{revision}"
+    manifest_path = frozen / "manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError("FROZEN_CANDIDATE_MISSING")
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("protocol_hash") != protocol_hash:
+        raise ValueError("CANDIDATE_PROTOCOL_HASH_MISMATCH")
+    artifact_hash = manifest.get("artifact_hash")
+    manifest_without_hash = dict(manifest)
+    manifest_without_hash.pop("artifact_hash", None)
+    memories = json.loads((frozen / "memories.json").read_text())
+    skills = json.loads((frozen / "skills.json").read_text())
+    if canonical_hash({"manifest": manifest_without_hash, "memories": memories, "skills": skills}) != artifact_hash:
+        raise ValueError("CANDIDATE_ARTIFACT_HASH_MISMATCH")
+    if arm == "skill":
+        review_path = frozen / "review.json"
+        review = json.loads(review_path.read_text()) if review_path.is_file() else {}
+        if review.get("status") != "APPROVED_FOR_DEVELOPMENT":
+            raise ValueError("SKILL_NOT_APPROVED_FOR_DEVELOPMENT")
+    return (memories if arm == "memory" else skills), artifact_hash
+
+
 def _wait_file(path: Path, process: subprocess.Popen, seconds: int = 10) -> None:
     for _ in range(seconds * 10):
         if path.exists():
@@ -180,7 +203,7 @@ def _wait_file(path: Path, process: subprocess.Popen, seconds: int = 10) -> None
     raise TimeoutError("PROXY_BRIDGE_START_TIMEOUT")
 
 
-def run_trial(root: Path, phase: str, arm: str, task_id: str, trial: int, infrastructure_retry: int | None = None) -> None:
+def run_trial(root: Path, phase: str, arm: str, task_id: str, trial: int, infrastructure_retry: int | None = None, candidate_revision: int | None = None) -> None:
     protocol = json.loads(PROTOCOL_FILE.read_text())
     if task_id not in _phase_tasks(protocol, phase):
         raise ValueError("TASK_NOT_IN_FROZEN_PHASE")
@@ -188,8 +211,17 @@ def run_trial(root: Path, phase: str, arm: str, task_id: str, trial: int, infras
         raise ValueError("UNKNOWN_ARM")
     if phase in {"smoke", "experience"} and arm != "vanilla":
         raise ValueError("TRAIN_COLLECTION_IS_VANILLA_ONLY")
+    if arm == "vanilla" and candidate_revision is not None:
+        raise ValueError("VANILLA_CANDIDATE_REVISION_FORBIDDEN")
+    if arm != "vanilla" and candidate_revision is None:
+        raise ValueError("CANDIDATE_REVISION_REQUIRED")
+    asset_pool: list[dict[str, Any]] = []
+    candidate_hash = None
+    if candidate_revision is not None:
+        asset_pool, candidate_hash = _candidate_assets(root, candidate_revision, arm, protocol["protocol_hash"])
     retry_suffix = f"-infra-retry-{infrastructure_retry}" if infrastructure_retry is not None else ""
-    run_id = f"{phase}-{task_id}-{arm}-trial-{trial}{retry_suffix}"
+    revision_suffix = f"-r{candidate_revision}" if candidate_revision is not None else ""
+    run_id = f"{phase}-{task_id}-{arm}{revision_suffix}-trial-{trial}{retry_suffix}"
     run_dir = root / "runs" / run_id
     if run_dir.exists():
         raise FileExistsError("IMMUTABLE_RUN_ALREADY_EXISTS")
@@ -203,7 +235,7 @@ def run_trial(root: Path, phase: str, arm: str, task_id: str, trial: int, infras
         "title": f"EvoAgentBench / {phase} / {task_id} / {arm} / trial {trial}",
         "description": "Pinned official verifier run; candidate promotion forbidden",
         "source_type": "other", "auto_assign_floating_assets": False,
-        "metadata_json": json.dumps({"protocol_hash": protocol["protocol_hash"], "phase": phase, "arm": arm, "official_task_id": task_id}),
+        "metadata_json": json.dumps({"protocol_hash": protocol["protocol_hash"], "phase": phase, "arm": arm, "official_task_id": task_id, "candidate_revision": candidate_revision, "candidate_artifact_hash": candidate_hash}),
         "linked_agents": [{"agent_id": scope["agent_id"]}],
     }, user_key)
     session_id = f"eab-{secrets.token_hex(12)}"
@@ -270,6 +302,23 @@ live: false
 """
         write_new(private / "config.yaml", config_yaml, private=True)
         env = {**os.environ, "HOME": str(home), "PYTHONUNBUFFERED": "1", "NO_PROXY": "*", "no_proxy": "*", "HF_ENDPOINT": "https://hf-mirror.com"}
+        for name in (
+            "TDAI_EVO_ASSET_POOL", "TDAI_EVO_ASSET_KIND", "TDAI_EVO_ASSET_TOP_K",
+            "TDAI_EVO_INJECTION_RECEIPT", "TDAI_EVO_CANDIDATE_HASH",
+        ):
+            env.pop(name, None)
+        receipt_path = private / "injection-receipt.json"
+        if arm != "vanilla":
+            pool_path = private / "asset-pool.json"
+            write_new(pool_path, asset_pool, private=True)
+            env.update({
+                "TDAI_EVO_ASSET_POOL": str(pool_path),
+                "TDAI_EVO_ASSET_KIND": arm,
+                "TDAI_EVO_ASSET_TOP_K": str(protocol["retrieval"]["top_k"]),
+                "TDAI_EVO_INJECTION_RECEIPT": str(receipt_path),
+                "TDAI_EVO_RUN_PRIVATE": str(private),
+                "TDAI_EVO_CANDIDATE_HASH": candidate_hash or "",
+            })
         log_file = private / "official.log"
         with log_file.open("x") as log:
             completed = subprocess.run([
@@ -289,7 +338,17 @@ live: false
             api("/v3/meta/participation-log/append", {**scope, "task_id": task["task_id"], "user_id": scope["owner_user_id"], "source": "evoagentbench-compatible", "metadata_json": json.dumps(safe_failure)}, user_key)
             api("/v3/meta/task/update", {"task_id": task["task_id"], "status": "completed", "metadata_json": json.dumps(safe_failure)}, user_key)
             raise RuntimeError("OFFICIAL_RESULT_MISSING")
-        evidence = adapt_trial(trial_dir, arm=arm, phase=phase, protocol_hash=protocol["protocol_hash"], expected_model=protocol["agent"]["model"], proxy_events_path=events_file)
+        receipt = json.loads(receipt_path.read_text()) if receipt_path.is_file() else None
+        if arm != "vanilla" and receipt is None:
+            raise RuntimeError("INJECTION_RECEIPT_MISSING")
+        evidence = adapt_trial(
+            trial_dir, arm=arm, phase=phase, protocol_hash=protocol["protocol_hash"],
+            expected_model=protocol["agent"]["model"], proxy_events_path=events_file,
+            injected_assets=receipt["assets"] if receipt else [], injection_receipt=receipt,
+        )
+        evidence["candidate_revision"] = candidate_revision
+        evidence["source_artifacts"]["injection_receipt_sha256"] = sha256_file(receipt_path) if receipt else None
+        evidence["evidence_hash"] = canonical_hash({key: value for key, value in evidence.items() if key != "evidence_hash"})
         evidence["run_id"] = run_id
         evidence["hub_scope"] = {**scope, "task_id": task["task_id"]}
         evidence["research_only"] = True
@@ -331,6 +390,7 @@ def main() -> None:
     parser.add_argument("--task")
     parser.add_argument("--trial", type=int, default=1)
     parser.add_argument("--infrastructure-retry", type=int)
+    parser.add_argument("--candidate-revision", type=int)
     args = parser.parse_args()
     if args.command == "setup":
         setup(args.root)
@@ -341,7 +401,7 @@ def main() -> None:
             parser.error("run requires --phase, --arm and --task")
         if args.infrastructure_retry is not None and args.infrastructure_retry < 1:
             parser.error("--infrastructure-retry must be positive")
-        run_trial(args.root, args.phase, args.arm, args.task, args.trial, args.infrastructure_retry)
+        run_trial(args.root, args.phase, args.arm, args.task, args.trial, args.infrastructure_retry, args.candidate_revision)
 
 
 if __name__ == "__main__":

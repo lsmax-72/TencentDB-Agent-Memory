@@ -15,11 +15,13 @@ from .driver import CORE_URL, PROTOCOL_FILE, api, canonical_hash
 from .metrics import compare
 
 
-def _load_runs(root: Path, phase: str) -> dict[str, list[dict[str, Any]]]:
+def _load_runs(root: Path, phase: str, candidate_revision: int | None = None) -> dict[str, list[dict[str, Any]]]:
     arms: dict[str, list[dict[str, Any]]] = {"vanilla": [], "memory": [], "skill": []}
     for path in sorted((root / "runs").glob(f"{phase}-*/evidence.json")):
         row = json.loads(path.read_text())
         if row.get("phase") != phase:
+            continue
+        if row.get("arm") != "vanilla" and candidate_revision is not None and row.get("candidate_revision") != candidate_revision:
             continue
         arms[row["arm"]].append(row)
     return arms
@@ -51,9 +53,9 @@ def _status(phase: str, comparison: dict[str, Any], infra: int, total: int) -> t
     return ("FAIL", reasons) if reasons else ("PASS", [])
 
 
-def build(root: Path, phase: str, attempt_id: str, candidate_file: Path | None) -> dict[str, Any]:
+def build(root: Path, phase: str, attempt_id: str, candidate_file: Path | None, candidate_revision: int | None = None) -> dict[str, Any]:
     protocol = json.loads(PROTOCOL_FILE.read_text())
-    arms = _load_runs(root, phase)
+    arms = _load_runs(root, phase, candidate_revision)
     result = compare(arms, f"{protocol['protocol_id']}:{phase}:{attempt_id}")
     rows = [row for arm_rows in arms.values() for row in arm_rows]
     infra = sum(row["status"] == "INFRA_ERROR" for row in rows)
@@ -74,6 +76,7 @@ def build(root: Path, phase: str, attempt_id: str, candidate_file: Path | None) 
         "benchmark": "EvoAgentBench-compatible", "phase": phase, "status": status, "reasons": reasons,
         "comparisons": result["comparisons"], "cost_summary": result["cost_summary"],
         "candidate_hash": candidate_hash,
+        "candidate_revision": candidate_revision,
         "retrieval_coverage": {arm: _coverage(arms[arm]) for arm in ("memory", "skill")},
         "contamination_findings": contamination, "source_run_hashes": source_hashes,
         "source_hash": canonical_hash(source_hashes),
@@ -107,12 +110,13 @@ def main() -> None:
     parser.add_argument("--phase", choices=["development", "test_checkpoint", "test"], required=True)
     parser.add_argument("--attempt-id", required=True)
     parser.add_argument("--candidate", type=Path)
+    parser.add_argument("--candidate-revision", type=int)
     parser.add_argument("--ingest", action="store_true")
     args = parser.parse_args()
     output = args.root / "attempts" / f"{args.attempt_id}.json"
     if output.exists():
         raise FileExistsError("IMMUTABLE_ATTEMPT_ALREADY_EXISTS")
-    attempt = build(args.root, args.phase, args.attempt_id, args.candidate)
+    attempt = build(args.root, args.phase, args.attempt_id, args.candidate, args.candidate_revision)
     output.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
     with os.fdopen(fd, "w") as handle:

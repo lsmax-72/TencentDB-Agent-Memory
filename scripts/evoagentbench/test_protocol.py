@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from scripts.evoagentbench.batch import experience_state
 from scripts.evoagentbench.metrics import compare
 from scripts.evoagentbench.nanobot_cli_compat import prepare_invocation
 from scripts.evoagentbench.protocol import build_protocol, sha256_json
+from scripts.evoagentbench.retrieval import injection_text, select_assets
 from scripts.evoagentbench.report import build as build_report
 from scripts.evoagentbench.refine import _response_json, _skill_response_format, _validate_memory, _validate_skills
 
@@ -113,6 +115,42 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(Path(env["HOME"]), workspace / ".tdai-nanobot-home")
             self.assertTrue((Path(env["HOME"]) / ".nanobot/config.json").is_file())
 
+    def test_retrieval_is_bounded_deterministic_and_hides_source_ids(self):
+        assets = [
+            {"id": "memory-train-a", "content_hash": "a", "task_intent": "shortest path in a graph", "approach": "Use Dijkstra with a heap", "key_insight": "nonnegative edges", "applicability": "weighted graph"},
+            {"id": "memory-train-b", "content_hash": "b", "task_intent": "count characters", "approach": "Use a frequency map", "key_insight": "count each symbol", "applicability": "strings"},
+            {"id": "memory-train-c", "content_hash": "c", "task_intent": "path reconstruction", "approach": "Store graph parents", "key_insight": "follow parent links", "applicability": "graphs"},
+        ]
+        selected = select_assets("Find the shortest path in a weighted graph", "memory", assets, top_k=2)
+        self.assertEqual([row["id"] for row in selected], ["memory-train-a", "memory-train-c"])
+        rendered = injection_text("memory", selected)
+        self.assertNotIn("memory-train-a", rendered)
+        self.assertIn("Dijkstra", rendered)
+
+    def test_nanobot_compat_injects_assets_and_writes_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            config = workspace / "config.json"
+            pool = workspace / "pool.json"
+            receipt = workspace / "receipt.json"
+            config.write_text(json.dumps({"agents": {"defaults": {"workspace": str(workspace)}}}))
+            pool.write_text(json.dumps([{"id": "memory-a", "content_hash": "hash-a", "task_intent": "weighted graph", "approach": "Use Dijkstra", "key_insight": "nonnegative edges", "applicability": "shortest path"}]))
+            previous = dict(os.environ)
+            os.environ.update({
+                "TDAI_EVO_ASSET_POOL": str(pool), "TDAI_EVO_ASSET_KIND": "memory",
+                "TDAI_EVO_ASSET_TOP_K": "2", "TDAI_EVO_INJECTION_RECEIPT": str(receipt),
+                "TDAI_EVO_RUN_PRIVATE": str(workspace),
+                "TDAI_EVO_CANDIDATE_HASH": "candidate-hash",
+            })
+            try:
+                command, _ = prepare_invocation(["agent", "--session", "s", "--message", "weighted graph shortest path", "--workspace", str(workspace), "--config", str(config)])
+            finally:
+                os.environ.clear(); os.environ.update(previous)
+            self.assertIn("Retrieved experiences", command[command.index("--message") + 1])
+            value = json.loads(receipt.read_text())
+            self.assertEqual(value["assets"], [{"id": "memory-a", "hash": "hash-a"}])
+            self.assertEqual(value["candidate_artifact_hash"], "candidate-hash")
+
     def test_refinement_rejects_single_source_or_case_specific_skill(self):
         quote_a = "Use bitmask dynamic programming to evaluate every subset transition."
         quote_b = "Apply bitmask dynamic programming over subset states and valid moves."
@@ -175,6 +213,12 @@ class MetricsTests(unittest.TestCase):
     def test_unpaired_runs_are_rejected(self):
         arms = {"vanilla": [self.row("a", "vanilla", 0)], "memory": [], "skill": []}
         with self.assertRaisesRegex(ValueError, "PAIRED_TASK_SET_MISMATCH"):
+            compare(arms, "seed")
+
+    def test_duplicate_arm_trial_is_rejected(self):
+        row = self.row("a", "vanilla", 1)
+        arms = {"vanilla": [row, dict(row)], "memory": [], "skill": []}
+        with self.assertRaisesRegex(ValueError, "DUPLICATE_ARM_TRIAL"):
             compare(arms, "seed")
 
     def test_pilot_report_does_not_turn_no_gain_into_pass(self):

@@ -185,6 +185,7 @@ def adapt_trial(
     protocol_hash: str,
     expected_model: str,
     injected_assets: list[dict[str, str]] | None = None,
+    injection_receipt: dict[str, Any] | None = None,
     proxy_events_path: Path | None = None,
 ) -> dict[str, Any]:
     if arm not in {"vanilla", "memory", "skill"}:
@@ -231,6 +232,12 @@ def adapt_trial(
         raise ValueError("VANILLA_ASSET_INJECTION_FORBIDDEN")
     if arm != "vanilla" and len(assets) > 2:
         raise ValueError("RETRIEVAL_TOP_K_EXCEEDED")
+    if injection_receipt is not None:
+        expected_kind = {"memory": "memory", "skill": "skill"}.get(arm)
+        if expected_kind is None or injection_receipt.get("kind") != expected_kind:
+            raise ValueError("INJECTION_RECEIPT_ARM_MISMATCH")
+        if injection_receipt.get("assets") != assets:
+            raise ValueError("INJECTION_RECEIPT_ASSET_MISMATCH")
     normalized = {
         "schema": "tdai-evoagentbench-trial-v1",
         "benchmark": "EvoAgentBench-compatible",
@@ -261,6 +268,8 @@ def adapt_trial(
         "expected_model": expected_model,
         "injected_assets": assets,
         "retrieval_count": len(assets),
+        "candidate_artifact_hash": injection_receipt.get("candidate_artifact_hash") if injection_receipt else None,
+        "retrieval_algorithm": injection_receipt.get("algorithm") if injection_receipt else None,
         "protocol_hash": protocol_hash,
         "source_artifacts": {
             "result_sha256": sha256_file(result_path),

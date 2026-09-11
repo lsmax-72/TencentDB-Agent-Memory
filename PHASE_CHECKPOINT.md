@@ -1,5 +1,13 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-11 EvoAgentBench 续跑：真实检索/注入路径补齐，仍停在原协议 Gate
+
+- 只读复核确认 MemoryProxy 与 `qwen3.8-27b` 当前可达，24 条 experience 结果、r1/r2 冻结资产及所有失败 Attempt 均保留；没有正在运行的 benchmark 进程。
+- 发现一个独立实现缺口：原 driver 虽记录 `arm`，但尚未真正检索或注入 Memory/Skill。现已增加确定性 `lexical-idf-v1` 检索、最多 2 条资产、同一 nanobot message 注入路径、逐 run 资产 ID/hash/候选 hash receipt，以及 frozen artifact hash 核验。
+- evolved arm 必须显式指定 frozen revision；Skill 没有 `APPROVED_FOR_DEVELOPMENT` receipt 时 fail-closed。报告可按 revision 过滤，metrics 拒绝同 arm/task/trial 重复证据，避免多 revision 静默覆盖。
+- 离线验证：18 项 Python tests、全脚本 `py_compile`、`git diff --check` PASS。尚未启动 development run，因此没有新增真实收益结论或正式资产写入。
+- 原冻结 Pilot 仍限制最多两个语义 Skill revision；r1/r2 都在 development 前因证据归并不可信被拒绝。继续生成 r3 会改变已批准协议，仍需明确授权；未授权前不能拿 r2 跑 Skill arm、不能打开官方 test。用户三个 deployment 改动继续保持不碰。
+
 ## 2026-09-10 EvoAgentBench train-only refinement：Memory 冻结，Skill 两版拒绝
 
 - 固定协议与 24 条 experience 轨迹未变；此前结果仍为 22 PASS / 2 FAIL / 0 INFRA。新增真实 train-only 提炼：最终干净 attempt `r1-a7` 经 MemoryProxy auxiliary 路径调用 `qwen3.8-27b`，明确跳过 session-init、正式资产注入、L0 写入和自动抽取，冻结 24 条 Memory 与 6 条初始 Skill。成本 38,708 tokens / 25 model calls，artifact `83e9edeb31163c130a50ef5eee7f11c20b8aabfdbc62d82f76f85b96b00f65a6`。

@@ -9,8 +9,51 @@ import shutil
 import sys
 from pathlib import Path
 
+try:
+    from .retrieval import ALGORITHM, injection_text, select_assets
+except ImportError:  # Executed by EvoAgentBench as a standalone CLI path.
+    from retrieval import ALGORITHM, injection_text, select_assets
+
 
 REAL_NANOBOT = Path("/Users/lsmax/Coder/EvoAgentBench/.venv-tdai/bin/nanobot")
+
+
+def _write_new(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        json.dump(value, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def _inject_assets(args: list[str], workspace: Path, env: dict[str, str]) -> list[str]:
+    pool_value = env.get("TDAI_EVO_ASSET_POOL")
+    if not pool_value:
+        return args
+    try:
+        message_index = args.index("--message") + 1
+        pool_path = Path(pool_value).resolve()
+        receipt_path = Path(env["TDAI_EVO_INJECTION_RECEIPT"]).resolve()
+        run_private = Path(env["TDAI_EVO_RUN_PRIVATE"]).resolve()
+        kind = env["TDAI_EVO_ASSET_KIND"]
+        top_k = int(env["TDAI_EVO_ASSET_TOP_K"])
+    except (KeyError, ValueError, IndexError) as error:
+        raise ValueError("COMPAT_INJECTION_CONFIG_INVALID") from error
+    if pool_path.parent != run_private or receipt_path.parent != run_private:
+        raise ValueError("COMPAT_INJECTION_PATH_OUTSIDE_RUN")
+    assets = json.loads(pool_path.read_text())
+    if not isinstance(assets, list):
+        raise ValueError("COMPAT_ASSET_POOL_INVALID")
+    selected = select_assets(args[message_index], kind, assets, top_k=top_k)
+    args[message_index] += injection_text(kind, selected)
+    _write_new(receipt_path, {
+        "schema": "tdai-evoagentbench-injection-v1",
+        "kind": kind,
+        "algorithm": ALGORITHM,
+        "candidate_artifact_hash": env.get("TDAI_EVO_CANDIDATE_HASH"),
+        "assets": [{"id": row["id"], "hash": row["content_hash"]} for row in selected],
+    })
+    return args
 
 
 def prepare_invocation(argv: list[str]) -> tuple[list[str], dict[str, str]]:
@@ -39,12 +82,13 @@ def prepare_invocation(argv: list[str]) -> tuple[list[str], dict[str, str]]:
     shutil.copyfile(config_path, destination)
     destination.chmod(0o600)
 
+    env = dict(os.environ)
+    args = _inject_assets(args, workspace, env)
     translated = [
         item
         for index, item in enumerate(args)
         if index not in {workspace_index, workspace_index + 1, config_index, config_index + 1}
     ]
-    env = dict(os.environ)
     env["HOME"] = str(compat_home)
     return [str(REAL_NANOBOT), *translated], env
 

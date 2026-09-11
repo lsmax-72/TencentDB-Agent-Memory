@@ -48,5 +48,14 @@ After all three arms of a frozen phase exist, build and ingest one immutable com
 
 ```bash
 python3 -m scripts.evoagentbench.report --root /Users/lsmax/Coder/evoagentbench-artifacts/code-v1 \
-  --phase development --attempt-id pilot-r1 --candidate /path/to/frozen/SKILL.md --ingest
+  --phase development --attempt-id pilot-r1 --candidate-revision 1 \
+  --candidate /path/to/frozen/SKILL.md --ingest
 ```
+
+Development and test runs must name the frozen revision for `memory` and `skill`
+arms with `--candidate-revision`. The driver verifies the complete candidate
+artifact hash before creating a Hub task. A Skill arm is fail-closed unless that
+revision has an `APPROVED_FOR_DEVELOPMENT` review receipt. Retrieval is the
+deterministic `lexical-idf-v1` algorithm, injects at most two assets through the
+same nanobot message path, and records the exact asset IDs and hashes in a
+per-run immutable receipt.

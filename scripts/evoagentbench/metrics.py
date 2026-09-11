@@ -46,10 +46,12 @@ def _totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def compare(arms: dict[str, list[dict[str, Any]]], seed: str) -> dict[str, Any]:
     if set(arms) != {"vanilla", "memory", "skill"}:
         raise ValueError("THREE_ARMS_REQUIRED")
-    indexed = {
-        arm: {(row["task_id"], row["trial"]): row for row in rows}
-        for arm, rows in arms.items()
-    }
+    indexed = {}
+    for arm, rows in arms.items():
+        keys = [(row["task_id"], row["trial"]) for row in rows]
+        if len(keys) != len(set(keys)):
+            raise ValueError("DUPLICATE_ARM_TRIAL")
+        indexed[arm] = {key: row for key, row in zip(keys, rows, strict=True)}
     keys = set(indexed["vanilla"])
     if any(set(rows) != keys for rows in indexed.values()):
         raise ValueError("PAIRED_TASK_SET_MISMATCH")
@@ -90,4 +92,3 @@ def compare(arms: dict[str, list[dict[str, Any]]], seed: str) -> dict[str, Any]:
             else None
         )
     return {"comparisons": comparisons, "cost_summary": costs}
-
