@@ -20,6 +20,20 @@
 .evolution-pagination { justify-content: flex-end; }
 .evolution-detail pre { background: #f7f8fa; padding: 16px; max-height: 480px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .evolution-hash { font-family: monospace; overflow-wrap: anywhere; color: #666; }
+.evolution-evidence { margin: 18px 0; }
+.evolution-evidence-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 16px 0; }
+.evolution-evidence-metrics > div { border: 1px solid #e5e8ed; background: #f7f8fa; padding: 12px 14px; min-width: 0; }
+.evolution-evidence-metrics span { display: block; color: #666; font-size: 12px; margin-bottom: 8px; }
+.evolution-evidence-metrics strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.evolution-facts { display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 10px 0; color: #666; font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
+.evolution-tool-list { display: grid; gap: 12px; }
+.evolution-tool-list > div { border: 1px solid #e5e8ed; padding: 14px; }
+.evolution-tool-list > div > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.evolution-tool-list p { margin: 10px 0 4px; color: #666; }
+.evolution-tool-list pre { margin: 0; max-height: 220px; }
+.evolution-muted { color: #888; }
+.evolution-raw { border-top: 1px solid #e5e8ed; padding-top: 14px; margin-top: 16px; }
+.evolution-raw summary { cursor: pointer; color: #006eff; }
 .evolution-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .evolution-diff > div { min-width: 0; }
 .evolution-review label { display: block; }

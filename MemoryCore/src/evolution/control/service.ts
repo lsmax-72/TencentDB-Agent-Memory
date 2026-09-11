@@ -148,7 +148,7 @@ export class EvolutionService {
         statuses: records.reduce<Record<string, number>>((counts, record) => ({ ...counts, [record.status]: (counts[record.status] ?? 0) + 1 }), {}),
         automation_ready: this.automationReady,
         runtime_status: this.automationReady ? "READY" : "OFFLINE_ONLY",
-        notices: ["内容校验不等于效果提升", "历史 FAIL / INFRA_ERROR 保留，不能通过导入采用", "模型服务未调用；自动化默认关闭"],
+        notices: ["内容校验不等于效果提升", "历史 FAIL / INFRA_ERROR 保留，不能通过导入采用", "正式资产自动闭环默认关闭；研究评测是否调用模型以轨迹证据为准"],
       };
     }
     if (action === "records/list") {

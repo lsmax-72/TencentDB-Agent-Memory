@@ -47,12 +47,14 @@ def parse_session(path: Path) -> dict[str, Any]:
     model_names: set[str] = set()
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     usage_seen = False
+    task_input = None
     if not path.exists():
         return {
             "tool_events": tool_events,
             "model_call_count": None,
             "usage": {key: None for key in usage},
             "actual_models": [],
+            "task_input": None,
             "session_hash": None,
         }
 
@@ -63,7 +65,9 @@ def parse_session(path: Path) -> dict[str, Any]:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if entry.get("role") == "assistant":
+        if entry.get("role") == "user" and task_input is None and isinstance(entry.get("content"), str):
+            task_input = entry["content"]
+        elif entry.get("role") == "assistant":
             turns += 1
             model = entry.get("model") or entry.get("model_name")
             if isinstance(model, str) and model:
@@ -99,13 +103,14 @@ def parse_session(path: Path) -> dict[str, Any]:
                 result = entry.get("content")
                 text = result if isinstance(result, str) else canonical_json(result)
                 tool_events[index]["result"] = text
-                tool_events[index]["success"] = not text.startswith("Error executing ")
+                tool_events[index]["success"] = re.match(r"^\s*(?:error\b|traceback\b|command blocked\b)", text, re.I) is None
 
     return {
         "tool_events": tool_events,
         "model_call_count": turns,
         "usage": usage if usage_seen else {key: None for key in usage},
         "actual_models": sorted(model_names),
+        "task_input": task_input,
         "session_hash": sha256_file(path),
     }
 
@@ -256,6 +261,7 @@ def adapt_trial(
         "ended_at": result.get("ended_at"),
         "elapsed_ms": round(float((result.get("agent_result") or {}).get("elapsed_sec") or 0) * 1000),
         "final_output": (result.get("agent_result") or {}).get("response") or "",
+        "task_input": session["task_input"],
         "verifier": {
             "reward": float(reward),
             "passed": verifier.get("passed"),

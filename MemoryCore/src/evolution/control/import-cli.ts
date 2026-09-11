@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { z } from "zod";
 import { SqliteMetadataStore } from "../../metadata/store/sqlite-adapter.js";
-import { importHistoricalEvaluation } from "./history.js";
+import { importHistoricalEvolutionRecords } from "./history.js";
 
 // Operator-only file import; this entrypoint is deliberately not an HTTP action.
 const config = z.object({
@@ -16,6 +16,6 @@ try {
   const member = metadata.getTeamMember(team_id, owner_user_id);
   const agent = metadata.getAgentById(agent_id);
   if (!member || member.status !== "active" || !agent || agent.team_id !== team_id || agent.owner_user_id !== owner_user_id) throw new Error("HISTORY_OWNER_SCOPE_REQUIRED");
-  const records = config.files.map(file => importHistoricalEvaluation(metadata.getEvolutionStore(), file, config.approved_root, config.scope));
+  const records = config.files.flatMap(file => importHistoricalEvolutionRecords(metadata.getEvolutionStore(), file, config.approved_root, config.scope));
   process.stdout.write(JSON.stringify(records.map(({ id, status, artifact_hash }) => ({ id, status, artifact_hash }))));
 } finally { metadata.close(); }

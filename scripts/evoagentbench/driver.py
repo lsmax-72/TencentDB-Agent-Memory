@@ -362,7 +362,7 @@ live: false
             api("/v3/evolution/task/complete", {
                 "team_id": scope["team_id"], "agent_id": scope["agent_id"], "task_id": task["task_id"],
                 "session_id": session_id, "run_id": run_id, "completion": "host_task_complete", "asset_ids": [],
-                "task_input": f"Official EvoAgentBench Algorithmic Reasoning task {task_id}; statement retained in official artifact.",
+                "task_input": (evidence.get("task_input") or f"Official EvoAgentBench Algorithmic Reasoning task {task_id}; statement unavailable in this run artifact.")[:100_000],
                 "final_output": evidence["final_output"][:100_000], "tool_events": tool_events,
                 "usage": {"input_tokens": evidence["usage"]["input_tokens"], "output_tokens": evidence["usage"]["output_tokens"], "model_calls": evidence["usage"]["model_call_count"], "tool_calls": evidence["usage"]["tool_call_count"]},
                 "actual_model": evidence["actual_model"] or "", "outcome": "PASS" if evidence["status"] == "TASK_PASS" else "FAIL" if evidence["status"] == "TASK_FAIL" else "INFRA_ERROR", "used_asset_versions": {},

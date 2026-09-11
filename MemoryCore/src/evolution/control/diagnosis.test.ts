@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { sha256 } from "../evaluation/contracts/hash.js";
 import { SqliteMetadataStore } from "../../metadata/store/sqlite-adapter.js";
 import { diagnose, type DiagnosisModel } from "./diagnosis.js";
-import { importHistoricalEvaluation } from "./history.js";
+import { importHistoricalEvaluation, importHistoricalEvolutionRecords } from "./history.js";
+import { contentHash } from "./store.js";
 const stores: SqliteMetadataStore[] = [];
 const directories: string[] = [];
 afterEach(() => { stores.splice(0).forEach(store => store.close()); directories.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })); });
@@ -76,5 +77,28 @@ describe("history and restart", () => {
     expect(record.payload.before).toBe("baseline"); expect(record.payload.after).toBe("candidate");
     frozen.artifact.content = "changed"; writeFileSync(file, JSON.stringify(frozen));
     expect(() => importHistoricalEvaluation(store, file, root, { team_id: "team", agent_id: "agent", owner_user_id: "owner" })).toThrow("CONTENT_HASH_MISMATCH");
+  });
+  it("imports a frozen benchmark refinement bundle without making candidates adoptable", () => {
+    const root = mkdtempSync(join(tmpdir(), "evolution-bundle-import-")); directories.push(root);
+    const file = join(root, "bundle.json"); const { store } = setup();
+    const memory = { asset_kind: "memory", candidate_id: "memory-r2-01", candidate_revision: 2, status: "TRAIN_ONLY_FROZEN",
+      content: { task_intent: "intent", approach: "approach", key_insight: "insight", applicability: "scope" },
+      content_hash: "", artifact_hash: "a".repeat(64), source_task_ids: ["train-a"], source_evidence_hashes: ["e".repeat(64)],
+      source_status: "TASK_PASS", train_only: true, research_only: true, promotion_allowed: false };
+    memory.content_hash = contentHash(memory.content);
+    const skill = { asset_kind: "skill", candidate_id: "skill-r1-01", candidate_revision: 1, status: "REJECTED_BEFORE_DEVELOPMENT",
+      content: { name: "Reusable skill", description: "description", content: "procedure" }, content_hash: "", artifact_hash: "b".repeat(64),
+      source_task_ids: ["train-a", "train-b"], review_reason: "invalid merge", train_only: true, research_only: true, promotion_allowed: false };
+    skill.content_hash = contentHash(skill.content);
+    const value: Record<string, unknown> = { schema: "tdai-evoagentbench-refinement-export-v1", protocol_id: "tdai-evoagentbench-code-v1",
+      protocol_hash: "c".repeat(64), source_revisions: [{ artifact_hash: memory.artifact_hash }, { artifact_hash: skill.artifact_hash }],
+      candidate_count: 2, candidates: [memory, skill], evidence_limitations: ["read only"] };
+    value.bundle_hash = contentHash(value); writeFileSync(file, JSON.stringify(value));
+    const records = importHistoricalEvolutionRecords(store, file, root, { team_id: "team", agent_id: "agent", owner_user_id: "owner" });
+    expect(records).toHaveLength(2); expect(records.map(record => record.status)).toEqual(["TRAIN_ONLY_FROZEN", "REJECTED_BEFORE_DEVELOPMENT"]);
+    expect(records.every(record => record.origin === "historical" && record.payload.promotion_allowed === false)).toBe(true);
+    expect(() => store.transition(records[0].id, 1, ["TRAIN_ONLY_FROZEN"], "APPLIED", "owner")).toThrow("READ_ONLY");
+    value.bundle_hash = "d".repeat(64); writeFileSync(file, JSON.stringify(value));
+    expect(() => importHistoricalEvolutionRecords(store, file, root, { team_id: "team", agent_id: "agent", owner_user_id: "owner" })).toThrow("BUNDLE_HASH_MISMATCH");
   });
 });

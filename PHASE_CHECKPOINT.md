@@ -1,5 +1,15 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-11 MemoryHub 真实 benchmark 证据可见性交付
+
+- 根因已确认：25 条 run trace 已在 Core，但 24 条冻结 Memory 和 r1/r2 Skill 只存在于 benchmark 文件系统，过去从未导入 8125；因此用户看到候选数 0，不是生成失败。
+- 新增 operator-only `tdai-evoagentbench-refinement-export-v1` 桥。它复核协议、manifest/artifact/content hash，只导出 r2 的 24 条最终 Memory 快照以避免 r1/r2 重复，再保留 r1 的 6 条与 r2 的 2 条 Skill，共 32 条只读历史候选。bundle `9b960d946b5e962f42aca2ea2f891608948286f7a08cd70eed0d2413b2e040bb`；任何记录都 `promotion_allowed=false`，不能进入正式检索、审查或采用。
+- 8125 原生腾讯 MemoryHub 已展示 32 条候选：Memory 标为“训练经验已冻结·只读”，两轮 Skill 均保留原 `REJECTED_BEFORE_DEVELOPMENT`，详情含冻结内容、来源任务、生成成本、原 artifact/content hash 和拒绝原因。没有重新解释成 PASS，也没有生成 r3。
+- 运行轨迹详情改为结构化展示 task/session/run、实际模型、token/model/tool 调用、最终输出、工具参数/结果和注入资产；原 JSON/审计折叠保留。已有 25 条 trace 的 task input 过去只存占位说明，不能无痕补写；未来 run 会从官方 session 保存实际输入。旧工具结果中 `Error:` 却标成功的问题由页面显式显示“结果含错误”，adapter 也已修复后续记录。
+- 主 8125 更新前停服备份：`/Users/lsmax/Coder/phase6-artifacts/backups/memoryhub-main-20260911-pre-r3`；新只读 runtime：`/Users/lsmax/Coder/phase6-artifacts/runtime/memoryhub-main-20260911-r3`。原 volumes 延续，8420/8125/8424 healthy，network aliases 保留。浏览器实测 25 trace、32 candidate、Memory/Skill 详情和折叠审计通过；重复导入仍为同一 32 个 ID，数据库候选总数 32。
+- 验证：Python 20 tests PASS；Core history 7 tests、plugin build PASS；Panel web build PASS；`git diff --check` PASS。Core 聚合 build 仍只被既有缺失 `scripts/seed-v2/tsconfig.json` 阻断。正式资产、历史 v4 FAIL、r1/r2 review、Gate/协议均未修改。
+- 下一科学步骤仍受原 Pilot Gate 限制：r1/r2 均在 development 前拒绝，不能生成 r3 或打开 official test；需要用户修改 frozen max-two-revision 协议后才能继续。当前定时检查保留，但不能绕过此 Gate。
+
 ## 2026-09-11 EvoAgentBench 续跑：真实检索/注入路径补齐，仍停在原协议 Gate
 
 - 只读复核确认 MemoryProxy 与 `qwen3.8-27b` 当前可达，24 条 experience 结果、r1/r2 冻结资产及所有失败 Attempt 均保留；没有正在运行的 benchmark 进程。

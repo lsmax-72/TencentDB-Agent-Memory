@@ -12,6 +12,7 @@ from scripts.evoagentbench.protocol import build_protocol, sha256_json
 from scripts.evoagentbench.retrieval import injection_text, select_assets
 from scripts.evoagentbench.report import build as build_report
 from scripts.evoagentbench.refine import _response_json, _skill_response_format, _validate_memory, _validate_skills
+from scripts.evoagentbench.hub_export import build_bundle
 
 
 class ProtocolTests(unittest.TestCase):
@@ -37,6 +38,33 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PINNED_SPLIT_SIZE_MISMATCH"):
             build_protocol({"train": [], "test": []})
 
+    def test_hub_export_keeps_one_memory_snapshot_and_both_skill_revisions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            protocol = json.loads(Path("scripts/evoagentbench/protocol-code-v1.json").read_text())
+            for revision, skill_count in ((1, 2), (2, 1)):
+                directory = root / "frozen" / f"refinement-r{revision}"
+                directory.mkdir(parents=True)
+                memory_public = {"task_intent": "intent", "approach": "approach", "key_insight": "insight", "applicability": "scope"}
+                memory = {**memory_public, "id": f"memory-r{revision}-01", "source_task_id": "train-a", "source_status": "TASK_PASS", "source_evidence_hash": "e" * 64, "content_hash": sha256_json(memory_public)}
+                if revision == 2:
+                    memory["derived_from_memory_id"] = "memory-r1-01"
+                skills = []
+                for index in range(skill_count):
+                    public = {"name": f"Skill {revision}-{index}", "description": "description", "content": "procedure"}
+                    skills.append({**public, "id": f"skill-r{revision}-{index + 1:02d}", "support_task_ids": ["train-a", "train-b"], "support_evidence": [{"task_id": "train-a", "quote": "grounded a"}, {"task_id": "train-b", "quote": "grounded b"}], "content_hash": sha256_json(public)})
+                manifest = {"schema": "tdai-evoagentbench-refinement-v1", "revision": revision, "protocol_hash": protocol["protocol_hash"], "memory_count": 1, "skill_count": len(skills), "generation_usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2, "model_calls": 2}, "train_only": True}
+                manifest["artifact_hash"] = sha256_json({"manifest": manifest, "memories": [memory], "skills": skills})
+                (directory / "manifest.json").write_text(json.dumps(manifest))
+                (directory / "memories.json").write_text(json.dumps([memory]))
+                (directory / "skills.json").write_text(json.dumps(skills))
+                (directory / "review.json").write_text(json.dumps({"status": "REJECTED_BEFORE_DEVELOPMENT", "artifact_hash": manifest["artifact_hash"], "reason": "bad merge", "findings": [], "action": "stop", "promotion_allowed": False}))
+            bundle = build_bundle(root)
+            self.assertEqual(bundle["candidate_count"], 4)
+            self.assertEqual(sum(row["asset_kind"] == "memory" for row in bundle["candidates"]), 1)
+            self.assertEqual(sum(row["asset_kind"] == "skill" for row in bundle["candidates"]), 3)
+            self.assertTrue(all(row["promotion_allowed"] is False for row in bundle["candidates"]))
+
     def test_experience_resume_reuses_valid_smoke_and_stops_on_incomplete_primary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -61,6 +89,7 @@ class AdapterTests(unittest.TestCase):
     def test_maps_official_result_and_tool_evidence(self):
         result = {"task_name": "tr-1", "trial": 1, "attempt": 1, "session_id": "s", "agent_result": {"completion_status": "completed", "elapsed_sec": 1.5, "response": "ok"}, "verifier_result": {"reward": 1.0, "passed": 4, "total": 4}, "token_usage": {"input": 10, "output": 5, "total": 15}}
         session = [
+            {"role": "user", "content": "Solve the hidden-test task."},
             {"role": "assistant", "model": "qwen3.8-27b", "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}, "tool_calls": [{"id": "c1", "function": {"name": "exec", "arguments": "{\"command\":\"python x.py\"}"}}]},
             {"role": "tool", "tool_call_id": "c1", "content": "done"},
         ]
@@ -77,6 +106,7 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(row["status"], "TASK_PASS")
         self.assertEqual(row["usage"]["model_call_count"], 1)
         self.assertEqual(row["usage"]["tool_call_count"], 1)
+        self.assertEqual(row["task_input"], "Solve the hidden-test task.")
         self.assertTrue(row["tool_events"][0]["success"])
         self.assertEqual(row["host_completion"], "host_task_complete")
 
@@ -89,6 +119,23 @@ class AdapterTests(unittest.TestCase):
             root.cleanup()
         self.assertEqual(row["status"], "INFRA_ERROR")
         self.assertEqual(row["failure_reason"], "USAGE_EVIDENCE_MISSING")
+
+    def test_tool_result_error_prefix_is_not_reported_as_success(self):
+        result = {"task_name": "tr-1", "agent_result": {"completion_status": "completed", "response": "done"}, "verifier_result": {"reward": 1.0}, "token_usage": {"input": 1, "output": 1, "total": 2}}
+        root, path = self.trial(result, [
+            {"role": "assistant", "model": "qwen3.8-27b", "tool_calls": [{"id": "c1", "function": {"name": "exec", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "Error: Command blocked by safety guard"},
+        ])
+        try:
+            events = path / "proxy.jsonl"
+            events.write_text("\n".join(json.dumps(event) for event in [
+                {"kind": "request", "call_id": 1},
+                {"kind": "response", "call_id": 1, "model": "qwen3.8-27b", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            ]) + "\n")
+            row = adapt_trial(path, arm="vanilla", phase="smoke", protocol_hash="h", expected_model="qwen3.8-27b", proxy_events_path=events)
+        finally:
+            root.cleanup()
+        self.assertFalse(row["tool_events"][0]["success"])
 
     def test_assets_and_contamination_are_bounded(self):
         self.assertEqual(candidate_contamination("Use abc320_a", ["abc320_a"]), ["TEST_ID:abc320_a"])
