@@ -76,3 +76,23 @@ revision has an `APPROVED_FOR_DEVELOPMENT` review receipt. Retrieval is the
 deterministic `lexical-idf-v1` algorithm, injects at most two assets through the
 same nanobot message path, and records the exact asset IDs and hashes in a
 per-run immutable receipt.
+
+New protocol revisions may opt into `lexical-idf-applicability-v6` for the Skill
+arm. It requires a frozen `applicability_profile`, records every selection or
+rejection reason, handles common numeric-bound formats, and requires matching
+task-family plus objective/entity signals. It may inject zero Skills. Existing
+frozen protocols continue to default to `lexical-idf-v1`; intermediate offline
+diagnostic revisions remain artifacts rather than supported runtime algorithms.
+
+Before spending model tokens, replay previously frozen vanilla prompts through
+both selectors. This is a retrieval diagnostic only and must not be reported as
+an evaluation result:
+
+```bash
+python3 -m scripts.evoagentbench.applicability_audit \
+  --runs /path/to/frozen/runs \
+  --source-skills /path/to/source/skills.json \
+  --projected-skills /path/to/projected/skills.json \
+  --phase development --algorithm lexical-idf-applicability-v6 \
+  --output /path/to/new/audit.json
+```

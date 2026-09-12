@@ -1,5 +1,15 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-12 Skill Applicability & Retrieval：离线真实轨迹验证完成
+
+- 保留 `lexical-idf-v1` 和全部历史 Attempt，新增 opt-in、可弃权的适用性检索。最终工程 revision 为 `lexical-idf-applicability-v6`：先检查同句目标/实体信号，再检查任务族、显式规模约束，最后才做 lexical-IDF 排序；每项选择或拒绝都写入私有 receipt。旧协议未声明新算法时仍使用 v1。
+- frozen r3 Skill 正文完全未改、模型调用为 0，只机械增加 `task_family / when_to_apply / do_not_apply_when / constraints / complexity / evidence_refs / task_signals`。code-v2 最终投影 artifact `f5482a9664ee6952b6cb19a754709aa600b7f44f9aec5788611b5fdecc74244b`；正式 Skill、历史 Candidate 和 EvaluationAttempt 均未修改。
+- 真实题面离线复放中，v1 在 code-v2 的 24/24 development task 都注入唯一 Skill；v6 为 0/24，并明确以 `CONSTRAINT_MISMATCH:n` 排除已知错召回 `abc388_e`。audit `2f7b15c781b2212f988e1c5ab96e7a0d7b5f6ea717d1a7e3eb10eef761b5bccd`。
+- 防止“全部过滤”的反向错误：v6 在两条真实支持轨迹 `3193`、`3446` 上均保留召回；smoke audit `ad3609cc50f8ee40f436b9e5e7666fa10267328fdc65f49863a973ac6bab981d`，experience audit `5ae10e0d465334236962272c73c976de57f93f8f75727ce855407d0c98bd5aa6`。
+- v2～v5 的离线诊断 artifact 全部保留，分别暴露 LaTeX 约束、`n,m`/`.length`、宽泛 `pair` 词和目标同义词问题；它们不是正式效果 Attempt，也不替换既有 FAIL。
+- 验证：EvoAgentBench Python 35 tests PASS，相关模块 `py_compile` PASS，`git diff --check` PASS。当前只证明错召回机制得到修复，尚未证明 Agent 能力提升；由于新 development 上 0 次召回，不值得消耗 vLLM 重跑同一组任务。
+- 下一步：用 train-only 轨迹实现 Trace2Skill-style 局部 patch 与证据聚类，生成覆盖更多任务族、仍满足两条独立证据的 Candidate；冻结后再建立新的未污染 development revision。首轮 8192 tokens / 0 tool calls 作为独立 runner-policy 问题处理。
+
 ## 2026-09-12 EvoAgentBench discriminative v2：真实区分评测完成，仍无迁移收益
 
 - 新增并冻结独立研究协议 `tdai-evoagentbench-code-v2-discriminative`，只从官方 train 中按原始 difficulty metadata 选题，不读取 Candidate 输出或表现。24 个 development task 与 v1 的 24 个 experience、12 个 development 完全不重叠，分布为 12 hard / 8 medium / 4 easy；protocol hash `fd10899a108751baed606ae293770f813d12c8bd2ecab9ddb1a7d85ca867509d`。

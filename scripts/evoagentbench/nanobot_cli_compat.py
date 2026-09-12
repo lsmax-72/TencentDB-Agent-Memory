@@ -10,9 +10,15 @@ import sys
 from pathlib import Path
 
 try:
-    from .retrieval import ALGORITHM, injection_text, select_assets
+    from .retrieval import (
+        ALGORITHM, APPLICABILITY_ALGORITHM, injection_text, select_assets,
+        select_skill_assets_for_algorithm,
+    )
 except ImportError:  # Executed by EvoAgentBench as a standalone CLI path.
-    from retrieval import ALGORITHM, injection_text, select_assets
+    from retrieval import (
+        ALGORITHM, APPLICABILITY_ALGORITHM, injection_text, select_assets,
+        select_skill_assets_for_algorithm,
+    )
 
 
 REAL_NANOBOT = Path("/Users/lsmax/Coder/EvoAgentBench/.venv-tdai/bin/nanobot")
@@ -37,6 +43,7 @@ def _inject_assets(args: list[str], workspace: Path, env: dict[str, str]) -> lis
         run_private = Path(env["TDAI_EVO_RUN_PRIVATE"]).resolve()
         kind = env["TDAI_EVO_ASSET_KIND"]
         top_k = int(env["TDAI_EVO_ASSET_TOP_K"])
+        algorithm = env.get("TDAI_EVO_RETRIEVAL_ALGORITHM", ALGORITHM)
     except (KeyError, ValueError, IndexError) as error:
         raise ValueError("COMPAT_INJECTION_CONFIG_INVALID") from error
     if pool_path.parent != run_private or receipt_path.parent != run_private:
@@ -44,15 +51,26 @@ def _inject_assets(args: list[str], workspace: Path, env: dict[str, str]) -> lis
     assets = json.loads(pool_path.read_text())
     if not isinstance(assets, list):
         raise ValueError("COMPAT_ASSET_POOL_INVALID")
-    selected = select_assets(args[message_index], kind, assets, top_k=top_k)
+    decisions = None
+    if algorithm == ALGORITHM:
+        selected = select_assets(args[message_index], kind, assets, top_k=top_k)
+    elif algorithm == APPLICABILITY_ALGORITHM and kind == "skill":
+        selected, decisions = select_skill_assets_for_algorithm(
+            args[message_index], assets, algorithm, top_k=top_k
+        )
+    else:
+        raise ValueError("COMPAT_RETRIEVAL_ALGORITHM_INVALID")
     args[message_index] += injection_text(kind, selected)
-    _write_new(receipt_path, {
+    receipt = {
         "schema": "tdai-evoagentbench-injection-v1",
         "kind": kind,
-        "algorithm": ALGORITHM,
+        "algorithm": algorithm,
         "candidate_artifact_hash": env.get("TDAI_EVO_CANDIDATE_HASH"),
         "assets": [{"id": row["id"], "hash": row["content_hash"]} for row in selected],
-    })
+    }
+    if decisions is not None:
+        receipt["applicability_decisions"] = decisions
+    _write_new(receipt_path, receipt)
     return args
 
 

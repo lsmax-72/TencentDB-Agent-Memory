@@ -346,6 +346,7 @@ live: false
         for name in (
             "TDAI_EVO_ASSET_POOL", "TDAI_EVO_ASSET_KIND", "TDAI_EVO_ASSET_TOP_K",
             "TDAI_EVO_INJECTION_RECEIPT", "TDAI_EVO_CANDIDATE_HASH",
+            "TDAI_EVO_RETRIEVAL_ALGORITHM",
         ):
             env.pop(name, None)
         receipt_path = private / "injection-receipt.json"
@@ -359,6 +360,9 @@ live: false
                 "TDAI_EVO_INJECTION_RECEIPT": str(receipt_path),
                 "TDAI_EVO_RUN_PRIVATE": str(private),
                 "TDAI_EVO_CANDIDATE_HASH": candidate_hash or "",
+                "TDAI_EVO_RETRIEVAL_ALGORITHM": protocol["retrieval"].get(
+                    f"{arm}_algorithm", "lexical-idf-v1"
+                ),
             })
         log_file = private / "official.log"
         with log_file.open("x") as log:

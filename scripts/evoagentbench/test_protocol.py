@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from scripts.evoagentbench.adapter import adapt_trial, candidate_contamination
+from scripts.evoagentbench.applicability_artifact import annotate_skill, freeze_projection
 from scripts.evoagentbench.carry_candidate import carry
 from scripts.evoagentbench.batch import experience_state
 from scripts.evoagentbench.metrics import compare
@@ -12,7 +13,10 @@ from scripts.evoagentbench.nanobot_cli_compat import prepare_invocation
 from scripts.evoagentbench.official_runner import raw_final_assistant_response
 from scripts.evoagentbench.protocol import build_protocol, sha256_json
 from scripts.evoagentbench.protocol_v2 import build_protocol as build_protocol_v2
-from scripts.evoagentbench.retrieval import injection_text, select_assets
+from scripts.evoagentbench.retrieval import (
+    APPLICABILITY_ALGORITHM, injection_text, select_applicable_skills,
+    select_assets,
+)
 from scripts.evoagentbench.report import _replace_runs, build as build_report
 from scripts.evoagentbench.refine import _response_json, _skill_response_format, _validate_memory, _validate_skills
 from scripts.evoagentbench.hub_export import build_bundle
@@ -282,6 +286,164 @@ class AdapterTests(unittest.TestCase):
         rendered = injection_text("memory", selected)
         self.assertNotIn("memory-train-a", rendered)
         self.assertIn("Dijkstra", rendered)
+
+    def _applicable_pair_skill(self):
+        return {
+            "id": "skill-a", "content_hash": "hash-a",
+            "name": "Pair enumeration", "description": "Check every pair in a small array",
+            "content": "Enumerate pairs and retain the maximum valid value.",
+            "applicability_profile": {
+                "task_family": "pair optimization in arrays",
+                "when_to_apply": "The input is small enough for quadratic enumeration.",
+                "do_not_apply_when": "The largest input permits too many pairs.",
+                "constraints": [{"parameter": "n", "max_value": 100}],
+                "complexity": "O(n^2)", "evidence_refs": ["train-a", "train-b"],
+                "task_signals": {
+                    "entity_terms": ["pair"],
+                    "objective_terms": ["maximum", "minimum", "count", "number", "total"],
+                    "same_sentence": True,
+                },
+            },
+        }
+
+    def test_skill_applicability_rejects_incompatible_size_constraint(self):
+        for query in (
+            "Given N <= 5e5 values, return the maximum over all pairs.",
+            r"Return the maximum over all pairs. Constraints: 2 \leq N \leq 5 \times 10^{5}",
+        ):
+            selected, decisions = select_applicable_skills(
+                query, [self._applicable_pair_skill()], top_k=1,
+            )
+            self.assertEqual(selected, [])
+            self.assertEqual(decisions[0]["reason"], "CONSTRAINT_MISMATCH:n")
+
+    def test_skill_applicability_understands_common_length_constraints(self):
+        for query in (
+            "Return the total number of valid pairs. Constraints: 1 <= n, m <= 50.",
+            "Return the maximum over all valid pairs. Constraints: 1 <= nums.length <= 50.",
+        ):
+            selected, decisions = select_applicable_skills(
+                query, [self._applicable_pair_skill()], top_k=1,
+            )
+            self.assertEqual([row["id"] for row in selected], ["skill-a"])
+            self.assertEqual(decisions[0]["reason"], "SELECTED")
+
+    def test_skill_applicability_selects_verified_match_and_can_abstain(self):
+        selected, decisions = select_applicable_skills(
+            "For an array with n <= 50, find the maximum over all pairs.",
+            [self._applicable_pair_skill()], top_k=1,
+        )
+        self.assertEqual([row["id"] for row in selected], ["skill-a"])
+        self.assertEqual(decisions[0]["reason"], "SELECTED")
+        selected, decisions = select_applicable_skills(
+            "For a string with n <= 50, remove adjacent equal letters.",
+            [self._applicable_pair_skill()], top_k=1,
+        )
+        self.assertEqual(selected, [])
+        self.assertEqual(decisions[0]["reason"], "TASK_SIGNAL_MISMATCH")
+
+    def test_skill_applicability_abstains_when_required_bound_is_missing(self):
+        selected, decisions = select_applicable_skills(
+            "Find the maximum value over every pair in the array.",
+            [self._applicable_pair_skill()], top_k=1,
+        )
+        self.assertEqual(selected, [])
+        self.assertEqual(decisions[0]["reason"], "CONSTRAINT_NOT_OBSERVED:n")
+
+    def test_skill_applicability_requires_objective_and_entity_together(self):
+        for query in (
+            "An array has no pair of distinct elements summing to k. Return the minimum possible sum of the array. Constraints: n <= 50.",
+            "Currency pairs describe a graph. Return the maximum amount after conversion. Constraints: n <= 10.",
+        ):
+            selected, decisions = select_applicable_skills(
+                query, [self._applicable_pair_skill()], top_k=1,
+            )
+            self.assertEqual(selected, [])
+            self.assertEqual(decisions[0]["reason"], "TASK_SIGNAL_MISMATCH")
+        for query in (
+            "Return the total number of good pairs. Constraints: n, m <= 50.",
+            "Return the maximum XOR value among all strong pairs. Constraints: nums.length <= 50.",
+        ):
+            selected, decisions = select_applicable_skills(
+                query, [self._applicable_pair_skill()], top_k=1,
+            )
+            self.assertEqual([row["id"] for row in selected], ["skill-a"])
+            self.assertEqual(decisions[0]["reason"], "SELECTED")
+
+    def test_skill_applicability_normalizes_objective_synonyms(self):
+        selected, decisions = select_applicable_skills(
+            "Return the total number of good pairs. Constraints: n, m <= 50.",
+            [self._applicable_pair_skill()], top_k=1,
+        )
+        self.assertEqual([row["id"] for row in selected], ["skill-a"])
+        self.assertEqual(decisions[0]["reason"], "SELECTED")
+
+    def test_nanobot_compat_records_applicability_decisions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            config = workspace / "config.json"
+            pool = workspace / "pool.json"
+            receipt = workspace / "receipt.json"
+            config.write_text(json.dumps({"agents": {"defaults": {"workspace": str(workspace)}}}))
+            pool.write_text(json.dumps([self._applicable_pair_skill()]))
+            previous = dict(os.environ)
+            os.environ.update({
+                "TDAI_EVO_ASSET_POOL": str(pool), "TDAI_EVO_ASSET_KIND": "skill",
+                "TDAI_EVO_ASSET_TOP_K": "2", "TDAI_EVO_INJECTION_RECEIPT": str(receipt),
+                "TDAI_EVO_RUN_PRIVATE": str(workspace),
+                "TDAI_EVO_CANDIDATE_HASH": "candidate-hash",
+                "TDAI_EVO_RETRIEVAL_ALGORITHM": APPLICABILITY_ALGORITHM,
+            })
+            try:
+                command, _ = prepare_invocation([
+                    "agent", "--session", "s", "--message",
+                    "Given n <= 500000, maximize a value over all pairs.",
+                    "--workspace", str(workspace), "--config", str(config),
+                ])
+            finally:
+                os.environ.clear(); os.environ.update(previous)
+            self.assertNotIn("Retrieved strategies", command[command.index("--message") + 1])
+            value = json.loads(receipt.read_text())
+            self.assertEqual(value["algorithm"], APPLICABILITY_ALGORITHM)
+            self.assertEqual(value["assets"], [])
+            self.assertEqual(value["applicability_decisions"][0]["reason"], "CONSTRAINT_MISMATCH:n")
+
+    def test_applicability_projection_preserves_content_and_freezes_hash(self):
+        source_skill = {
+            "id": "skill-r3-01", "content_hash": "old-hash",
+            "name": "Pair enumeration", "description": "Use O(n^2) when n <= 100.",
+            "content": "Trigger: Find an optimum over pairs in a small array. Procedure: Enumerate every pair.",
+            "support_task_ids": ["train-b", "train-a"],
+        }
+        projected = annotate_skill(source_skill)
+        self.assertEqual(projected["content"], source_skill["content"])
+        self.assertEqual(projected["source_content_hash"], "old-hash")
+        self.assertEqual(projected["applicability_profile"]["constraints"], [{"parameter": "n", "max_value": 100}])
+        self.assertEqual(projected["applicability_profile"]["complexity"], "O(n^2)")
+        self.assertEqual(projected["applicability_profile"]["task_signals"]["entity_terms"], ["pair"])
+        self.assertNotEqual(projected["content_hash"], "old-hash")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.json"
+            output = Path(tmp) / "frozen"
+            source.write_text(json.dumps([source_skill]))
+            manifest = freeze_projection(source, output)
+            self.assertEqual(manifest["model_calls"], 0)
+            self.assertFalse(manifest["content_rewritten"])
+            self.assertTrue((output / "skills.json").is_file())
+            with self.assertRaisesRegex(FileExistsError, "APPLICABILITY_OUTPUT_ALREADY_EXISTS"):
+                freeze_projection(source, output)
+
+    def test_applicability_projection_does_not_mislabel_per_pair_cost(self):
+        projected = annotate_skill({
+            "id": "skill-r3-01", "content_hash": "old-hash",
+            "name": "Pair enumeration", "description": "Check all pairs in a small array.",
+            "content": "Trigger: Find an optimum where n <= 100 and each validity check is O(1). Procedure: Iterate through all possible pairs.",
+            "support_task_ids": ["train-a", "train-b"],
+        })
+        self.assertEqual(
+            projected["applicability_profile"]["complexity"],
+            "O(number_of_pairs) total; O(1) per pair",
+        )
 
     def test_nanobot_compat_injects_assets_and_writes_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:
