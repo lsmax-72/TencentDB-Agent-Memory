@@ -96,3 +96,20 @@ python3 -m scripts.evoagentbench.applicability_audit \
   --phase development --algorithm lexical-idf-applicability-v6 \
   --output /path/to/new/audit.json
 ```
+
+The next candidate-generation path uses one train-only local patch per trace
+before any cross-task Skill synthesis. Failed traces can contribute warnings,
+not successful strategies; every patch must quote its frozen source memory.
+Exact mechanism clusters require two independent tasks and a shared task-family
+signal. A completed patch artifact is still not a Candidate and cannot be
+evaluated or promoted:
+
+```bash
+python3 -m scripts.evoagentbench.trace_patch_runner \
+  --root /Users/lsmax/Coder/evoagentbench-artifacts/code-v1 \
+  --source-revision 3 --attempt-id trace2skill-r1-a1
+```
+
+If infrastructure fails after some calls, keep that attempt and reuse only its
+validated checkpoints in a new immutable attempt with
+`--reuse-from-attempt trace2skill-r1-a1`.
