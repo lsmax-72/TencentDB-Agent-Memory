@@ -81,7 +81,7 @@ def build(root: Path, phase: str, attempt_id: str, candidate_file: Path | None, 
     if candidate_file:
         text = candidate_file.read_text()
         candidate_hash = __import__("hashlib").sha256(text.encode()).hexdigest()
-        contamination = candidate_contamination(text, protocol["selection"]["final_test"])
+        contamination = candidate_contamination(text, protocol["selection"].get("final_test", []))
         if contamination:
             status, reasons = "FAIL", reasons + ["CANDIDATE_TEST_CONTAMINATION"]
     source_hashes = sorted(row["evidence_hash"] for row in rows)

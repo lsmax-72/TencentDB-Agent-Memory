@@ -52,7 +52,7 @@ def _session_prompt(run_dir: Path) -> str:
 
 def _experience_runs(root: Path, protocol: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
-    smoke_ids = set(protocol["selection"]["smoke"])
+    smoke_ids = set(protocol["selection"].get("smoke", []))
     for task_id in protocol["selection"]["experience"]:
         candidates = list((root / "runs").glob(f"experience-{task_id}-vanilla-trial-1/evidence.json"))
         if task_id in smoke_ids:
@@ -290,6 +290,7 @@ def _revision_memories(
 def refine(
     root: Path, revision: int, attempt_number: int, resume_from_attempt: int | None,
     reuse_memories_from_revision: int | None,
+    memory_only: bool = False,
 ) -> None:
     protocol = json.loads(PROTOCOL_FILE.read_text())
     attempt = root / "refinement-attempts" / f"r{revision}-a{attempt_number}"
@@ -311,10 +312,14 @@ def refine(
     key = local_user_key()
     task = api("/v3/meta/task/create", {
         "team_id": scope["team_id"], "creator_user_id": scope["owner_user_id"],
-        "title": f"EvoAgentBench / train-only refinement / r{revision} attempt {attempt_number}",
-        "description": "Research-only Memory and Skill generation from frozen train evidence",
+        "title": f"EvoAgentBench / train-only {'Memory' if memory_only else 'refinement'} / r{revision} attempt {attempt_number}",
+        "description": (
+            "Research-only Memory generation from frozen train evidence"
+            if memory_only else
+            "Research-only Memory and Skill generation from frozen train evidence"
+        ),
         "source_type": "other", "auto_assign_floating_assets": False,
-        "metadata_json": json.dumps({"protocol_hash": protocol["protocol_hash"], "train_only": True, "revision": revision, "attempt": attempt_number}),
+        "metadata_json": json.dumps({"protocol_hash": protocol["protocol_hash"], "train_only": True, "memory_only": memory_only, "revision": revision, "attempt": attempt_number}),
         "linked_agents": [{"agent_id": scope["agent_id"]}],
     }, key)
     session = f"eab-refinement-r{revision}-a{attempt_number}"
@@ -366,24 +371,26 @@ def refine(
             write_new(attempt / "model-events" / f"{index:02d}.json", event)
             print(json.dumps({"stage": "memory", "position": index, "total": len(sources), "task_id": source["task_id"], "usage": usage}), flush=True)
 
-        synth_input = [{key: row[key] for key in ("source_task_id", "source_status", "task_intent", "approach", "key_insight", "applicability")} for row in memories]
-        body = {"model": protocol["agent"]["model"], "temperature": 0, "max_tokens": 12000, "stream": False,
-                "response_format": _skill_response_format(source_ids),
-                "chat_template_kwargs": {"enable_thinking": False},
-                "messages": [{"role": "system", "content": SKILL_SYSTEM}, {"role": "user", "content": json.dumps(synth_input, ensure_ascii=False)}]}
-        text, usage, response_hash = _chat(body, headers)
-        active_attempt_model_calls += 1
-        try:
-            parsed = _response_json(text)
-        except (json.JSONDecodeError, TypeError) as error:
-            write_new(attempt / "invalid-responses" / "skill.txt", text, private=True)
-            raise RuntimeError("REFINEMENT_SKILL_RESPONSE_NOT_JSON") from error
-        write_new(attempt / "skill-response.json", parsed, private=True)
-        skills = _validate_skills(parsed, {row["source_task_id"]: row for row in memories})
-        for index, skill in enumerate(skills, start=1):
-            skill["id"] = f"skill-r{revision}-{index:02d}"
-            skill["content_hash"] = canonical_hash({key: skill[key] for key in ("name", "description", "content")})
-        events.append({"stage": "skill", "usage": usage, "response_hash": response_hash})
+        skills = []
+        if not memory_only:
+            synth_input = [{key: row[key] for key in ("source_task_id", "source_status", "task_intent", "approach", "key_insight", "applicability")} for row in memories]
+            body = {"model": protocol["agent"]["model"], "temperature": 0, "max_tokens": 12000, "stream": False,
+                    "response_format": _skill_response_format(source_ids),
+                    "chat_template_kwargs": {"enable_thinking": False},
+                    "messages": [{"role": "system", "content": SKILL_SYSTEM}, {"role": "user", "content": json.dumps(synth_input, ensure_ascii=False)}]}
+            text, usage, response_hash = _chat(body, headers)
+            active_attempt_model_calls += 1
+            try:
+                parsed = _response_json(text)
+            except (json.JSONDecodeError, TypeError) as error:
+                write_new(attempt / "invalid-responses" / "skill.txt", text, private=True)
+                raise RuntimeError("REFINEMENT_SKILL_RESPONSE_NOT_JSON") from error
+            write_new(attempt / "skill-response.json", parsed, private=True)
+            skills = _validate_skills(parsed, {row["source_task_id"]: row for row in memories})
+            for index, skill in enumerate(skills, start=1):
+                skill["id"] = f"skill-r{revision}-{index:02d}"
+                skill["content_hash"] = canonical_hash({key: skill[key] for key in ("name", "description", "content")})
+            events.append({"stage": "skill", "usage": usage, "response_hash": response_hash})
 
         frozen.mkdir(parents=True, mode=0o700)
         write_new(frozen / "memories.json", memories)
@@ -404,6 +411,8 @@ def refine(
             "model": protocol["agent"]["model"], "temperature": 0, "fallback": "disabled", "train_only": True,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
+        if memory_only:
+            manifest["memory_only"] = True
         manifest["artifact_hash"] = canonical_hash({"manifest": manifest, "memories": memories, "skills": skills})
         write_new(frozen / "manifest.json", manifest)
         write_new(attempt / "model-events.json", events)
@@ -425,6 +434,7 @@ def main() -> None:
     parser.add_argument("--attempt", type=int, default=1)
     parser.add_argument("--resume-from-attempt", type=int)
     parser.add_argument("--reuse-memories-from-revision", type=int)
+    parser.add_argument("--memory-only", action="store_true")
     args = parser.parse_args()
     if args.revision not in (1, 2):
         parser.error("only the frozen pilot revisions 1 and 2 are allowed")
@@ -434,7 +444,10 @@ def main() -> None:
         parser.error("resume source must be a different positive attempt")
     if args.reuse_memories_from_revision is not None and args.reuse_memories_from_revision < 1:
         parser.error("memory source revision must be positive")
-    refine(args.root, args.revision, args.attempt, args.resume_from_attempt, args.reuse_memories_from_revision)
+    refine(
+        args.root, args.revision, args.attempt, args.resume_from_attempt,
+        args.reuse_memories_from_revision, args.memory_only,
+    )
 
 
 if __name__ == "__main__":

@@ -102,7 +102,11 @@ def setup(root: Path) -> None:
     split_file = EVO_REPO / "benchmark/data/splits/code_implementation.json"
     protocol = json.loads(PROTOCOL_FILE.read_text())
     split = json.loads(split_file.read_text())
-    if protocol.get("protocol_revision") == 2:
+    if protocol.get("protocol_revision") == 3:
+        from .protocol_v3 import validate_frozen_protocol_v3
+
+        validate_frozen_protocol_v3(protocol, split)
+    elif protocol.get("protocol_revision") == 2:
         from .protocol_v2 import validate_frozen_protocol_v2
 
         metadata_path = PROTOCOL_FILE.with_name("protocol-code-v2-metadata.json")
@@ -175,7 +179,10 @@ def _phase_tasks(protocol: dict[str, Any], phase: str) -> set[str]:
         "test_checkpoint": "test_checkpoint",
         "test": "final_test",
     }
-    return set(protocol["selection"][mapping[phase]])
+    selection_key = mapping[phase]
+    if selection_key not in protocol["selection"]:
+        raise ValueError("PHASE_NOT_AVAILABLE_IN_PROTOCOL")
+    return set(protocol["selection"][selection_key])
 
 
 def _candidate_assets(root: Path, revision: int, arm: str, candidate_protocol_hash: str) -> tuple[list[dict[str, Any]], str]:

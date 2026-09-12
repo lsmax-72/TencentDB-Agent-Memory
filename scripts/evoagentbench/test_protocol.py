@@ -13,6 +13,7 @@ from scripts.evoagentbench.nanobot_cli_compat import prepare_invocation
 from scripts.evoagentbench.official_runner import raw_final_assistant_response
 from scripts.evoagentbench.protocol import build_protocol, sha256_json
 from scripts.evoagentbench.protocol_v2 import build_protocol as build_protocol_v2
+from scripts.evoagentbench.protocol_v3 import build_protocol as build_protocol_v3
 from scripts.evoagentbench.retrieval import (
     APPLICABILITY_ALGORITHM, injection_text, select_applicable_skills,
     select_assets,
@@ -63,6 +64,34 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(protocol["selection"]["difficulty_quotas"], {"hard": 12, "medium": 8, "easy": 4})
         self.assertFalse(protocol["candidate"]["refinement_allowed"])
         self.assertEqual(protocol["benchmark"]["metadata_snapshot_hash"], snapshot["artifact_hash"])
+
+    def test_v3_trace2skill_split_is_fresh_stratified_and_candidate_blind(self):
+        v1 = json.loads(Path("scripts/evoagentbench/protocol-code-v1.json").read_text())
+        v2 = json.loads(Path("scripts/evoagentbench/protocol-code-v2.json").read_text())
+        metadata = json.loads(Path("scripts/evoagentbench/protocol-code-v2-metadata.json").read_text())
+        split = {
+            "train": v1["selection"]["final_train"],
+            "test": v1["selection"]["final_test"],
+        }
+        protocol = build_protocol_v3(split, metadata, v1, v2)
+        prior = set(
+            v1["selection"]["experience"]
+            + v1["selection"]["development"]
+            + v2["selection"]["development"]
+        )
+        experience = set(protocol["selection"]["experience"])
+        development = set(protocol["selection"]["development"])
+        self.assertEqual(len(experience), 48)
+        self.assertEqual(len(development), 24)
+        self.assertFalse(prior & experience)
+        self.assertFalse(prior & development)
+        self.assertFalse(experience & development)
+        self.assertEqual(
+            protocol["retrieval"]["skill_algorithm"],
+            "lexical-idf-applicability-v6",
+        )
+        self.assertFalse(protocol["candidate_generation"]["development_or_test_visible"])
+        self.assertTrue(protocol["governance"]["official_test_locked_until_pilot_pass"])
 
     def test_candidate_carry_preserves_frozen_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -85,7 +85,11 @@ def validate(root: Path, phase: str) -> Path | None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--phase", choices=["development", "test_checkpoint", "final_test"], required=True)
+    parser.add_argument(
+        "--phase",
+        choices=["experience", "development", "test_checkpoint", "final_test"],
+        required=True,
+    )
     args = parser.parse_args()
     print(json.dumps(build(args.root, args.phase)))
 

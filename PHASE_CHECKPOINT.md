@@ -1,5 +1,14 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-12 Trace2Skill v3：协议冻结并开始真实 train 收集
+
+- 冻结 `tdai-evoagentbench-code-v3-trace2skill`，hash `bab5d58fdb5650af55bbfd9e071210d89e86bfafe6d06b584fc77d14279ec97b`。仅从官方 train 按固定种子/难度配额选择 48 条 experience、24 条 development；与 v1/v2 已使用的 60 条 train 全部不重叠。协议不包含 official test ID，pilot PASS 前无法误开 test。
+- 新隔离 root `/Users/lsmax/Coder/evoagentbench-artifacts/code-v3` 已建立，复用专用 EvoAgentBench Team/Agent；正式资产快照已记录。MemoryProxy 与真实 `qwen3.8-27b` 只读连通检查通过。
+- experience 子集缓存已从 4.49GB 官方源一次性冻结：源 hash `7ae239c4b25f59e0331b83725ab566a53568ea19d93fcbc5f647bec5caeb55db`，cache hash `f4f9e472fe23a912ad6a0db06d788ec4ea073d8d12c7e93f7b1170765435cad1`，artifact `73c6b6dd7bef7b1a534ea0ee0acae3661477c88b721169441cc7b1df5bd30a10`。
+- 真实 experience 批处理已启动。截至 checkpoint 完成 4/48：`abc318_a`、`abc314_f` PASS；`abc315_f`、`3233` FAIL。两个 FAIL 均为单次输出打满 8192 tokens 且 0 tool calls，真实保留，不重跑挑结果；当前继续执行 `abc372_g`。
+- 为 v3 增加 `memory-only` 提炼模式：只冻结逐题 Memory，不再额外调用旧式全批 Skill synthesis；后续接 trace patch → mechanism cluster → modular Candidate。当前未生成 v3 Candidate，也未读取 v3 development 内容。
+- 验证：EvoAgentBench Python 46 tests PASS；v3 protocol freeze check、相关 `py_compile` 与 `git diff --check` PASS。
+
 ## 2026-09-12 Trace2Skill 模块化 Candidate pipeline：离线实现完成，真实生成待模型恢复
 
 - 新增逐轨迹 patch schema 与生成 runner：每条训练轨迹独立分析，必须引用冻结 Memory 原文；失败轨迹只能形成 warning，不能证明成功策略。公开字段拒绝 task ID、固定答案、路径和 benchmark 标记。

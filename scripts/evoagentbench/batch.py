@@ -52,7 +52,7 @@ def experience_state(root: Path, task_id: str, smoke_ids: set[str]) -> tuple[str
 def collect_experience(root: Path) -> None:
     protocol = json.loads(PROTOCOL_FILE.read_text())
     tasks = protocol["selection"]["experience"]
-    smoke = set(protocol["selection"]["smoke"])
+    smoke = set(protocol["selection"].get("smoke", []))
     for index, task_id in enumerate(tasks, start=1):
         state, source = experience_state(root, task_id, smoke)
         print(json.dumps({"position": index, "total": len(tasks), "task_id": task_id, "state": state, "source": source}), flush=True)
