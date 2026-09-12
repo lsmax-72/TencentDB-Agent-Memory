@@ -5,11 +5,13 @@ import unittest
 from pathlib import Path
 
 from scripts.evoagentbench.adapter import adapt_trial, candidate_contamination
+from scripts.evoagentbench.carry_candidate import carry
 from scripts.evoagentbench.batch import experience_state
 from scripts.evoagentbench.metrics import compare
 from scripts.evoagentbench.nanobot_cli_compat import prepare_invocation
 from scripts.evoagentbench.official_runner import raw_final_assistant_response
 from scripts.evoagentbench.protocol import build_protocol, sha256_json
+from scripts.evoagentbench.protocol_v2 import build_protocol as build_protocol_v2
 from scripts.evoagentbench.retrieval import injection_text, select_assets
 from scripts.evoagentbench.report import _replace_runs, build as build_report
 from scripts.evoagentbench.refine import _response_json, _skill_response_format, _validate_memory, _validate_skills
@@ -40,6 +42,41 @@ class ProtocolTests(unittest.TestCase):
     def test_wrong_split_size_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "PINNED_SPLIT_SIZE_MISMATCH"):
             build_protocol({"train": [], "test": []})
+
+    def test_v2_selection_is_stratified_disjoint_and_candidate_blind(self):
+        split = self.split()
+        v1 = build_protocol(split)
+        difficulties = ("easy", "medium", "hard")
+        metadata = [
+            {"question_id": task_id, "difficulty": difficulties[index % 3], "platform": "test", "question_title": task_id}
+            for index, task_id in enumerate(split["train"])
+        ]
+        protocol, snapshot = build_protocol_v2(split, metadata, v1, "a" * 64)
+        selected = protocol["selection"]["development"]
+        excluded = set(v1["selection"]["experience"] + v1["selection"]["development"])
+        self.assertEqual(len(selected), 24)
+        self.assertFalse(set(selected) & excluded)
+        self.assertEqual(protocol["selection"]["difficulty_quotas"], {"hard": 12, "medium": 8, "easy": 4})
+        self.assertFalse(protocol["candidate"]["refinement_allowed"])
+        self.assertEqual(protocol["benchmark"]["metadata_snapshot_hash"], snapshot["artifact_hash"])
+
+    def test_candidate_carry_preserves_frozen_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source/frozen/refinement-r3"
+            target = root / "target"
+            source.mkdir(parents=True)
+            memories = []
+            skills = []
+            manifest = {"protocol_hash": "source-protocol", "revision": 3}
+            manifest["artifact_hash"] = sha256_json({"manifest": manifest, "memories": memories, "skills": skills})
+            for name, value in (("manifest.json", manifest), ("memories.json", memories), ("skills.json", skills), ("review.json", {"status": "APPROVED_FOR_DEVELOPMENT"})):
+                (source / name).write_text(json.dumps(value))
+            protocol = root / "protocol.json"
+            protocol.write_text(json.dumps({"protocol_hash": "target-protocol", "candidate": {"revision": 3, "artifact_hash": manifest["artifact_hash"], "source_protocol_hash": "source-protocol"}}))
+            receipt = carry(root / "source", target, 3, protocol)
+            self.assertEqual(receipt["candidate_artifact_hash"], manifest["artifact_hash"])
+            self.assertEqual((target / "frozen/refinement-r3/skills.json").read_bytes(), (source / "skills.json").read_bytes())
 
     def test_hub_export_keeps_one_memory_snapshot_and_both_skill_revisions(self):
         with tempfile.TemporaryDirectory() as tmp:

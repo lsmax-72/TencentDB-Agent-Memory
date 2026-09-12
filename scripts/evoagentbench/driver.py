@@ -23,7 +23,7 @@ from .subset_cache import validate as validate_phase_cache
 
 
 REPO = Path(__file__).resolve().parents[2]
-PROTOCOL_FILE = REPO / "scripts/evoagentbench/protocol-code-v1.json"
+PROTOCOL_FILE = Path(os.environ.get("TDAI_EVO_PROTOCOL_FILE", REPO / "scripts/evoagentbench/protocol-code-v1.json")).resolve()
 EVO_REPO = Path("/Users/lsmax/Coder/EvoAgentBench")
 LCB_REPO = Path("/Users/lsmax/Coder/LiveCodeBench")
 PYTHON = EVO_REPO / ".venv-tdai/bin/python"
@@ -101,7 +101,14 @@ def setup(root: Path) -> None:
         raise RuntimeError("PINNED_BENCHMARK_ENVIRONMENT_MISSING")
     split_file = EVO_REPO / "benchmark/data/splits/code_implementation.json"
     protocol = json.loads(PROTOCOL_FILE.read_text())
-    validate_frozen_protocol(protocol, json.loads(split_file.read_text()))
+    split = json.loads(split_file.read_text())
+    if protocol.get("protocol_revision") == 2:
+        from .protocol_v2 import validate_frozen_protocol_v2
+
+        metadata_path = PROTOCOL_FILE.with_name("protocol-code-v2-metadata.json")
+        validate_frozen_protocol_v2(protocol, split, json.loads(metadata_path.read_text()))
+    else:
+        validate_frozen_protocol(protocol, split)
     user_key = local_user_key()
     user = api("/v3/meta/user/get", {"user_key": user_key}, user_key)
     teams = api("/v3/meta/team/list", {"user_key": user_key, "name": TEAM_NAME, "limit": 100}, user_key)["items"]
@@ -171,13 +178,13 @@ def _phase_tasks(protocol: dict[str, Any], phase: str) -> set[str]:
     return set(protocol["selection"][mapping[phase]])
 
 
-def _candidate_assets(root: Path, revision: int, arm: str, protocol_hash: str) -> tuple[list[dict[str, Any]], str]:
+def _candidate_assets(root: Path, revision: int, arm: str, candidate_protocol_hash: str) -> tuple[list[dict[str, Any]], str]:
     frozen = root / "frozen" / f"refinement-r{revision}"
     manifest_path = frozen / "manifest.json"
     if not manifest_path.is_file():
         raise FileNotFoundError("FROZEN_CANDIDATE_MISSING")
     manifest = json.loads(manifest_path.read_text())
-    if manifest.get("protocol_hash") != protocol_hash:
+    if manifest.get("protocol_hash") != candidate_protocol_hash:
         raise ValueError("CANDIDATE_PROTOCOL_HASH_MISMATCH")
     artifact_hash = manifest.get("artifact_hash")
     manifest_without_hash = dict(manifest)
@@ -244,7 +251,13 @@ def run_trial(root: Path, phase: str, arm: str, task_id: str, trial: int, infras
     asset_pool: list[dict[str, Any]] = []
     candidate_hash = None
     if candidate_revision is not None:
-        asset_pool, candidate_hash = _candidate_assets(root, candidate_revision, arm, protocol["protocol_hash"])
+        frozen_candidate = protocol.get("candidate")
+        if frozen_candidate and candidate_revision != frozen_candidate.get("revision"):
+            raise ValueError("CANDIDATE_REVISION_NOT_FROZEN_FOR_PROTOCOL")
+        candidate_protocol_hash = frozen_candidate.get("source_protocol_hash") if frozen_candidate else protocol["protocol_hash"]
+        asset_pool, candidate_hash = _candidate_assets(root, candidate_revision, arm, candidate_protocol_hash)
+        if frozen_candidate and candidate_hash != frozen_candidate.get("artifact_hash"):
+            raise ValueError("CANDIDATE_ARTIFACT_NOT_FROZEN_FOR_PROTOCOL")
     retry_suffix = f"-infra-retry-{infrastructure_retry}" if infrastructure_retry is not None else ""
     revision_suffix = f"-r{candidate_revision}" if candidate_revision is not None else ""
     run_id = f"{phase}-{task_id}-{arm}{revision_suffix}-trial-{trial}{retry_suffix}"

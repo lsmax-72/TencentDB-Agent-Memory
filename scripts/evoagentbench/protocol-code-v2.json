@@ -1,0 +1,388 @@
+{
+  "protocol_id": "tdai-evoagentbench-code-v2-discriminative",
+  "protocol_revision": 2,
+  "predecessor_protocol_id": "tdai-evoagentbench-code-v1",
+  "predecessor_protocol_hash": "d3bcb0ee7bd7b056e54471227ecd401de71a88b86376f8ad2d71c71fd27871e3",
+  "benchmark": {
+    "name": "EvoAgentBench-compatible / Algorithmic Reasoning",
+    "evoagentbench_revision": "948a17288782d5120778da16b4cf1cad9305d8b4",
+    "livecodebench_revision": "28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24",
+    "release": "release_v6",
+    "split_hash": "3a2235754efca064b2f45a5bbbc65be62c433588be81e6de78e683f928cf2a06",
+    "official_train_count": 182,
+    "official_test_count": 86,
+    "dataset_source_sha256": "7ae239c4b25f59e0331b83725ab566a53568ea19d93fcbc5f647bec5caeb55db",
+    "metadata_snapshot_hash": "f7177ba5d71f6ea42cbb9bade889b71294d42b3747eb8fb9098a9d4491c1cc5e"
+  },
+  "selection": {
+    "seed": "tdai-evoagentbench-code-v2-discriminative",
+    "algorithm": "difficulty quota, then sha256(seed\\0difficulty\\0task_id), ascending",
+    "eligibility": "official train minus v1 experience and v1 development",
+    "difficulty_quotas": {
+      "hard": 12,
+      "medium": 8,
+      "easy": 4
+    },
+    "eligible_count": 146,
+    "eligible_difficulty_counts": {
+      "easy": 67,
+      "hard": 22,
+      "medium": 57
+    },
+    "regression": [
+      "3246",
+      "3528",
+      "abc359_a",
+      "2870",
+      "3251",
+      "3093",
+      "abc308_e",
+      "3610",
+      "3778",
+      "3675",
+      "3265",
+      "3764"
+    ],
+    "development": [
+      "3017",
+      "3223",
+      "abc388_e",
+      "2921",
+      "2884",
+      "abc342_e",
+      "abc344_d",
+      "3603",
+      "abc328_d",
+      "abc380_f",
+      "3345",
+      "3604",
+      "3570",
+      "2834",
+      "2811",
+      "abc326_c",
+      "3540",
+      "3495",
+      "abc370_d",
+      "3613",
+      "abc393_a",
+      "3626",
+      "3685",
+      "3408"
+    ],
+    "development_metadata": [
+      {
+        "question_title": "number-of-beautiful-integers-in-the-range",
+        "platform": "leetcode",
+        "question_id": "3017",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "count-complete-substrings",
+        "platform": "leetcode",
+        "question_id": "3223",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "Simultaneous Kagamimochi",
+        "platform": "atcoder",
+        "question_id": "abc388_e",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "count-stepping-numbers-in-range",
+        "platform": "leetcode",
+        "question_id": "2921",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "length-of-the-longest-valid-substring",
+        "platform": "leetcode",
+        "question_id": "2884",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "Last Train",
+        "platform": "atcoder",
+        "question_id": "abc342_e",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "String Bags",
+        "platform": "atcoder",
+        "question_id": "abc344_d",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "check-if-dfs-strings-are-palindromes",
+        "platform": "leetcode",
+        "question_id": "3603",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "Take ABC",
+        "platform": "atcoder",
+        "question_id": "abc328_d",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "Exchange Game",
+        "platform": "atcoder",
+        "question_id": "abc380_f",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "find-the-sum-of-the-power-of-all-subsequences",
+        "platform": "leetcode",
+        "question_id": "3345",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "find-the-number-of-possible-ways-for-an-event",
+        "platform": "leetcode",
+        "question_id": "3604",
+        "difficulty": "hard"
+      },
+      {
+        "question_title": "count-of-substrings-containing-every-vowel-and-k-consonants-i",
+        "platform": "leetcode",
+        "question_id": "3570",
+        "difficulty": "medium"
+      },
+      {
+        "question_title": "relocate-marbles",
+        "platform": "leetcode",
+        "question_id": "2834",
+        "difficulty": "medium"
+      },
+      {
+        "question_title": "determine-the-minimum-sum-of-a-k-avoiding-array",
+        "platform": "leetcode",
+        "question_id": "2811",
+        "difficulty": "medium"
+      },
+      {
+        "question_title": "Peak",
+        "platform": "atcoder",
+        "question_id": "abc326_c",
+        "difficulty": "medium"
+      },
+      {
+        "question_title": "hash-divided-string",
+        "platform": "leetcode",
+        "question_id": "3540",
+        "difficulty": "medium"
+      },
+      {
+        "question_title": "k-th-nearest-obstacle-queries",
+        "platform": "leetcode",
+        "question_id": "3495",
+        "difficulty": "medium"
+      },
+      {
+        "question_title": "Cross Explosion",
+        "platform": "atcoder",
+        "question_id": "abc370_d",
+        "difficulty": "medium"
+      },
+      {
+        "question_title": "maximize-amount-after-two-days-of-conversions",
+        "platform": "leetcode",
+        "question_id": "3613",
+        "difficulty": "medium"
+      },
+      {
+        "question_title": "Poisonous Oyster",
+        "platform": "atcoder",
+        "question_id": "abc393_a",
+        "difficulty": "easy"
+      },
+      {
+        "question_title": "smallest-divisible-digit-product-i",
+        "platform": "leetcode",
+        "question_id": "3626",
+        "difficulty": "easy"
+      },
+      {
+        "question_title": "count-subarrays-of-length-three-with-a-condition",
+        "platform": "leetcode",
+        "question_id": "3685",
+        "difficulty": "easy"
+      },
+      {
+        "question_title": "count-the-number-of-special-characters-i",
+        "platform": "leetcode",
+        "question_id": "3408",
+        "difficulty": "easy"
+      }
+    ],
+    "final_test": [
+      "3423",
+      "3638",
+      "3687",
+      "3762",
+      "abc319_c",
+      "abc320_a",
+      "abc320_c",
+      "abc322_c",
+      "abc324_a",
+      "abc324_f",
+      "abc325_e",
+      "abc327_c",
+      "abc327_d",
+      "abc327_e",
+      "abc328_b",
+      "abc330_a",
+      "abc335_c",
+      "abc336_b",
+      "abc338_a",
+      "abc338_b",
+      "abc339_b",
+      "abc339_d",
+      "abc350_e",
+      "abc352_e",
+      "abc353_a",
+      "abc353_b",
+      "abc354_b",
+      "abc356_b",
+      "abc356_c",
+      "abc357_b",
+      "abc357_e",
+      "abc358_a",
+      "abc359_c",
+      "abc359_e",
+      "abc361_e",
+      "abc361_f",
+      "abc363_b",
+      "abc365_a",
+      "abc366_a",
+      "abc366_d",
+      "abc367_a",
+      "abc367_g",
+      "abc370_g",
+      "abc372_f",
+      "abc373_a",
+      "abc374_a",
+      "abc374_c",
+      "abc374_d",
+      "abc375_b",
+      "abc376_e",
+      "abc376_g",
+      "abc378_c",
+      "abc378_d",
+      "abc379_b",
+      "abc380_a",
+      "abc381_b",
+      "abc382_g",
+      "abc383_a",
+      "abc384_c",
+      "abc385_a",
+      "abc387_a",
+      "abc387_b",
+      "abc388_a",
+      "abc389_d",
+      "abc390_c",
+      "abc390_f",
+      "abc391_d",
+      "abc392_d",
+      "abc394_a",
+      "abc394_g",
+      "abc395_c",
+      "abc396_b",
+      "abc397_a",
+      "abc400_b",
+      "abc400_g",
+      "arc182_d",
+      "arc183_d",
+      "arc184_c",
+      "arc186_c",
+      "arc186_d",
+      "arc186_e",
+      "arc188_d",
+      "arc189_c",
+      "arc190_d",
+      "arc194_a",
+      "arc195_d"
+    ],
+    "test_checkpoint": [
+      "abc356_b",
+      "abc324_a",
+      "abc319_c",
+      "arc195_d",
+      "abc322_c",
+      "abc387_b",
+      "3638",
+      "abc338_a",
+      "abc358_a",
+      "abc370_g",
+      "abc336_b",
+      "abc400_g",
+      "abc380_a",
+      "abc376_e",
+      "abc367_g",
+      "3687",
+      "arc186_d",
+      "abc381_b",
+      "abc390_c",
+      "abc357_b"
+    ]
+  },
+  "candidate": {
+    "revision": 3,
+    "artifact_hash": "789d040f5fbaba0b2561e05a9070a9ec2a1d32ed10c786e8a397cbe68fe5e181",
+    "source_protocol_hash": "d3bcb0ee7bd7b056e54471227ecd401de71a88b86376f8ad2d71c71fd27871e3",
+    "refinement_allowed": false
+  },
+  "regression_reference": {
+    "main_attempt_id": "pilot-r3-main",
+    "main_attempt_artifact_hash": "cef68f83856f46bcaeda801e36ffb6f1b9252bce0a4e00d5d8d2a21ed31242d0",
+    "implementation_fix_attempt_id": "pilot-r3-implementation-fix-retry-1",
+    "implementation_fix_attempt_artifact_hash": "97d05af30e9afae966263e5e86f2f1631ae238c4e973b04f71c7945b56139517"
+  },
+  "arms": [
+    "vanilla",
+    "memory",
+    "skill"
+  ],
+  "retrieval": {
+    "top_k": 2,
+    "memory_source": "official_train_experience_only",
+    "skill_source": "official_train_evidence_only",
+    "test_records_observation_only": true
+  },
+  "agent": {
+    "host": "nanobot-ai==0.1.4.post3",
+    "provider": "vllm-via-memory-proxy",
+    "model": "qwen3.8-27b",
+    "temperature": 0,
+    "fallback": "disabled",
+    "max_retries": 0,
+    "agent_timeout_seconds": 1800,
+    "test_timeout_seconds": 6,
+    "max_tool_iterations": 12,
+    "max_output_tokens_per_call": 8192,
+    "context_window_tokens": 65536
+  },
+  "pilot_gate": {
+    "skill_transfer_gain_gt": 0,
+    "newly_fixed_gte_newly_broken": true,
+    "mean_token_or_turn_cost_increase_lte": 0.25
+  },
+  "test_stop": {
+    "infrastructure_failure_rate_gt": 0.1,
+    "skill_transfer_gain_lte": -0.1,
+    "no_gain_and_cost_increase_gt": 0.5
+  },
+  "strong_evidence": {
+    "skill_transfer_gain_gt": 0,
+    "paired_bootstrap_ci_lower_gt": 0,
+    "newly_fixed_gt_newly_broken": true,
+    "cost_increase_lte": 0.25
+  },
+  "governance": {
+    "promotion": "forbidden",
+    "production_assets_mutable": false,
+    "test_data_candidate_generation": false,
+    "wiki_in_scope": false
+  },
+  "protocol_hash": "fd10899a108751baed606ae293770f813d12c8bd2ecab9ddb1a7d85ca867509d"
+}

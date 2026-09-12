@@ -13,7 +13,7 @@ from .protocol import sha256_json
 
 
 SOURCE = Path("/Users/lsmax/Coder/evoagentbench-data/livecode/release_v6.json")
-PROTOCOL_FILE = Path(__file__).with_name("protocol-code-v1.json")
+PROTOCOL_FILE = Path(os.environ.get("TDAI_EVO_PROTOCOL_FILE", Path(__file__).with_name("protocol-code-v1.json"))).resolve()
 
 
 def write_new(path: Path, value: object) -> None:

@@ -1,0 +1,1100 @@
+{
+  "schema": "tdai-evoagentbench-code-metadata-v1",
+  "release": "release_v6",
+  "source_sha256": "7ae239c4b25f59e0331b83725ab566a53568ea19d93fcbc5f647bec5caeb55db",
+  "official_train_rows": [
+    {
+      "question_title": "C. Raspberries",
+      "platform": "codeforces",
+      "question_id": "1883_C",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "A. Game with Integers",
+      "platform": "codeforces",
+      "question_id": "1899_A",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "count-of-integers",
+      "platform": "leetcode",
+      "question_id": "2757",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "find-the-distinct-difference-array",
+      "platform": "leetcode",
+      "question_id": "2777",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimum-string-length-after-removing-substrings",
+      "platform": "leetcode",
+      "question_id": "2800",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-the-punishment-number-of-an-integer",
+      "platform": "leetcode",
+      "question_id": "2802",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "determine-the-minimum-sum-of-a-k-avoiding-array",
+      "platform": "leetcode",
+      "question_id": "2811",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "check-if-the-number-is-fascinating",
+      "platform": "leetcode",
+      "question_id": "2824",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "relocate-marbles",
+      "platform": "leetcode",
+      "question_id": "2834",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "minimum-operations-to-make-the-integer-zero",
+      "platform": "leetcode",
+      "question_id": "2837",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "sum-of-squares-of-special-elements",
+      "platform": "leetcode",
+      "question_id": "2844",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-the-value-of-the-partition",
+      "platform": "leetcode",
+      "question_id": "2845",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "total-distance-traveled",
+      "platform": "leetcode",
+      "question_id": "2857",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "longest-even-odd-subarray-with-threshold",
+      "platform": "leetcode",
+      "question_id": "2866",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "continuous-subarrays",
+      "platform": "leetcode",
+      "question_id": "2868",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "longest-non-decreasing-subarray-from-two-arrays",
+      "platform": "leetcode",
+      "question_id": "2869",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "longest-alternating-subarray",
+      "platform": "leetcode",
+      "question_id": "2870",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "split-strings-by-separator",
+      "platform": "leetcode",
+      "question_id": "2881",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "length-of-the-longest-valid-substring",
+      "platform": "leetcode",
+      "question_id": "2884",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "visit-array-positions-to-maximize-score",
+      "platform": "leetcode",
+      "question_id": "2893",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "max-pair-sum-in-an-array",
+      "platform": "leetcode",
+      "question_id": "2902",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "count-pairs-whose-sum-is-less-than-target",
+      "platform": "leetcode",
+      "question_id": "2917",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "count-stepping-numbers-in-range",
+      "platform": "leetcode",
+      "question_id": "2921",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "account-balance-after-rounded-purchase",
+      "platform": "leetcode",
+      "question_id": "2955",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "count-symmetric-integers",
+      "platform": "leetcode",
+      "question_id": "2998",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "check-if-strings-can-be-made-equal-with-operations-i",
+      "platform": "leetcode",
+      "question_id": "2999",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimum-absolute-difference-between-elements-with-constraint",
+      "platform": "leetcode",
+      "question_id": "3000",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "number-of-beautiful-integers-in-the-range",
+      "platform": "leetcode",
+      "question_id": "3017",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "minimum-array-length-after-pair-removals",
+      "platform": "leetcode",
+      "question_id": "3081",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "sum-of-values-at-indices-with-k-set-bits",
+      "platform": "leetcode",
+      "question_id": "3093",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "length-of-the-longest-subsequence-that-sums-to-target",
+      "platform": "leetcode",
+      "question_id": "3106",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "maximum-value-of-an-ordered-triplet-i",
+      "platform": "leetcode",
+      "question_id": "3154",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "subarrays-distinct-element-sum-of-squares-i",
+      "platform": "leetcode",
+      "question_id": "3163",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimum-equal-sum-of-two-arrays-after-replacing-zeros",
+      "platform": "leetcode",
+      "question_id": "3171",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "find-the-k-or-of-an-array",
+      "platform": "leetcode",
+      "question_id": "3183",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximum-strong-pair-xor-i",
+      "platform": "leetcode",
+      "question_id": "3193",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-common-elements-between-two-arrays",
+      "platform": "leetcode",
+      "question_id": "3206",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "make-three-strings-equal",
+      "platform": "leetcode",
+      "question_id": "3207",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-the-peaks",
+      "platform": "leetcode",
+      "question_id": "3221",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "count-complete-substrings",
+      "platform": "leetcode",
+      "question_id": "3223",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "length-of-longest-subarray-with-at-most-k-frequency",
+      "platform": "leetcode",
+      "question_id": "3225",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "minimum-number-game",
+      "platform": "leetcode",
+      "question_id": "3226",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximum-size-of-a-set-after-removals",
+      "platform": "leetcode",
+      "question_id": "3228",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "minimum-number-of-coins-to-be-added",
+      "platform": "leetcode",
+      "question_id": "3231",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "maximize-the-number-of-partitions-after-operations",
+      "platform": "leetcode",
+      "question_id": "3233",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "smallest-missing-integer-greater-than-sequential-prefix-sum",
+      "platform": "leetcode",
+      "question_id": "3236",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimize-length-of-array-using-operations",
+      "platform": "leetcode",
+      "question_id": "3244",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "check-if-bitwise-or-has-trailing-zeros",
+      "platform": "leetcode",
+      "question_id": "3246",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimum-number-of-operations-to-make-array-xor-equal-to-k",
+      "platform": "leetcode",
+      "question_id": "3249",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "maximum-area-of-longest-diagonal-rectangle",
+      "platform": "leetcode",
+      "question_id": "3251",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximum-good-subarray-sum",
+      "platform": "leetcode",
+      "question_id": "3265",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "number-of-changing-keys",
+      "platform": "leetcode",
+      "question_id": "3312",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximum-number-of-operations-with-the-same-score-i",
+      "platform": "leetcode",
+      "question_id": "3320",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-the-length-of-the-longest-common-prefix",
+      "platform": "leetcode",
+      "question_id": "3329",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "find-the-sum-of-the-power-of-all-subsequences",
+      "platform": "leetcode",
+      "question_id": "3345",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "distribute-elements-into-two-arrays-i",
+      "platform": "leetcode",
+      "question_id": "3347",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximum-length-substring-with-two-occurrences",
+      "platform": "leetcode",
+      "question_id": "3349",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximize-happiness-of-selected-children",
+      "platform": "leetcode",
+      "question_id": "3351",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "existence-of-a-substring-in-a-string-and-its-reverse",
+      "platform": "leetcode",
+      "question_id": "3353",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimum-levels-to-gain-more-points",
+      "platform": "leetcode",
+      "question_id": "3355",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "most-frequent-ids",
+      "platform": "leetcode",
+      "question_id": "3363",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "find-the-sum-of-encrypted-integers",
+      "platform": "leetcode",
+      "question_id": "3367",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "score-of-a-string",
+      "platform": "leetcode",
+      "question_id": "3379",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "taking-maximum-energy-from-the-mystic-dungeon",
+      "platform": "leetcode",
+      "question_id": "3383",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "minimum-operations-to-make-median-of-array-equal-to-k",
+      "platform": "leetcode",
+      "question_id": "3387",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "right-triangles",
+      "platform": "leetcode",
+      "question_id": "3388",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "count-the-number-of-special-characters-i",
+      "platform": "leetcode",
+      "question_id": "3408",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "permutation-difference-between-two-strings",
+      "platform": "leetcode",
+      "question_id": "3412",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "sum-of-digit-differences-of-all-pairs",
+      "platform": "leetcode",
+      "question_id": "3416",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "count-pairs-that-form-a-complete-day-i",
+      "platform": "leetcode",
+      "question_id": "3421",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-the-number-of-good-pairs-i",
+      "platform": "leetcode",
+      "question_id": "3446",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "alternating-groups-i",
+      "platform": "leetcode",
+      "question_id": "3463",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximum-height-of-a-triangle",
+      "platform": "leetcode",
+      "question_id": "3469",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimum-operations-to-make-binary-array-elements-equal-to-one-i",
+      "platform": "leetcode",
+      "question_id": "3475",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "find-minimum-operations-to-make-all-elements-divisible-by-three",
+      "platform": "leetcode",
+      "question_id": "3476",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "k-th-nearest-obstacle-queries",
+      "platform": "leetcode",
+      "question_id": "3495",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "count-substrings-with-k-frequency-characters-i",
+      "platform": "leetcode",
+      "question_id": "3502",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "number-of-bit-changes-to-make-two-integers-equal",
+      "platform": "leetcode",
+      "question_id": "3508",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-if-digit-game-can-be-won",
+      "platform": "leetcode",
+      "question_id": "3515",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-the-number-of-winning-players",
+      "platform": "leetcode",
+      "question_id": "3519",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-the-power-of-k-size-subarrays-i",
+      "platform": "leetcode",
+      "question_id": "3522",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "reach-end-of-array-with-max-score",
+      "platform": "leetcode",
+      "question_id": "3528",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "hash-divided-string",
+      "platform": "leetcode",
+      "question_id": "3540",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "count-substrings-that-satisfy-k-constraint-i",
+      "platform": "leetcode",
+      "question_id": "3543",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimum-number-of-valid-strings-to-form-target-i",
+      "platform": "leetcode",
+      "question_id": "3559",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "find-the-key-of-the-numbers",
+      "platform": "leetcode",
+      "question_id": "3568",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "count-of-substrings-containing-every-vowel-and-k-consonants-i",
+      "platform": "leetcode",
+      "question_id": "3570",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "identify-the-largest-outlier-in-an-array",
+      "platform": "leetcode",
+      "question_id": "3594",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "check-if-dfs-strings-are-palindromes",
+      "platform": "leetcode",
+      "question_id": "3603",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "find-the-number-of-possible-ways-for-an-event",
+      "platform": "leetcode",
+      "question_id": "3604",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "minimum-element-after-replacement-with-digit-sum",
+      "platform": "leetcode",
+      "question_id": "3606",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimum-division-operations-to-make-array-non-decreasing",
+      "platform": "leetcode",
+      "question_id": "3607",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "find-x-sum-of-all-k-long-subarrays-i",
+      "platform": "leetcode",
+      "question_id": "3610",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximize-amount-after-two-days-of-conversions",
+      "platform": "leetcode",
+      "question_id": "3613",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "maximum-number-of-distinct-elements-after-operations",
+      "platform": "leetcode",
+      "question_id": "3620",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "smallest-divisible-digit-product-i",
+      "platform": "leetcode",
+      "question_id": "3626",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "button-with-longest-push-time",
+      "platform": "leetcode",
+      "question_id": "3632",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "check-balanced-string",
+      "platform": "leetcode",
+      "question_id": "3636",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimum-positive-sum-subarray",
+      "platform": "leetcode",
+      "question_id": "3644",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "sum-of-good-subsequences",
+      "platform": "leetcode",
+      "question_id": "3646",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "minimum-number-of-operations-to-make-elements-in-array-distinct",
+      "platform": "leetcode",
+      "question_id": "3656",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximize-sum-of-weights-after-edge-removals",
+      "platform": "leetcode",
+      "question_id": "3675",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "smallest-number-with-all-set-bits",
+      "platform": "leetcode",
+      "question_id": "3676",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "count-subarrays-of-length-three-with-a-condition",
+      "platform": "leetcode",
+      "question_id": "3685",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximum-subarray-with-equal-products",
+      "platform": "leetcode",
+      "question_id": "3702",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "minimize-the-maximum-edge-weight-of-graph",
+      "platform": "leetcode",
+      "question_id": "3720",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "sum-of-variable-length-subarrays",
+      "platform": "leetcode",
+      "question_id": "3731",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "choose-k-elements-with-maximum-sum",
+      "platform": "leetcode",
+      "question_id": "3759",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "assign-elements-to-groups-with-constraints",
+      "platform": "leetcode",
+      "question_id": "3760",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "separate-squares-i",
+      "platform": "leetcode",
+      "question_id": "3763",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "maximum-sum-with-at-most-k-elements",
+      "platform": "leetcode",
+      "question_id": "3764",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "minimum-pair-removal-to-sort-array-i",
+      "platform": "leetcode",
+      "question_id": "3773",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "find-minimum-cost-to-remove-array-elements",
+      "platform": "leetcode",
+      "question_id": "3776",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "transform-array-by-parity",
+      "platform": "leetcode",
+      "question_id": "3778",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "longest-palindrome-after-substring-concatenation-i",
+      "platform": "leetcode",
+      "question_id": "3793",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "count-beautiful-numbers",
+      "platform": "leetcode",
+      "question_id": "3801",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "maximize-active-section-with-trade-i",
+      "platform": "leetcode",
+      "question_id": "3805",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "properties-graph",
+      "platform": "leetcode",
+      "question_id": "3809",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "reverse-degree-of-a-string",
+      "platform": "leetcode",
+      "question_id": "3811",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "maximum-containers-on-a-ship",
+      "platform": "leetcode",
+      "question_id": "3817",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Overall Winner",
+      "platform": "atcoder",
+      "question_id": "abc301_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Attack",
+      "platform": "atcoder",
+      "question_id": "abc302_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Find snuke",
+      "platform": "atcoder",
+      "question_id": "abc302_b",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Similar String",
+      "platform": "atcoder",
+      "question_id": "abc303_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Weekly Records",
+      "platform": "atcoder",
+      "question_id": "abc307_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "racecar",
+      "platform": "atcoder",
+      "question_id": "abc307_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "New Scheme",
+      "platform": "atcoder",
+      "question_id": "abc308_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "MEX",
+      "platform": "atcoder",
+      "question_id": "abc308_e",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Add One Edge",
+      "platform": "atcoder",
+      "question_id": "abc309_d",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Vacation Together",
+      "platform": "atcoder",
+      "question_id": "abc311_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Cans and Openers",
+      "platform": "atcoder",
+      "question_id": "abc312_f",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "A Certain Game",
+      "platform": "atcoder",
+      "question_id": "abc314_f",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "tcdr",
+      "platform": "atcoder",
+      "question_id": "abc315_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Shortcuts",
+      "platform": "atcoder",
+      "question_id": "abc315_f",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Full Moon",
+      "platform": "atcoder",
+      "question_id": "abc318_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Longest Palindrome",
+      "platform": "atcoder",
+      "question_id": "abc320_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Prefix and Suffix",
+      "platform": "atcoder",
+      "question_id": "abc322_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Error Correction",
+      "platform": "atcoder",
+      "question_id": "abc324_c",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "326",
+      "platform": "atcoder",
+      "question_id": "abc326_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Peak",
+      "platform": "atcoder",
+      "question_id": "abc326_c",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "ABC Puzzle",
+      "platform": "atcoder",
+      "question_id": "abc326_d",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "ab",
+      "platform": "atcoder",
+      "question_id": "abc327_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Take ABC",
+      "platform": "atcoder",
+      "question_id": "abc328_d",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Counting Ls",
+      "platform": "atcoder",
+      "question_id": "abc330_d",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Pentagon",
+      "platform": "atcoder",
+      "question_id": "abc333_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Erase Leaves",
+      "platform": "atcoder",
+      "question_id": "abc333_d",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Last Train",
+      "platform": "atcoder",
+      "question_id": "abc342_e",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Diversity of Scores",
+      "platform": "atcoder",
+      "question_id": "abc343_d",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "String Bags",
+      "platform": "atcoder",
+      "question_id": "abc344_d",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Substring",
+      "platform": "atcoder",
+      "question_id": "abc347_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Airport Code",
+      "platform": "atcoder",
+      "question_id": "abc349_c",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Weighted Tic",
+      "platform": "atcoder",
+      "question_id": "abc349_e",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Past ABCs",
+      "platform": "atcoder",
+      "question_id": "abc350_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "New Friends",
+      "platform": "atcoder",
+      "question_id": "abc350_d",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Sigma Problem",
+      "platform": "atcoder",
+      "question_id": "abc353_c",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Remove Pairs",
+      "platform": "atcoder",
+      "question_id": "abc354_e",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Intersecting Intervals",
+      "platform": "atcoder",
+      "question_id": "abc355_d",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Count Takahashi",
+      "platform": "atcoder",
+      "question_id": "abc359_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Buy a Pen",
+      "platform": "atcoder",
+      "question_id": "abc362_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Piling Up",
+      "platform": "atcoder",
+      "question_id": "abc363_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Grid Walk",
+      "platform": "atcoder",
+      "question_id": "abc364_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "AtCoder Janken 3",
+      "platform": "atcoder",
+      "question_id": "abc365_d",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Balls and Bag Query",
+      "platform": "atcoder",
+      "question_id": "abc366_c",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Raise Both Hands",
+      "platform": "atcoder",
+      "question_id": "abc370_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Cross Explosion",
+      "platform": "atcoder",
+      "question_id": "abc370_d",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Ax + By < C",
+      "platform": "atcoder",
+      "question_id": "abc372_g",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "No Cross Matching",
+      "platform": "atcoder",
+      "question_id": "abc373_g",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Unvarnished Report",
+      "platform": "atcoder",
+      "question_id": "abc374_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Exchange Game",
+      "platform": "atcoder",
+      "question_id": "abc380_f",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "11/22 String",
+      "platform": "atcoder",
+      "question_id": "abc381_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "aaaadaa",
+      "platform": "atcoder",
+      "question_id": "abc384_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Santa Claus 1",
+      "platform": "atcoder",
+      "question_id": "abc385_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Operate 1",
+      "platform": "atcoder",
+      "question_id": "abc386_c",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Coming of Age Celebration",
+      "platform": "atcoder",
+      "question_id": "abc388_d",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "Simultaneous Kagamimochi",
+      "platform": "atcoder",
+      "question_id": "abc388_e",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Simultaneous Kagamimochi 2",
+      "platform": "atcoder",
+      "question_id": "abc388_g",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Seek Grid",
+      "platform": "atcoder",
+      "question_id": "abc391_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Poisonous Oyster",
+      "platform": "atcoder",
+      "question_id": "abc393_a",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "cat",
+      "platform": "atcoder",
+      "question_id": "abc394_b",
+      "difficulty": "easy"
+    },
+    {
+      "question_title": "Uniqueness",
+      "platform": "atcoder",
+      "question_id": "abc398_c",
+      "difficulty": "medium"
+    },
+    {
+      "question_title": "ABCBA",
+      "platform": "atcoder",
+      "question_id": "abc398_f",
+      "difficulty": "hard"
+    },
+    {
+      "question_title": "Hamming Distance",
+      "platform": "atcoder",
+      "question_id": "abc399_a",
+      "difficulty": "easy"
+    }
+  ],
+  "artifact_hash": "f7177ba5d71f6ea42cbb9bade889b71294d42b3747eb8fb9098a9d4491c1cc5e"
+}
