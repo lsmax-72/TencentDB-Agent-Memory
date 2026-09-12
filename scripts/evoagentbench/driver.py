@@ -19,6 +19,7 @@ from typing import Any
 
 from .adapter import adapt_trial, sha256_file
 from .protocol import validate_frozen_protocol
+from .subset_cache import validate as validate_phase_cache
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -203,6 +204,31 @@ def _wait_file(path: Path, process: subprocess.Popen, seconds: int = 10) -> None
     raise TimeoutError("PROXY_BRIDGE_START_TIMEOUT")
 
 
+def benchmark_run_payload(evidence: dict[str, Any]) -> dict[str, Any]:
+    scope = evidence["hub_scope"]
+    tool_events = [{"name": item["name"], "arguments": json.dumps(item["arguments"], ensure_ascii=False)[:20_000], "result": str(item["result"] or "")[:40_000], "success": item["success"] is True, "sequence": item["sequence"]} for item in evidence["tool_events"][:100]]
+    return {
+        "team_id": scope["team_id"], "agent_id": scope["agent_id"], "task_id": scope["task_id"],
+        "run_id": evidence["run_id"], "session_id": evidence.get("session_id") or evidence["run_id"],
+        "protocol_hash": evidence["protocol_hash"], "phase": evidence["phase"], "arm": evidence["arm"],
+        "trial": evidence["trial"], "status": evidence["status"], "reward": evidence["reward"],
+        "candidate_revision": evidence.get("candidate_revision"), "candidate_hash": evidence.get("candidate_artifact_hash"),
+        "task_input": (evidence.get("task_input") or f"Official EvoAgentBench Algorithmic Reasoning task {evidence['task_id']}; statement unavailable in this run artifact.")[:100_000],
+        "final_output": evidence["final_output"][:100_000], "tool_events": tool_events,
+        "usage": {"input_tokens": evidence["usage"]["input_tokens"], "output_tokens": evidence["usage"]["output_tokens"], "model_calls": evidence["usage"]["model_call_count"], "tool_calls": evidence["usage"]["tool_call_count"]},
+        "actual_model": evidence["actual_model"] or "",
+        "injected_assets": [{"id": item["id"], "hash": item["hash"]} for item in evidence["injected_assets"]],
+    }
+
+
+def ingest_saved_run(root: Path, run_id: str) -> dict[str, Any]:
+    evidence_path = root / "runs" / run_id / "evidence.json"
+    if not evidence_path.is_file():
+        raise FileNotFoundError("SAVED_RUN_EVIDENCE_MISSING")
+    user_key = json.loads((root / "private/secrets.json").read_text())["user_key"]
+    return api("/v3/evolution/benchmark/run/ingest", benchmark_run_payload(json.loads(evidence_path.read_text())), user_key)
+
+
 def run_trial(root: Path, phase: str, arm: str, task_id: str, trial: int, infrastructure_retry: int | None = None, candidate_revision: int | None = None) -> None:
     protocol = json.loads(PROTOCOL_FILE.read_text())
     if task_id not in _phase_tasks(protocol, phase):
@@ -280,9 +306,11 @@ tools:
   restrictToWorkspace: true
 """
         write_new(private / "nanobot.yaml", agent_yaml, private=True)
+        phase_cache = validate_phase_cache(root, "final_test" if phase == "test" else phase)
+        cache_dir = phase_cache or Path("/Users/lsmax/Coder/evoagentbench-data/livecode")
         domain_yaml = f"""lcb_repo: {LCB_REPO}
 release_version: release_v6
-cache_dir: /Users/lsmax/Coder/evoagentbench-data/livecode
+cache_dir: {cache_dir}
 split_file: {EVO_REPO}/benchmark/data/splits/code_implementation.json
 agent_timeout: {protocol['agent']['agent_timeout_seconds']}
 test_timeout: {protocol['agent']['test_timeout_seconds']}
@@ -367,6 +395,8 @@ live: false
                 "usage": {"input_tokens": evidence["usage"]["input_tokens"], "output_tokens": evidence["usage"]["output_tokens"], "model_calls": evidence["usage"]["model_call_count"], "tool_calls": evidence["usage"]["tool_call_count"]},
                 "actual_model": evidence["actual_model"] or "", "outcome": "PASS" if evidence["status"] == "TASK_PASS" else "FAIL" if evidence["status"] == "TASK_FAIL" else "INFRA_ERROR", "used_asset_versions": {},
             }, user_key)
+        else:
+            api("/v3/evolution/benchmark/run/ingest", benchmark_run_payload(evidence), user_key)
         print(json.dumps({"run_id": run_id, "status": evidence["status"], "reward": evidence["reward"], "usage": evidence["usage"]}))
     finally:
         if bridge.poll() is None:
@@ -383,7 +413,7 @@ live: false
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["setup", "connectivity", "run"])
+    parser.add_argument("command", choices=["setup", "connectivity", "run", "ingest-run"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--phase", choices=["smoke", "experience", "development", "test_checkpoint", "test"])
     parser.add_argument("--arm", choices=["vanilla", "memory", "skill"])
@@ -391,17 +421,23 @@ def main() -> None:
     parser.add_argument("--trial", type=int, default=1)
     parser.add_argument("--infrastructure-retry", type=int)
     parser.add_argument("--candidate-revision", type=int)
+    parser.add_argument("--run-id")
     args = parser.parse_args()
     if args.command == "setup":
         setup(args.root)
     elif args.command == "connectivity":
         print(json.dumps(readonly_connectivity()))
-    else:
+    elif args.command == "run":
         if not args.phase or not args.arm or not args.task:
             parser.error("run requires --phase, --arm and --task")
         if args.infrastructure_retry is not None and args.infrastructure_retry < 1:
             parser.error("--infrastructure-retry must be positive")
         run_trial(args.root, args.phase, args.arm, args.task, args.trial, args.infrastructure_retry, args.candidate_revision)
+    else:
+        if not args.run_id:
+            parser.error("ingest-run requires --run-id")
+        record = ingest_saved_run(args.root, args.run_id)
+        print(json.dumps({"run_id": args.run_id, "record_id": record["id"]}))
 
 
 if __name__ == "__main__":

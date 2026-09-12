@@ -13,6 +13,7 @@ function setup() {
   metadata.createTeam({ team_id: "team", name: "EvoAgentBench", owner_user_id: "owner" });
   metadata.addTeamMember({ team_id: "team", user_id: "other", role: "admin" });
   metadata.createAgent({ agent_id: "agent", team_id: "team", owner_user_id: "owner", name: "nanobot" });
+  metadata.createTask({ task_id: "task", team_id: "team", creator_user_id: "owner", title: "development / vanilla" });
   return new EvolutionService(metadata.getEvolutionStore(), metadata, { checkAssetPermission: async () => ({ allowed: true, reason: "test" }) });
 }
 
@@ -42,5 +43,22 @@ describe("EvoAgentBench evidence ingestion", () => {
     await service.invoke("benchmark/attempt/ingest", input, "owner-key");
     await expect(service.invoke("benchmark/attempt/ingest", { ...input, status: "PASS" }, "owner-key")).rejects.toThrow("IDEMPOTENCY_CONFLICT");
     await expect(service.invoke("benchmark/attempt/ingest", { ...input, attempt_id: "other-r1" }, "other-key")).rejects.toThrow("AGENT_OWNER_REQUIRED");
+  });
+
+  it("stores development run details without dispatching diagnosis", async () => {
+    const service = setup();
+    const body = {
+      team_id: "team", agent_id: "agent", task_id: "task", run_id: "development-a-vanilla-trial-1", session_id: "session-1",
+      protocol_hash: "a".repeat(64), phase: "development", arm: "vanilla", trial: 1,
+      status: "TASK_PASS", reward: 1, candidate_revision: null, candidate_hash: null,
+      task_input: "Solve safely", final_output: "Done", tool_events: [],
+      usage: { input_tokens: 10, output_tokens: 2, model_calls: 1, tool_calls: 0 }, actual_model: "qwen3.8-27b", injected_assets: [],
+    } as const;
+    const record = await service.invoke("benchmark/run/ingest", body, "owner-key") as EvolutionRecord;
+    expect(record).toMatchObject({ kind: "trace", status: "RECORDED", asset_ids: [] });
+    expect(record.payload).toMatchObject({ evidence_mode: "benchmark", completion: "benchmark_verifier_complete", test_traces_candidate_eligible: false });
+    expect(service.store.list("team", "job")).toEqual([]);
+    await expect(service.invoke("diagnosis/request", { team_id: "team", id: record.id }, "owner-key"))
+      .rejects.toThrow("HOST_TASK_COMPLETION_REQUIRED");
   });
 });

@@ -48,7 +48,21 @@ const benchmarkIngestSchema = scopeSchema.extend({
   evidence_limitations: z.array(z.string().max(500)).max(20), contamination_findings: z.array(z.string().max(300)).max(100),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "observation/ingest", "benchmark/attempt/ingest", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
+const benchmarkRunIngestSchema = scopeSchema.extend({
+  agent_id: id, task_id: id, run_id: id, session_id: id,
+  protocol_hash: z.string().regex(/^[a-f0-9]{64}$/),
+  phase: z.enum(["development", "test_checkpoint", "test"]),
+  arm: z.enum(["vanilla", "memory", "skill"]), trial: z.number().int().positive(),
+  status: z.enum(["TASK_PASS", "TASK_FAIL", "INFRA_ERROR"]), reward: z.number().min(0).max(1),
+  candidate_revision: z.number().int().positive().nullable(), candidate_hash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  task_input: z.string().max(100_000), final_output: z.string().max(100_000),
+  tool_events: z.array(z.object({ name: z.string().max(120), arguments: z.string().max(20_000), result: z.string().max(40_000), success: z.boolean(), sequence: z.number().int().nonnegative() }).strict()).max(100),
+  usage: z.object({ input_tokens: nullableCount, output_tokens: nullableCount, model_calls: nullableCount, tool_calls: nullableCount }).strict(),
+  actual_model: z.string().max(200),
+  injected_assets: z.array(z.object({ id, hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).max(2),
+}).strict();
+
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "observation/ingest", "benchmark/run/ingest", "benchmark/attempt/ingest", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
 
 interface EvolutionConfiguration {
   reviewBindingIds(teamId: string, agentId: string): string[];
@@ -291,6 +305,40 @@ export class EvolutionService {
           research_only: true, promotion_allowed: false, test_traces_candidate_eligible: false,
         },
       }, `${actor.id}/evoagentbench/${input.attempt_id}/${input.source_hash}`, actor.id);
+    }
+    if (action === "benchmark/run/ingest") {
+      const input = benchmarkRunIngestSchema.parse(body);
+      const task = await this.metadata.getTaskById(input.task_id);
+      const agent = await this.metadata.getAgentById(input.agent_id);
+      if (!task || !agent || task.team_id !== team_id || agent.team_id !== team_id
+        || task.creator_user_id !== actor.id || agent.owner_user_id !== actor.id || agent.status !== "active") {
+        throw new EvolutionError(403, "TASK_OWNER_REQUIRED");
+      }
+      if ((input.arm === "vanilla") !== (input.injected_assets.length === 0)
+        || (input.arm === "vanilla") !== (input.candidate_hash === null && input.candidate_revision === null)) {
+        throw new EvolutionError(400, "BENCHMARK_ASSET_PROVENANCE_INVALID");
+      }
+      const inputText = redactEvidence(input.task_input), outputText = redactEvidence(input.final_output);
+      const toolEvidence = input.tool_events.map(event => ({ event, args: redactEvidence(event.arguments), result: redactEvidence(event.result) }));
+      const usedAssetVersions = Object.fromEntries(input.injected_assets.map(asset => [asset.id, asset.hash]));
+      const payload = {
+        ...input, evidence_mode: "benchmark", completion: "benchmark_verifier_complete",
+        task_input: inputText.text, final_output: outputText.text,
+        tool_events: toolEvidence.map(({ event, args, result }) => ({ ...event, arguments: args.text, result: result.text })),
+        outcome: input.status === "TASK_PASS" ? "PASS" : input.status === "TASK_FAIL" ? "FAIL" : "INFRA_ERROR",
+        used_asset_versions: usedAssetVersions, research_only: true, promotion_allowed: false,
+        test_traces_candidate_eligible: false,
+        redaction: {
+          policy: "credential-patterns-v1", task_input_hash: inputText.original_sha256, final_output_hash: outputText.original_sha256,
+          replacements: inputText.replacements + outputText.replacements + toolEvidence.reduce((sum, item) => sum + item.args.replacements + item.result.replacements, 0),
+          tool_original_hashes: toolEvidence.map(({ event, args, result }) => ({ sequence: event.sequence, arguments: args.original_sha256, result: result.original_sha256 })),
+        },
+      };
+      // Development/test runs are visible research evidence, never diagnosis inputs.
+      return this.store.append({
+        team_id, owner_user_id: actor.id, agent_id: input.agent_id, kind: "trace", origin: "runtime",
+        title: task.title, status: "RECORDED", asset_ids: [], payload,
+      }, `${actor.id}/evoagentbench-run/${input.run_id}`, actor.id);
     }
     if (action === "task/complete") {
       const input = scopeSchema.extend({

@@ -16,6 +16,7 @@ export function EvaluationEvidence({ payload }: { payload: Record<string, unknow
   const pairs = Array.isArray(payload.pairs) ? payload.pairs.map(object) : [];
   const benchmark = payload.attempt_type === 'benchmark_transfer_evaluation';
   const comparisons = object(payload.comparisons);
+  const costArms = benchmark ? ['vanilla', 'memory', 'skill'] : ['baseline', 'candidate'];
   return <div>
     {benchmark && <>
       <Alert type="info">这是 EvoAgentBench-compatible 研究评测，不是官方排行榜成绩，也不能直接授权正式 Skill Promotion。</Alert>
@@ -27,10 +28,10 @@ export function EvaluationEvidence({ payload }: { payload: Record<string, unknow
         { key: 'ci', header: '95% CI', render: (row: Record<string, unknown>) => JSON.stringify(row.paired_bootstrap_95_ci ?? null) },
         { key: 'cost', header: 'Token 成本变化', render: (row: Record<string, unknown>) => display(row.token_cost_change) },
       ]} />
-      <p>检索覆盖率：{JSON.stringify(payload.retrieval_coverage ?? {})}　污染检查：{JSON.stringify(payload.contamination_findings ?? [])}</p>
+      <p>检索覆盖率：{JSON.stringify(payload.retrieval_coverage ?? {})}；污染检查：{JSON.stringify(payload.contamination_findings ?? [])}</p>
     </>}
-    {gate.status !== undefined && <p><strong>Gate：{display(gate.status)}</strong>　{JSON.stringify(gate.reasons ?? [])}</p>}
-    {Object.keys(cost).length > 0 && <Table records={['baseline', 'candidate'].map(arm => ({ arm, ...object(cost[arm]) }))} recordKey="arm" columns={[
+    {gate.status !== undefined && <p><strong>Gate：{display(gate.status)}</strong>；{JSON.stringify(gate.reasons ?? [])}</p>}
+    {Object.keys(cost).length > 0 && <Table records={costArms.map(arm => ({ arm, ...object(cost[arm]) }))} recordKey="arm" columns={[
       { key: 'arm', header: '对照条件' },
       ...[['total_tokens', 'Tokens'], ['tool_call_count', '工具调用'], ['model_call_count', '模型调用'], ['elapsed_ms', '耗时 ms']].map(([key, header]) => ({ key, header, render: (row: Record<string, unknown>) => display(row[key]) })),
     ]} />}

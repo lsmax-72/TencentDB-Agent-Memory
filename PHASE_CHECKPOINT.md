@@ -1,5 +1,17 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-12 EvoAgentBench development Pilot：真实迁移未成立
+
+- 冻结的 12 个 development task 已完成 Vanilla / Memory / Skill r3 共 36 个真实 arm；0 个 `INFRA_ERROR`。每个 arm 使用 fresh task/session/workspace、`qwen3.8-27b`、temperature 0、fallback disabled、原冻结 budget/toolset 和官方 LiveCodeBench verifier。
+- 主 Attempt `pilot-r3-main` 已只读导入 8125，record `evo-0934cf50-e2d8-440e-900a-d6e542ad6663`。Attempt artifact `cef68f83856f46bcaeda801e36ffb6f1b9252bce0a4e00d5d8d2a21ed31242d0`，source `1182134ba5330728e967de25507645349b5b7dbd9591ab261004a83a7673d40d`；Gate **FAIL**：`SKILL_TRANSFER_GAIN_NOT_POSITIVE`、`NEWLY_FIXED_LT_NEWLY_BROKEN`。
+- Skill r3：0 newly_fixed / 1 newly_broken / 11 unchanged_success，transfer gain `-0.083333`，95% CI `[-0.25, 0]`，pass@1 `0.9167`。唯一回归为 `abc308_e`：Vanilla PASS，Skill FAIL；Memory 同题也 FAIL。不得打开 official test、不得 Promotion，也不再把 r3 描述为已产生正向效果。
+- 成本：Vanilla 612,178 tokens / 48 model / 37 tool；Memory 608,928 / 46 / 34（tokens -0.53%）；Skill 598,478 / 47 / 35（tokens -2.24%）。`3265` 上 Skill tokens -29.9%，但 `3528` +30.2%、`2870` +40.3%、`3675` +37.1%；效率波动不能抵消正确性回归。
+- 为避免每个 arm 重复解析 4.49GB 官方缓存，新增只含冻结 12 题的等价 phase cache。完整源 SHA `7ae239c4b25f59e0331b83725ab566a53568ea19d93fcbc5f647bec5caeb55db`，cache artifact `69021bc7374c9a0d98fb4657286222c16db6ae3056e8228dfe9a2da36867c713`；逐题内容 hash 已冻结。`3246` 三组仍使用完整 1055 题缓存，剩余 11 对三组统一使用等价 cache；题面、隐藏测试、grader、模型和预算未变。
+- development 单题现在通过新 `benchmark/run/ingest` 只读进入运行轨迹，保存真实任务输入、输出、usage、工具和注入资产 ID/hash，且不触发 diagnosis/candidate。首个 Memory 导入曾因 `hash/content_hash` 字段映射错误失败；原有效 run 未重跑，修复后从 frozen evidence 幂等补导入，并新增回归测试。
+- MemoryHub 成本表已适配 Vanilla/Memory/Skill 三组；8125 浏览器验证 Attempt FAIL、pair、回归、检索覆盖和三组总成本均可见。当前 Hub runtime `/Users/lsmax/Coder/phase6-artifacts/runtime/memoryhub-main-20260912-r7`，Core 仍使用内容相同的 r6 core snapshot；8420/8125/8424 healthy。
+- 验证：EvoAgentBench Python 22 tests PASS；Core benchmark ingest 3 tests PASS；Panel evolution 4 tests PASS；Panel web lint 0 errors（33 既有 warnings）与 build PASS；真实浏览器成本/结果可见性 PASS。用户三个 deployment 修改继续保持不碰。
+- 下一步不是继续 official test 或制造 Candidate r4：先针对 `abc308_e` 的三组 trace 做只读归因，判断是通用注入干扰、检索不相关、模型随机性还是 Skill/Memory 内容缺陷。任何 stability probe 必须独立保存，不能替换本 Attempt；若结论要求改变 frozen protocol，进入 Critical Review。
+
 ## 2026-09-11 Skill refinement 阻塞修复：r3 可进入 development
 
 - 用户明确要求先修复“两版 Skill 均被拒绝且旧 revision 上限阻断继续”的问题。原 benchmark protocol v1、r1/r2 artifact/review 和所有历史结果保持不变；新增独立 hash 的 `tdai-evoagentbench-code-refinement-v2`，只把候选修复上限扩到 r3，不改变 Case、split、模型、budget、检索、development/test Gate 或 Promotion 标准。

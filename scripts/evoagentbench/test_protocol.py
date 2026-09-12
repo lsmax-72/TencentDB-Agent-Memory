@@ -14,6 +14,7 @@ from scripts.evoagentbench.report import build as build_report
 from scripts.evoagentbench.refine import _response_json, _skill_response_format, _validate_memory, _validate_skills
 from scripts.evoagentbench.hub_export import build_bundle
 from scripts.evoagentbench.repair_candidate import repair
+from scripts.evoagentbench.driver import benchmark_run_payload
 
 
 class ProtocolTests(unittest.TestCase):
@@ -182,6 +183,18 @@ class AdapterTests(unittest.TestCase):
                 adapt_trial(path, arm="skill", phase="development", protocol_hash="h", expected_model="qwen3.8-27b", injected_assets=[{"id": str(i), "hash": "x"} for i in range(3)])
         finally:
             root.cleanup()
+
+    def test_benchmark_run_payload_preserves_frozen_asset_hash(self):
+        evidence = {
+            "hub_scope": {"team_id": "team", "agent_id": "agent", "task_id": "task"},
+            "run_id": "development-a-memory-r3-trial-1", "session_id": "session", "protocol_hash": "a" * 64,
+            "phase": "development", "arm": "memory", "trial": 1, "status": "TASK_PASS", "reward": 1.0,
+            "candidate_revision": 3, "candidate_artifact_hash": "b" * 64, "task_id": "a", "task_input": "solve",
+            "final_output": "done", "tool_events": [], "usage": {"input_tokens": 10, "output_tokens": 2, "model_call_count": 1, "tool_call_count": 0},
+            "actual_model": "qwen3.8-27b", "injected_assets": [{"id": "memory-r2-01", "hash": "c" * 64}],
+        }
+        payload = benchmark_run_payload(evidence)
+        self.assertEqual(payload["injected_assets"], [{"id": "memory-r2-01", "hash": "c" * 64}])
 
     def test_nanobot_compat_translates_workspace_and_config(self):
         with tempfile.TemporaryDirectory() as tmp:
