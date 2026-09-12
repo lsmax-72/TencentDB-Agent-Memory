@@ -39,7 +39,9 @@ const benchmarkComparison = z.object({
   pass_at_1: z.number().min(0).max(1).nullable(), token_cost_change: z.number().nullable(),
 }).strict();
 const benchmarkIngestSchema = scopeSchema.extend({
-  agent_id: id, attempt_id: id, protocol_id: z.literal("tdai-evoagentbench-code-v1"),
+  agent_id: id, attempt_id: id,
+  // Keep research imports allow-listed so a caller cannot label arbitrary evidence as a frozen protocol.
+  protocol_id: z.enum(["tdai-evoagentbench-code-v1", "tdai-evoagentbench-code-v2-discriminative"]),
   protocol_hash: z.string().regex(/^[a-f0-9]{64}$/), source_hash: z.string().regex(/^[a-f0-9]{64}$/),
   phase: z.enum(["development", "test_checkpoint", "test"]), status: z.enum(["PASS", "FAIL", "INFRA_ERROR"]),
   comparisons: z.object({ memory: benchmarkComparison, skill: benchmarkComparison }).strict(),

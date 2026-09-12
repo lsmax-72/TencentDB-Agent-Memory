@@ -45,6 +45,15 @@ describe("EvoAgentBench evidence ingestion", () => {
     await expect(service.invoke("benchmark/attempt/ingest", { ...input, attempt_id: "other-r1" }, "other-key")).rejects.toThrow("AGENT_OWNER_REQUIRED");
   });
 
+  it("accepts the frozen discriminative protocol revision and rejects unknown protocols", async () => {
+    const service = setup();
+    const v2 = { ...input, attempt_id: "discriminative-r3", protocol_id: "tdai-evoagentbench-code-v2-discriminative" } as const;
+    const record = await service.invoke("benchmark/attempt/ingest", v2, "owner-key") as EvolutionRecord;
+    expect(record.payload).toMatchObject({ protocol_id: "tdai-evoagentbench-code-v2-discriminative", research_only: true });
+    await expect(service.invoke("benchmark/attempt/ingest", { ...v2, attempt_id: "unknown", protocol_id: "unknown-protocol" }, "owner-key"))
+      .rejects.toThrow();
+  });
+
   it("stores development run details without dispatching diagnosis", async () => {
     const service = setup();
     const body = {

@@ -1,5 +1,19 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-12 EvoAgentBench discriminative v2：真实区分评测完成，仍无迁移收益
+
+- 新增并冻结独立研究协议 `tdai-evoagentbench-code-v2-discriminative`，只从官方 train 中按原始 difficulty metadata 选题，不读取 Candidate 输出或表现。24 个 development task 与 v1 的 24 个 experience、12 个 development 完全不重叠，分布为 12 hard / 8 medium / 4 easy；protocol hash `fd10899a108751baed606ae293770f813d12c8bd2ecab9ddb1a7d85ca867509d`。
+- Candidate 没有重新生成或调参：精确复用 frozen Skill r3 artifact `789d040f5fbaba0b2561e05a9070a9ec2a1d32ed10c786e8a397cbe68fe5e181`，carry receipt `ee005cee66f891f2ad0fb85731df8f7a0674a168c615189031587cca68df196d`。题目、官方 verifier、`qwen3.8-27b`、temperature 0、fallback disabled、budget、toolset、top-k 均在首次 run 前冻结。
+- 24 题 × Vanilla / Memory / Skill 共 72 个真实 arm 全部完成，0 `INFRA_ERROR`。主结果保存在 `discriminative-v2-r3-main`；首次 Hub 导入因 Core 仅 allow-list v1 protocol_id 返回 400，结果文件和所有运行证据保留。最小实现修复只增加已知 v2 ID 并补回归测试，没有修改评测数据或结论。
+- 独立导入重试 `discriminative-v2-r3-implementation-fix-retry-1` 已进入 8125，record `evo-a0dd67d1-6685-48e5-8a2a-71196186c8b8`，source hash 与主 Attempt 同为 `8221835721a986757e7a966f142977b7e009c8ecfcd595a4d2402938d3dcf02f`。浏览器已验证 24 个 pair、成本与失败状态可见。
+- Memory：1 newly_fixed（`abc388_e`）/ 1 newly_broken（`3223`）/ 17 unchanged_success / 5 unchanged_failure，transfer gain `0`，95% CI `[-0.125,0.125]`，pass@1 `0.75`，tokens `1,263,795`（较 Vanilla `+8.91%`）。
+- Skill：0 newly_fixed / 1 newly_broken（`3223`）/ 17 unchanged_success / 6 unchanged_failure，transfer gain `-0.041667`，95% CI `[-0.125,0]`，pass@1 `0.7083`，tokens `1,257,321`（较 Vanilla `+8.36%`）。Vanilla 为 18/24、`1,160,365` tokens；Skill/Memory 都未得到正向迁移证据。
+- Gate **FAIL**：`SKILL_TRANSFER_GAIN_NOT_POSITIVE`、`NEWLY_FIXED_LT_NEWLY_BROKEN`。旧 v1 corrected regression evidence 仍为 Skill 12/12、0 newly_broken；因此是“旧集未回归，但新集没有改善且出现新回归”，不得打开 official test、不得 Promotion。
+- 多个失败任务出现单次输出打满 8192 tokens 且 0 tool calls；`3223` Skill 同型失败，Memory 则经过 12 model / 14 tool calls 后仍失败。`abc388_e` Skill 检索到了触发条件不匹配的小规模暴力枚举策略，说明当前资产检索/适用条件仍不足，而不是缺少更容易的题。
+- Core runtime 更新为 `/Users/lsmax/Coder/phase6-artifacts/runtime/memoryhub-main-20260912-r8`；旧容器保留为 `tdai-memory-core-pre-r8`，原数据卷、8125/8424/8096 和 automation disabled 状态保持。完整报告见 `docs/evoagentbench-discriminative-v2-report.md`。
+- 验证：EvoAgentBench Python 26 tests PASS；MemoryCore 174 tests / 39 files PASS；Core plugin build PASS；8125 真实浏览器详情与 24 个 pair 可见性 PASS；`git diff --check` PASS。
+- 下一步停止 Candidate 措辞调参和 official test。若继续研究，应先把“检索适用条件”和“首轮超长输出不使用工具”拆成两个可证伪机制问题，设计新的 train/development-only 实现实验；任何改变已冻结 v2 Suite/Gate 或 Promotion 标准的方案须进入 Critical Review。
+
 ## 2026-09-12 EvoAgentBench development Pilot：真实迁移未成立
 
 - `abc308_e` 深入归因发现一个接入实现缺陷：nanobot CLI 的 `--no-markdown` 输出会按终端宽度折行，Pinned EvoAgentBench 在最终 response 语法损坏后回退 session，却优先选择最后一次 `write_file`（本题是压力测试脚本），没有选择 session 中完整且正确的最终 assistant 代码。原主 Attempt 和 `newly_broken` 结论保持不变。
