@@ -350,7 +350,7 @@ live: false
         log_file = private / "official.log"
         with log_file.open("x") as log:
             completed = subprocess.run([
-                str(PYTHON), str(EVO_REPO / "benchmark/src/run.py"), "--config", str(private / "config.yaml"),
+                str(PYTHON), str(REPO / "scripts/evoagentbench/official_runner.py"), "--config", str(private / "config.yaml"),
                 "--domain", "code_implementation", "--task", task_id, "--job", "official", "--trials", "1", "--parallel", "1",
             ], cwd=EVO_REPO / "benchmark", env=env, stdout=log, stderr=subprocess.STDOUT)
         trial_dir = run_dir / "official/official" / f"{task_id}__trial_1"

@@ -2,6 +2,11 @@
 
 ## 2026-09-12 EvoAgentBench development Pilot：真实迁移未成立
 
+- `abc308_e` 深入归因发现一个接入实现缺陷：nanobot CLI 的 `--no-markdown` 输出会按终端宽度折行，Pinned EvoAgentBench 在最终 response 语法损坏后回退 session，却优先选择最后一次 `write_file`（本题是压力测试脚本），没有选择 session 中完整且正确的最终 assistant 代码。原主 Attempt 和 `newly_broken` 结论保持不变。
+- 独立 `pilot-r3-implementation-fix-retry-1` 已保存并导入 8125（record `evo-6d871496-6f55-468e-925a-a80c431893fb`）。它不重新调用模型，只把原 session 的最终代码交给同一官方 LiveCodeBench verifier，`abc308_e` Skill 从错误抓取的 0/1 修正为 15/15；regrade artifact `bd00125459df60d9cbf535bc5c898a1c3c4f12976feb48edf98cab08b0376840`，retry attempt artifact `97d05af30e9afae966263e5e86f2f1631ae238c4e973b04f71c7945b56139517`。
+- 修正后 Skill r3 为 12/12，但仍是 0 newly_fixed / 0 newly_broken、transfer gain `0`、95% CI `[0,0]`，所以 Gate 仍为 **FAIL (`SKILL_TRANSFER_GAIN_NOT_POSITIVE`)**。Memory 原始最终答案重评仍失败，保持 11/12 和 1 newly_broken。Pilot 没有证明自进化收益，官方 test 仍不得打开。
+- 后续真实 run 改由本地窄 wrapper 从 session 捕获原始最终 assistant 输出，再调用未修改的 pinned runner/verifier；不修改官方 checkout、题目、隐藏测试、模型、预算或工具。新增会话重评分工具和回归测试，Python 共 24 tests PASS。
+
 - 冻结的 12 个 development task 已完成 Vanilla / Memory / Skill r3 共 36 个真实 arm；0 个 `INFRA_ERROR`。每个 arm 使用 fresh task/session/workspace、`qwen3.8-27b`、temperature 0、fallback disabled、原冻结 budget/toolset 和官方 LiveCodeBench verifier。
 - 主 Attempt `pilot-r3-main` 已只读导入 8125，record `evo-0934cf50-e2d8-440e-900a-d6e542ad6663`。Attempt artifact `cef68f83856f46bcaeda801e36ffb6f1b9252bce0a4e00d5d8d2a21ed31242d0`，source `1182134ba5330728e967de25507645349b5b7dbd9591ab261004a83a7673d40d`；Gate **FAIL**：`SKILL_TRANSFER_GAIN_NOT_POSITIVE`、`NEWLY_FIXED_LT_NEWLY_BROKEN`。
 - Skill r3：0 newly_fixed / 1 newly_broken / 11 unchanged_success，transfer gain `-0.083333`，95% CI `[-0.25, 0]`，pass@1 `0.9167`。唯一回归为 `abc308_e`：Vanilla PASS，Skill FAIL；Memory 同题也 FAIL。不得打开 official test、不得 Promotion，也不再把 r3 描述为已产生正向效果。

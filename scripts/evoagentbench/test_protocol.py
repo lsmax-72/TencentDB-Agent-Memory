@@ -8,9 +8,10 @@ from scripts.evoagentbench.adapter import adapt_trial, candidate_contamination
 from scripts.evoagentbench.batch import experience_state
 from scripts.evoagentbench.metrics import compare
 from scripts.evoagentbench.nanobot_cli_compat import prepare_invocation
+from scripts.evoagentbench.official_runner import raw_final_assistant_response
 from scripts.evoagentbench.protocol import build_protocol, sha256_json
 from scripts.evoagentbench.retrieval import injection_text, select_assets
-from scripts.evoagentbench.report import build as build_report
+from scripts.evoagentbench.report import _replace_runs, build as build_report
 from scripts.evoagentbench.refine import _response_json, _skill_response_format, _validate_memory, _validate_skills
 from scripts.evoagentbench.hub_export import build_bundle
 from scripts.evoagentbench.repair_candidate import repair
@@ -210,6 +211,28 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(command[-1], "--no-markdown")
             self.assertEqual(Path(env["HOME"]), workspace / ".tdai-nanobot-home")
             self.assertTrue((Path(env["HOME"]) / ".nanobot/config.json").is_file())
+
+    def test_official_runner_prefers_intact_final_session_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Path(tmp) / "session.jsonl"
+            session.write_text("\n".join(json.dumps(row) for row in [
+                {"role": "assistant", "content": "working"},
+                {"role": "tool", "content": "done"},
+                {"role": "assistant", "content": "```python\nvalue = [1, 2, 3]\n```"},
+            ]) + "\n")
+            self.assertEqual(raw_final_assistant_response(session), "```python\nvalue = [1, 2, 3]\n```")
+
+    def test_report_replaces_only_explicit_implementation_retry(self):
+        arms = {"vanilla": [], "memory": [], "skill": [{"arm": "skill", "task_id": "a", "trial": 1, "reward": 0}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            replacement = Path(tmp) / "evidence.json"
+            replacement.write_text(json.dumps({
+                "arm": "skill", "task_id": "a", "trial": 1, "reward": 1,
+                "implementation_fix_retry": {"retry_id": "capture-fix-r1"},
+            }))
+            retries = _replace_runs(arms, [replacement])
+        self.assertEqual(arms["skill"][0]["reward"], 1)
+        self.assertEqual(retries, [{"retry_id": "capture-fix-r1"}])
 
     def test_retrieval_is_bounded_deterministic_and_hides_source_ids(self):
         assets = [
