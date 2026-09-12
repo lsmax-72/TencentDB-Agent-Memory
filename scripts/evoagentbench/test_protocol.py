@@ -378,6 +378,31 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in selected], ["skill-a"])
         self.assertEqual(decisions[0]["reason"], "SELECTED")
 
+    def test_skill_applicability_supports_specific_non_numeric_objective(self):
+        skill = self._applicable_pair_skill()
+        skill.update({
+            "id": "skill-palindrome", "name": "Palindrome prefix completion",
+            "description": "Append the minimum suffix needed to complete a palindrome.",
+            "content": "Trigger: Construct the shortest palindrome with a required prefix. Procedure: compare suffixes.",
+        })
+        skill["applicability_profile"] = {
+            "task_family": "palindrome prefix completion",
+            "when_to_apply": "Construct the shortest palindrome with a required prefix.",
+            "do_not_apply_when": "Do not apply to substring-only queries.",
+            "constraints": [], "complexity": "O(n^2)",
+            "evidence_refs": ["train-a", "train-b"],
+            "task_signals": {
+                "entity_terms": ["palindrome"], "objective_terms": ["construct"],
+                "same_sentence": True,
+            },
+        }
+        selected, decisions = select_applicable_skills(
+            "Construct the shortest palindrome by appending characters to this prefix.",
+            [skill], top_k=1,
+        )
+        self.assertEqual([row["id"] for row in selected], ["skill-palindrome"])
+        self.assertEqual(decisions[0]["reason"], "SELECTED")
+
     def test_nanobot_compat_records_applicability_decisions(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp).resolve()

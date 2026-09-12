@@ -141,11 +141,30 @@ def cluster_strategy_patches(patches: list[dict[str, Any]]) -> list[dict[str, An
     return clusters
 
 
+def load_patch_artifact(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    manifest = json.loads((path / "manifest.json").read_text())
+    patches = json.loads((path / "patches.json").read_text())
+    clusters = json.loads((path / "clusters.json").read_text())
+    if manifest.get("schema") != SCHEMA or not manifest.get("train_only"):
+        raise ValueError("TRACE_PATCH_MANIFEST_INVALID")
+    for patch in patches:
+        unsigned = {key: value for key, value in patch.items() if key != "patch_hash"}
+        if sha256_json(unsigned) != patch.get("patch_hash"):
+            raise ValueError("TRACE_PATCH_HASH_MISMATCH")
+    if cluster_strategy_patches(patches) != clusters:
+        raise ValueError("TRACE_PATCH_CLUSTER_MISMATCH")
+    unsigned_manifest = {key: value for key, value in manifest.items() if key != "artifact_hash"}
+    if sha256_json({"manifest": unsigned_manifest, "patches": patches, "clusters": clusters}) != manifest.get("artifact_hash"):
+        raise ValueError("TRACE_PATCH_ARTIFACT_HASH_MISMATCH")
+    return manifest, patches, clusters
+
+
 def freeze_patch_artifact(
     source_memories: Path,
     response_file: Path,
     output: Path,
     *,
+    protocol_hash: str,
     model: str,
     usage: dict[str, Any],
 ) -> dict[str, Any]:
@@ -173,6 +192,7 @@ def freeze_patch_artifact(
         "schema": SCHEMA,
         "source_path": str(source_memories.resolve()),
         "source_sha256": sha256_file(source_memories),
+        "protocol_hash": protocol_hash,
         "source_count": len(memories),
         "patch_count": len(patches),
         "eligible_cluster_count": len(clusters),

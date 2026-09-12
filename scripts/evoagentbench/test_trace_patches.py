@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 
 from scripts.evoagentbench.trace_patches import (
-    cluster_strategy_patches, freeze_patch_artifact, patch_response_format,
-    validate_patch,
+    cluster_strategy_patches, freeze_patch_artifact, load_patch_artifact,
+    patch_response_format, validate_patch,
 )
 from scripts.evoagentbench.trace_patch_runner import _reused_attempt
 
@@ -84,14 +84,18 @@ class TracePatchTest(unittest.TestCase):
             response_file.write_text(json.dumps(responses))
             manifest = freeze_patch_artifact(
                 source_file, response_file, output,
-                model="qwen3.8-27b", usage={"total_tokens": 12, "model_calls": 2},
+                protocol_hash="protocol-hash", model="qwen3.8-27b",
+                usage={"total_tokens": 12, "model_calls": 2},
             )
             self.assertEqual(manifest["eligible_cluster_count"], 1)
             self.assertFalse(manifest["candidate_generated"])
+            loaded, _, clusters = load_patch_artifact(output)
+            self.assertEqual(loaded["artifact_hash"], manifest["artifact_hash"])
+            self.assertEqual(clusters[0]["mechanism_key"], "all_pairs_enumeration")
             with self.assertRaisesRegex(FileExistsError, "ALREADY_EXISTS"):
                 freeze_patch_artifact(
                     source_file, response_file, output,
-                    model="qwen3.8-27b", usage={},
+                    protocol_hash="protocol-hash", model="qwen3.8-27b", usage={},
                 )
 
     def test_retry_reuses_only_valid_failed_attempt_checkpoints(self):

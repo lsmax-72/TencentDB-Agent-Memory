@@ -1,12 +1,13 @@
 # Autonomous Evolution Checkpoint
 
-## 2026-09-12 Trace2Skill train-only patch pipeline：实现完成，真实生成待模型恢复
+## 2026-09-12 Trace2Skill 模块化 Candidate pipeline：离线实现完成，真实生成待模型恢复
 
 - 新增逐轨迹 patch schema 与生成 runner：每条训练轨迹独立分析，必须引用冻结 Memory 原文；失败轨迹只能形成 warning，不能证明成功策略。公开字段拒绝 task ID、固定答案、路径和 benchmark 标记。
 - 跨轨迹聚类只接受相同具体 `mechanism_key`、至少两条独立来源且 task family 有共同信号的 strategy；单例继续保留为 Memory，不为增加 Skill 数量而硬合并。patch artifact 明确 `candidate_generated=false`，不能进入评测或 Promotion。
+- 合格 cluster 逐个独立合成模块化 Skill；静态校验要求完整 Trigger / Procedure / Verification / Stop、精确来源集合、逐字 evidence、适用性 profile 和唯一 hash。冻结 Candidate 仅 `APPROVED_FOR_DEVELOPMENT`，明确 `effect_proven=false / promotion_allowed=false`。
 - 每个模型调用保存独立 checkpoint；基础设施失败保留 Attempt，新 Attempt 可显式复用已验证 checkpoint，并分别记录 active/reused model calls。旧 refinement r1-r3、Candidate、协议和历史结果均未修改。
-- 验证：EvoAgentBench Python 41 tests PASS，相关模块 `py_compile`、`git diff --check` PASS。遵照当前 vLLM 规避要求，本节只完成离线实现，没有发起模型调用，也没有生成新的 Candidate。
-- 下一步：实现按合格 cluster 独立合成模块化 Skill 的冻结阶段；随后需要更多未用于 development 的 train evidence 扩大机制覆盖，再用全新 development revision 验证。
+- 验证：EvoAgentBench Python 45 tests PASS，相关模块 `py_compile`、`git diff --check` PASS。遵照当前 vLLM 规避要求，本节只完成离线实现，没有发起模型调用，也没有生成新的 Candidate。
+- 下一步：冻结新的 train/development revision，使用更多未用于旧 development 的 train evidence 扩大机制覆盖；模型恢复后执行 patch → Candidate → 全新 development 对照。
 
 ## 2026-09-12 Skill Applicability & Retrieval：离线真实轨迹验证完成
 

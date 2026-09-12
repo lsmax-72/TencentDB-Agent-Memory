@@ -168,7 +168,7 @@ def generate(
         source_file = root / "frozen" / f"refinement-r{source_revision}" / "memories.json"
         manifest = freeze_patch_artifact(
             source_file, attempt / "responses.json", output,
-            model=protocol["agent"]["model"], usage={
+            protocol_hash=protocol["protocol_hash"], model=protocol["agent"]["model"], usage={
                 **_usage_total(events),
                 "active_model_calls": len(events) - len(reused),
                 "reused_model_calls": len(reused),

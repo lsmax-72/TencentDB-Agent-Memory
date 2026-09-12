@@ -29,6 +29,9 @@ OBJECTIVE_ALIASES = {
     "smallest": "minimum", "lowest": "minimum",
     "optimum": "optimum", "optimal": "optimum",
 }
+OBJECTIVE_STOP_WORDS = STOP_WORDS | {
+    "compute", "determine", "find", "return", "value", "values",
+}
 
 
 def _tokens(text: str) -> Counter[str]:
@@ -136,8 +139,9 @@ def _profile(asset: dict[str, Any]) -> dict[str, Any]:
 
 def _objective_tokens(text: str) -> set[str]:
     return {
-        canonical for token, canonical in OBJECTIVE_ALIASES.items()
-        if re.search(rf"\b{token}\b", text, re.I)
+        OBJECTIVE_ALIASES.get(token, token)
+        for token in (match.lower() for match in TOKEN.findall(text))
+        if token not in OBJECTIVE_STOP_WORDS
     }
 
 

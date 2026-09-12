@@ -113,3 +113,16 @@ python3 -m scripts.evoagentbench.trace_patch_runner \
 If infrastructure fails after some calls, keep that attempt and reuse only its
 validated checkpoints in a new immutable attempt with
 `--reuse-from-attempt trace2skill-r1-a1`.
+
+After the patch artifact is frozen, synthesize one independent Skill per
+eligible mechanism cluster. The output remains train-only and is approved only
+for a future development evaluation; `effect_proven=false` and promotion stays
+forbidden:
+
+```bash
+python3 -m scripts.evoagentbench.trace_skill_runner \
+  --root /path/to/new-protocol-root \
+  --patch-artifact /path/to/frozen/trace-patches-r1 \
+  --source-revision 1 --target-revision 2 \
+  --attempt-id trace2skill-candidate-r2-a1
+```
