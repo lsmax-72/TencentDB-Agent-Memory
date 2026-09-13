@@ -1,5 +1,13 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-13 EvoAgentBench v5：四组候选盲实验已冻结并开始
+
+- 新独立协议 `tdai-evoagentbench-code-v5-factorial-heldout` 已冻结，hash `194b6bbff99a403fb9c03a38cfd18122875a2171b593b1ef8d6c8d45c6b5f525`；commit `a7d29d0`。历史三组 Attempt、旧 Suite 和结论均未修改。
+- 从此前从未使用的 50 条官方 train 中，仅依据冻结的 `question_title / difficulty / question_id`，按三个能力族确定性选择 24 条 experience 和 12 条 development；Candidate、模型输出和历史 reward 均未参与选题。两份 phase cache 已冻结。
+- 新增 `memory_skill` 第四组：与单独组复用相同选择器和每类 top-k，固定先 Skill 后 Memory；报告增加 Combined-vs-Memory、Combined-vs-Skill 和二阶 interaction，组合上下文成本不隐藏。
+- development 前新增强制检索预检：至少一题真实命中 Skill，Candidate 不得包含 held-out ID；否则标记 `EFFECT_NOT_ATTRIBUTABLE` 并停止真实四组调用，不再重复上一轮 0% 暴露问题。
+- 真实 MemoryProxy / `qwen3.8-27b` 连通；隔离 root `/Users/lsmax/Coder/evoagentbench-artifacts/code-v5-factorial`。24 条 train 轨迹正在顺序采集，首题 `3329` 为 PASS（38,659 tokens / 3 model / 3 tool）。下一步由当前运行继续完成 train → Memory r1 → trace patches → semantic clusters → Skill r2 → preflight → 12×4 development → immutable report；不打开 official test、不 Promotion。
+
 ## 2026-09-13 Trace2Skill v4：72 arm 完成，机械 PASS 但效果不可归因
 
 - 24 条未见 development × Vanilla / Memory / Skill 共 72 个真实 arm 全部完成，0 `INFRA_ERROR`。Attempt `trace2skill-semantic-v2-r2-main` 已导入 8125，record `evo-4087e37a-7f36-4475-8810-5f5e187b42e2`，artifact `1faa4373684398604ff14d33e970d6ea295ae2778567f2fe23a2952c9fbae0fb`。

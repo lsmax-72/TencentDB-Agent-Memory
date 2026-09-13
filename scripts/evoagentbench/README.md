@@ -110,6 +110,14 @@ The report includes all evolved-vs-Vanilla comparisons, combined-vs-single-arm
 increments, and a secondary factorial interaction estimate. Combined context
 cost is reported as a real treatment cost, not normalized away.
 
+The same stages can be resumed without overwriting a completed run. A failed
+model or infrastructure attempt still stops for an explicitly versioned retry:
+
+```bash
+python3 -m scripts.evoagentbench.factorial_pipeline \
+  --root /path/to/code-v5-factorial --ingest
+```
+
 Before spending model tokens, replay previously frozen vanilla prompts through
 both selectors. This is a retrieval diagnostic only and must not be reported as
 an evaluation result:
