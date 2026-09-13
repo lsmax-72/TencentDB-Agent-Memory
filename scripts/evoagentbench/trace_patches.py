@@ -17,6 +17,7 @@ from .protocol import sha256_json
 
 SCHEMA = "tdai-trace-skill-patches-v1"
 SEMANTIC_SCHEMA = "tdai-trace-skill-patches-v2"
+REVIEWED_SCHEMA = "tdai-trace-skill-patches-v3"
 SEMANTIC_CLUSTER_ALGORITHM = "mutual-best-tfidf-v1"
 SEMANTIC_CLUSTER_MIN_SIMILARITY = 0.30
 PATCH_SYSTEM = """/no_think
@@ -234,24 +235,57 @@ def load_patch_artifact(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]
     manifest = json.loads((path / "manifest.json").read_text())
     patches = json.loads((path / "patches.json").read_text())
     clusters = json.loads((path / "clusters.json").read_text())
-    if manifest.get("schema") not in {SCHEMA, SEMANTIC_SCHEMA} or not manifest.get("train_only"):
+    if manifest.get("schema") not in {SCHEMA, SEMANTIC_SCHEMA, REVIEWED_SCHEMA} or not manifest.get("train_only"):
         raise ValueError("TRACE_PATCH_MANIFEST_INVALID")
     for patch in patches:
         unsigned = {key: value for key, value in patch.items() if key != "patch_hash"}
         if sha256_json(unsigned) != patch.get("patch_hash"):
             raise ValueError("TRACE_PATCH_HASH_MISMATCH")
-    expected_clusters = (
-        cluster_strategy_patches_semantic_v2(
-            patches,
-            minimum_similarity=manifest.get("cluster_minimum_similarity", SEMANTIC_CLUSTER_MIN_SIMILARITY),
+    if manifest.get("schema") == REVIEWED_SCHEMA:
+        proposals = json.loads((path / "proposals.json").read_text())
+        decisions = json.loads((path / "decisions.json").read_text())
+        if (
+            sha256_json(proposals) != manifest.get("proposal_hash")
+            or sha256_json(decisions) != manifest.get("decision_hash")
+            or len(clusters) != manifest.get("eligible_cluster_count")
+        ):
+            raise ValueError("TRACE_PATCH_REVIEW_INTEGRITY_MISMATCH")
+        by_source = {patch["source_task_id"]: patch for patch in patches}
+        seen_mechanisms = set()
+        for cluster in clusters:
+            support_ids = cluster.get("support_task_ids")
+            if (
+                not isinstance(support_ids, list) or len(support_ids) < 2
+                or any(task_id not in by_source for task_id in support_ids)
+                or any(by_source[task_id]["patch_type"] != "strategy" for task_id in support_ids)
+                or cluster.get("support_patch_hashes") != sorted(
+                    by_source[task_id]["patch_hash"] for task_id in support_ids
+                )
+                or cluster.get("mechanism_key") in seen_mechanisms
+            ):
+                raise ValueError("TRACE_PATCH_CLUSTER_MISMATCH")
+            seen_mechanisms.add(cluster["mechanism_key"])
+        artifact_payload = {
+            "manifest": {key: value for key, value in manifest.items() if key != "artifact_hash"},
+            "patches": patches, "proposals": proposals,
+            "decisions": decisions, "clusters": clusters,
+        }
+    else:
+        expected_clusters = (
+            cluster_strategy_patches_semantic_v2(
+                patches,
+                minimum_similarity=manifest.get("cluster_minimum_similarity", SEMANTIC_CLUSTER_MIN_SIMILARITY),
+            )
+            if manifest.get("schema") == SEMANTIC_SCHEMA
+            else cluster_strategy_patches(patches)
         )
-        if manifest.get("schema") == SEMANTIC_SCHEMA
-        else cluster_strategy_patches(patches)
-    )
-    if expected_clusters != clusters:
-        raise ValueError("TRACE_PATCH_CLUSTER_MISMATCH")
-    unsigned_manifest = {key: value for key, value in manifest.items() if key != "artifact_hash"}
-    if sha256_json({"manifest": unsigned_manifest, "patches": patches, "clusters": clusters}) != manifest.get("artifact_hash"):
+        if expected_clusters != clusters:
+            raise ValueError("TRACE_PATCH_CLUSTER_MISMATCH")
+        artifact_payload = {
+            "manifest": {key: value for key, value in manifest.items() if key != "artifact_hash"},
+            "patches": patches, "clusters": clusters,
+        }
+    if sha256_json(artifact_payload) != manifest.get("artifact_hash"):
         raise ValueError("TRACE_PATCH_ARTIFACT_HASH_MISMATCH")
     return manifest, patches, clusters
 

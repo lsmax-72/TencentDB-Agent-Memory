@@ -9,6 +9,9 @@ from scripts.evoagentbench.trace_patches import (
     patch_response_format, validate_patch,
 )
 from scripts.evoagentbench.trace_patch_runner import _reused_attempt
+from scripts.evoagentbench.trace_cluster_review import (
+    freeze_reviewed_clusters, propose_pairs, review_response_format,
+)
 
 
 class TracePatchTest(unittest.TestCase):
@@ -179,6 +182,60 @@ class TracePatchTest(unittest.TestCase):
             (attempt / "failure.json").unlink()
             with self.assertRaisesRegex(RuntimeError, "NOT_FAILED"):
                 _reused_attempt(root, "first", {"train-a": source}, {"train-a"})
+
+    def test_capability_pair_review_is_frozen_and_grounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memories = [self.source("train-a"), self.source("train-b")]
+            first = self.patch()
+            first["mechanism_key"] = "bounded_pair_scan"
+            second = self.patch()
+            second["mechanism_key"] = "complete_pair_enumeration"
+            responses = [
+                {"source_task_id": "train-a", "patch": first},
+                {"source_task_id": "train-b", "patch": second},
+            ]
+            memory_file = root / "memories.json"
+            patch_responses = root / "patch-responses.json"
+            source_dir = root / "source"
+            memory_file.write_text(json.dumps(memories))
+            patch_responses.write_text(json.dumps(responses))
+            freeze_patch_artifact(
+                memory_file, patch_responses, source_dir,
+                protocol_hash="source-protocol", model="model", usage={"model_calls": 2},
+            )
+            _, patches, _ = load_patch_artifact(source_dir)
+            proposals = propose_pairs(
+                patches, {"train-a": "counting", "train-b": "counting"}
+            )
+            self.assertEqual(len(proposals), 1)
+            proposal = proposals[0]
+            schema = review_response_format(proposal)["json_schema"]["schema"]
+            self.assertFalse(schema["additionalProperties"])
+            review = [{
+                "proposal_id": proposal["proposal_id"],
+                "decision": "supported",
+                "support_task_ids": ["train-a", "train-b"],
+                "shared_mechanism_key": "bounded_pair_enumeration",
+                "rationale": "Both patches enumerate the complete bounded pair space once.",
+                "evidence": [
+                    {"task_id": "train-a", "quote": first["trigger"]},
+                    {"task_id": "train-b", "quote": second["trigger"]},
+                ],
+            }]
+            review_file = root / "reviews.json"
+            review_file.write_text(json.dumps(review))
+            target = root / "target"
+            manifest = freeze_reviewed_clusters(
+                source_dir, memory_file, review_file, target,
+                protocol_hash="review-protocol",
+                capability_assignments={"train-a": "counting", "train-b": "counting"},
+                model="model", usage={"model_calls": 1},
+            )
+            self.assertEqual(manifest["eligible_cluster_count"], 1)
+            loaded, _, clusters = load_patch_artifact(target)
+            self.assertEqual(loaded["artifact_hash"], manifest["artifact_hash"])
+            self.assertEqual(clusters[0]["mechanism_key"], "bounded_pair_enumeration")
 
 
 if __name__ == "__main__":

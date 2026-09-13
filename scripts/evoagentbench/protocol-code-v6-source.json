@@ -1,0 +1,12 @@
+{
+  "source_protocol_hash": "194b6bbff99a403fb9c03a38cfd18122875a2171b593b1ef8d6c8d45c6b5f525",
+  "source_memory_artifact_hash": "148043c145f01f11abee0cb6a2f0a3a2d66e90a5d6a4032b85452a7280a7266c",
+  "source_patch_artifact_hash": "952bf332a169697d090350f8ca2ebcfa57e9740de33f22695b11cbfaff6cf7e5",
+  "source_task_count": 24,
+  "source_pass_count": 23,
+  "source_fail_count": 1,
+  "source_infra_error_count": 0,
+  "source_cluster_count": 0,
+  "source_global_max_similarity": 0.2278,
+  "source_same_family_max_similarity": 0.191456
+}

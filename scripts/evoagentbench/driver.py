@@ -102,7 +102,11 @@ def setup(root: Path) -> None:
     split_file = EVO_REPO / "benchmark/data/splits/code_implementation.json"
     protocol = json.loads(PROTOCOL_FILE.read_text())
     split = json.loads(split_file.read_text())
-    if protocol.get("protocol_revision") == 5:
+    if protocol.get("protocol_revision") == 6:
+        from .protocol_v6 import validate_frozen_protocol_v6
+
+        validate_frozen_protocol_v6(protocol, split)
+    elif protocol.get("protocol_revision") == 5:
         from .protocol_v5 import validate_frozen_protocol_v5
 
         validate_frozen_protocol_v5(protocol, split)

@@ -160,3 +160,10 @@ python3 -m scripts.evoagentbench.trace_skill_runner \
   --source-revision 1 --target-revision 2 \
   --attempt-id trace2skill-candidate-r2-a1
 ```
+
+If a frozen absolute similarity threshold yields no cluster on a new train
+sample, keep that artifact unchanged. A generation-only revision may propose
+mutual-nearest pairs inside capability families frozen before execution, then
+use a temperature-zero reviewer to admit only pairs sharing one concrete
+procedure. The reviewer sees train patches only, and its decisions are frozen
+before any held-out run.
