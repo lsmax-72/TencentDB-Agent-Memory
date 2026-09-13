@@ -18,6 +18,7 @@ from scripts.evoagentbench.protocol_v3 import build_protocol as build_protocol_v
 from scripts.evoagentbench.protocol_v4 import build_protocol as build_protocol_v4
 from scripts.evoagentbench.protocol_v5 import build_protocol as build_protocol_v5
 from scripts.evoagentbench.protocol_v6 import build_protocol as build_protocol_v6
+from scripts.evoagentbench.protocol_v7 import build_protocol as build_protocol_v7
 from scripts.evoagentbench.retrieval import (
     APPLICABILITY_ALGORITHM, injection_text, select_applicable_skills,
     select_assets,
@@ -141,6 +142,19 @@ class ProtocolTests(unittest.TestCase):
         )
         self.assertFalse(protocol["candidate_generation"]["development_or_test_visible"])
         self.assertEqual(protocol["candidate_generation"]["source_cluster_count"], 0)
+
+    def test_v7_changes_review_abstraction_without_changing_heldout_protocol(self):
+        v6 = json.loads(Path("scripts/evoagentbench/protocol-code-v6.json").read_text())
+        source = json.loads(Path("scripts/evoagentbench/protocol-code-v7-source.json").read_text())
+        protocol = build_protocol_v7(v6, source)
+        for key in (
+            "selection", "arms", "retrieval", "agent", "pilot_gate", "test_stop",
+            "strong_evidence", "evidence_completeness", "factorial_analysis",
+        ):
+            self.assertEqual(protocol[key], v6[key])
+        self.assertEqual(protocol["candidate_generation"]["source_proposal_count"], 4)
+        self.assertEqual(protocol["candidate_generation"]["source_cluster_count"], 0)
+        self.assertFalse(protocol["candidate_generation"]["development_or_test_visible"])
 
     def test_candidate_carry_preserves_frozen_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:

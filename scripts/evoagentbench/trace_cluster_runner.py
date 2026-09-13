@@ -12,8 +12,8 @@ from typing import Any
 from .driver import DEFAULT_ROOT, PROTOCOL_FILE, api, local_user_key, write_new
 from .refine import _chat, _response_json
 from .trace_cluster_review import (
-    CLUSTER_ALGORITHM, REVIEW_SYSTEM, freeze_reviewed_clusters, propose_pairs,
-    review_response_format, validate_review,
+    CLUSTER_ALGORITHM, PRINCIPLE_CLUSTER_ALGORITHM, freeze_reviewed_clusters,
+    propose_pairs, review_response_format, review_system, validate_review,
 )
 from .trace_patches import load_patch_artifact
 
@@ -35,7 +35,8 @@ def generate(
 ) -> dict[str, Any]:
     protocol = json.loads(PROTOCOL_FILE.read_text())
     generation = protocol.get("candidate_generation", {})
-    if generation.get("cluster_algorithm") != CLUSTER_ALGORITHM:
+    cluster_algorithm = generation.get("cluster_algorithm")
+    if cluster_algorithm not in {CLUSTER_ALGORITHM, PRINCIPLE_CLUSTER_ALGORITHM}:
         raise ValueError("TRACE_CLUSTER_ALGORITHM_NOT_FROZEN")
     source_manifest, patches, _ = load_patch_artifact(source_artifact)
     if source_manifest["artifact_hash"] != generation.get("source_patch_artifact_hash"):
@@ -87,7 +88,7 @@ def generate(
                 "response_format": review_response_format(proposal),
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [
-                    {"role": "system", "content": REVIEW_SYSTEM},
+                    {"role": "system", "content": review_system(cluster_algorithm)},
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
             }
@@ -117,6 +118,7 @@ def generate(
             protocol_hash=protocol["protocol_hash"],
             capability_assignments=assignments,
             model=protocol["agent"]["model"], usage=_usage_total(events),
+            cluster_algorithm=cluster_algorithm,
         )
         safe = {
             "status": "CLUSTERS_FROZEN", "attempt_id": attempt_id,

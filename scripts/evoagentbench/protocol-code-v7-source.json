@@ -1,0 +1,12 @@
+{
+  "predecessor_protocol_hash": "4ded42e65ad265d57743b6ab3c7def6f857c78d8f38f3e15acc4b107d41a2f0d",
+  "source_memory_protocol_hash": "194b6bbff99a403fb9c03a38cfd18122875a2171b593b1ef8d6c8d45c6b5f525",
+  "source_memory_artifact_hash": "148043c145f01f11abee0cb6a2f0a3a2d66e90a5d6a4032b85452a7280a7266c",
+  "source_patch_artifact_hash": "548b2e2ac5228156c2f4027e30221dd915fd18d0165c62cc3674b7cecdce1be6",
+  "source_task_count": 24,
+  "source_pass_count": 23,
+  "source_fail_count": 1,
+  "source_infra_error_count": 0,
+  "source_proposal_count": 4,
+  "source_cluster_count": 0
+}
