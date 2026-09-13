@@ -19,6 +19,8 @@ from scripts.evoagentbench.protocol_v4 import build_protocol as build_protocol_v
 from scripts.evoagentbench.protocol_v5 import build_protocol as build_protocol_v5
 from scripts.evoagentbench.protocol_v6 import build_protocol as build_protocol_v6
 from scripts.evoagentbench.protocol_v7 import build_protocol as build_protocol_v7
+from scripts.evoagentbench.protocol_v8 import build_protocol as build_protocol_v8
+from scripts.evoagentbench.composite_candidate import freeze_composite
 from scripts.evoagentbench.retrieval import (
     APPLICABILITY_ALGORITHM, injection_text, select_applicable_skills,
     select_assets,
@@ -155,6 +157,66 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(protocol["candidate_generation"]["source_proposal_count"], 4)
         self.assertEqual(protocol["candidate_generation"]["source_cluster_count"], 0)
         self.assertFalse(protocol["candidate_generation"]["development_or_test_visible"])
+
+    def test_v8_freezes_composition_without_changing_factorial_protocol(self):
+        v7 = json.loads(Path("scripts/evoagentbench/protocol-code-v7.json").read_text())
+        source = json.loads(Path("scripts/evoagentbench/protocol-code-v8-source.json").read_text())
+        protocol = build_protocol_v8(v7, source)
+        for key in (
+            "selection", "arms", "retrieval", "agent", "pilot_gate", "test_stop",
+            "strong_evidence", "evidence_completeness", "factorial_analysis",
+        ):
+            self.assertEqual(protocol[key], v7[key])
+        self.assertEqual(protocol["candidate_generation"]["composition_model_calls"], 0)
+        self.assertFalse(protocol["candidate_generation"]["development_or_test_visible"])
+
+    def test_composite_candidate_preserves_frozen_memory_and_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory_source, skill_source = root / "memory", root / "skill"
+            memory_source.mkdir()
+            skill_source.mkdir()
+            memories = [{"id": "memory-1", "content_hash": "m"}]
+            memory_manifest = {"protocol_hash": "memory-protocol", "revision": 1}
+            memory_manifest["artifact_hash"] = sha256_json({
+                "manifest": memory_manifest, "memories": memories, "skills": [],
+            })
+            for name, value in (
+                ("manifest.json", memory_manifest), ("memories.json", memories),
+                ("skills.json", []),
+            ):
+                (memory_source / name).write_text(json.dumps(value))
+            skills = [{
+                "id": "skill-1", "content_hash": "s",
+                "support_task_ids": ["train-a", "train-b"],
+                "applicability_profile": {"task_family": "pairs"},
+            }]
+            skill_manifest = {"schema": "projection", "skill_count": 1}
+            skill_manifest["artifact_hash"] = sha256_json({
+                "manifest": skill_manifest, "skills": skills,
+            })
+            (skill_source / "manifest.json").write_text(json.dumps(skill_manifest))
+            (skill_source / "skills.json").write_text(json.dumps(skills))
+            protocol = {
+                "protocol_hash": "composite-protocol",
+                "selection": {"development": ["heldout"]},
+                "candidate_generation": {
+                    "candidate_revision": 2,
+                    "source_memory_artifact_hash": memory_manifest["artifact_hash"],
+                    "source_skill_projection_hash": skill_manifest["artifact_hash"],
+                },
+                "agent": {"model": "model"},
+                "retrieval": {"skill_algorithm": "algorithm"},
+            }
+            protocol_file = root / "protocol.json"
+            protocol_file.write_text(json.dumps(protocol))
+            output = root / "candidate"
+            manifest = freeze_composite(
+                memory_source, skill_source, output, protocol_file,
+            )
+            self.assertEqual(manifest["memory_count"], 1)
+            self.assertEqual(manifest["skill_count"], 1)
+            self.assertEqual(manifest["generation_usage"]["model_calls"], 0)
 
     def test_candidate_carry_preserves_frozen_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:
