@@ -1,5 +1,14 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-13 Trace2Skill v4：72 arm 完成，机械 PASS 但效果不可归因
+
+- 24 条未见 development × Vanilla / Memory / Skill 共 72 个真实 arm 全部完成，0 `INFRA_ERROR`。Attempt `trace2skill-semantic-v2-r2-main` 已导入 8125，record `evo-4087e37a-7f36-4475-8810-5f5e187b42e2`，artifact `1faa4373684398604ff14d33e970d6ea295ae2778567f2fe23a2952c9fbae0fb`。
+- Vanilla 19/24；Memory 19/24，2 fixed / 2 broken、gain 0、tokens -4.05%；Skill 21/24，2 fixed / 0 broken、gain +0.0833、tokens +3.42%。冻结 Pilot Gate 的机械结果为 `PASS`。
+- 关键限制：Skill retrieval coverage 为 **0%**，24 个 Skill arm 都没有实际注入 Candidate。两道 fixed 只能归因于 fresh session 的运行差异，不能证明 Skill 效果。本轮研究结论是 `EFFECT_NOT_ATTRIBUTABLE`；保留 Attempt PASS，不打开 official test、不 Promotion。
+- Core 曾错误拒绝“绑定 frozen Candidate 但检索主动弃权”的 trace。实现修复允许 evolved arm 零命中但仍强制 candidate revision/hash；原 Skill run 只重新 ingest，未重跑模型。Core targeted 5 tests 与 plugin build PASS，主 runtime 已更新为 `/Users/lsmax/Coder/phase6-artifacts/runtime/memoryhub-main-20260913-r9`，旧容器保留。
+- 正式资产前后保持 Skill / Memory / Wiki / Code Graph = 1 / 1 / 0 / 0。完整报告见 `docs/evoagentbench-trace2skill-v4-report.md`。
+- 下一步触发 Critical Review：若继续，必须版本化“候选盲但对能力维度有非零覆盖”的 held-out Suite，或把 treatment exposure 加入证据充分性规则；不得无痕修改本 Attempt/Gate，也不得用当前表面 PASS 开 official test。
+
 ## 2026-09-13 Trace2Skill v3/v4：训练完成，语义聚类 Candidate 已冻结
 
 - v3 的 48 条真实 experience 全部完成：41 PASS / 7 TASK_FAIL / 0 INFRA_ERROR；失败原样保留。48 条 train-only Memory 已冻结为 r1，artifact `8d7b87efe775288d42bb0d4e4de68c3ef1bc450d4e7edeb244856d5024815803`，生成成本 61,582 tokens / 48 model calls。
