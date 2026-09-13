@@ -193,7 +193,7 @@ def adapt_trial(
     injection_receipt: dict[str, Any] | None = None,
     proxy_events_path: Path | None = None,
 ) -> dict[str, Any]:
-    if arm not in {"vanilla", "memory", "skill"}:
+    if arm not in {"vanilla", "memory", "skill", "memory_skill"}:
         raise ValueError("UNKNOWN_ARM")
     if phase not in {"smoke", "experience", "development", "test_checkpoint", "test"}:
         raise ValueError("UNKNOWN_PHASE")
@@ -235,14 +235,23 @@ def adapt_trial(
     assets = injected_assets or []
     if arm == "vanilla" and assets:
         raise ValueError("VANILLA_ASSET_INJECTION_FORBIDDEN")
-    if arm != "vanilla" and len(assets) > 2:
+    maximum_assets = 4 if arm == "memory_skill" else 2
+    if arm != "vanilla" and len(assets) > maximum_assets:
         raise ValueError("RETRIEVAL_TOP_K_EXCEEDED")
     if injection_receipt is not None:
-        expected_kind = {"memory": "memory", "skill": "skill"}.get(arm)
+        expected_kind = {"memory": "memory", "skill": "skill", "memory_skill": "memory_skill"}.get(arm)
         if expected_kind is None or injection_receipt.get("kind") != expected_kind:
             raise ValueError("INJECTION_RECEIPT_ARM_MISMATCH")
         if injection_receipt.get("assets") != assets:
             raise ValueError("INJECTION_RECEIPT_ASSET_MISMATCH")
+        if arm == "memory_skill":
+            selections = injection_receipt.get("selections")
+            ordered = [
+                *(selections or {}).get("skill", []),
+                *(selections or {}).get("memory", []),
+            ]
+            if injection_receipt.get("injection_order") != ["skill", "memory"] or ordered != assets:
+                raise ValueError("COMBINED_INJECTION_ORDER_INVALID")
     normalized = {
         "schema": "tdai-evoagentbench-trial-v1",
         "benchmark": "EvoAgentBench-compatible",
@@ -274,6 +283,10 @@ def adapt_trial(
         "expected_model": expected_model,
         "injected_assets": assets,
         "retrieval_count": len(assets),
+        "retrieval_counts": {
+            kind: len(rows)
+            for kind, rows in (injection_receipt.get("selections") or {}).items()
+        } if injection_receipt and arm == "memory_skill" else None,
         "candidate_artifact_hash": injection_receipt.get("candidate_artifact_hash") if injection_receipt else None,
         "retrieval_algorithm": injection_receipt.get("algorithm") if injection_receipt else None,
         "protocol_hash": protocol_hash,

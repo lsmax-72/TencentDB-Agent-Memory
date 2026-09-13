@@ -27,8 +27,12 @@ def main() -> None:
     if generation.get("cluster_algorithm") != SEMANTIC_CLUSTER_ALGORITHM:
         raise ValueError("TRACE_RECLUSTER_ALGORITHM_NOT_FROZEN")
     source_manifest, _, _ = load_patch_artifact(args.source_artifact)
-    if source_manifest["artifact_hash"] != generation.get("source_patch_artifact_hash"):
-        raise ValueError("TRACE_RECLUSTER_SOURCE_NOT_FROZEN")
+    expected_source_hash = generation.get("source_patch_artifact_hash")
+    if expected_source_hash:
+        if source_manifest["artifact_hash"] != expected_source_hash:
+            raise ValueError("TRACE_RECLUSTER_SOURCE_NOT_FROZEN")
+    elif source_manifest.get("protocol_hash") != protocol["protocol_hash"]:
+        raise ValueError("TRACE_RECLUSTER_SOURCE_PROTOCOL_MISMATCH")
     output = args.root / "frozen" / f"trace-patches-{args.attempt_id}"
     manifest = freeze_semantic_recluster(
         args.source_artifact,

@@ -38,6 +38,10 @@ const benchmarkComparison = z.object({
   transfer_gain: z.number().min(-1).max(1).nullable(), paired_bootstrap_95_ci: z.tuple([z.number(), z.number()]).nullable(),
   pass_at_1: z.number().min(0).max(1).nullable(), token_cost_change: z.number().nullable(),
 }).strict();
+const benchmarkCost = z.object({
+  total_tokens: nullableCount, model_call_count: nullableCount,
+  tool_call_count: nullableCount, elapsed_ms: z.number().int().nonnegative(),
+}).strict();
 const benchmarkIngestSchema = scopeSchema.extend({
   agent_id: id, attempt_id: id,
   // Keep research imports allow-listed so a caller cannot label arbitrary evidence as a frozen protocol.
@@ -46,11 +50,23 @@ const benchmarkIngestSchema = scopeSchema.extend({
     "tdai-evoagentbench-code-v2-discriminative",
     "tdai-evoagentbench-code-v3-trace2skill",
     "tdai-evoagentbench-code-v3-suite-generation-v2",
+    "tdai-evoagentbench-code-v5-factorial-heldout",
   ]),
   protocol_hash: z.string().regex(/^[a-f0-9]{64}$/), source_hash: z.string().regex(/^[a-f0-9]{64}$/),
   phase: z.enum(["development", "test_checkpoint", "test"]), status: z.enum(["PASS", "FAIL", "INFRA_ERROR"]),
-  comparisons: z.object({ memory: benchmarkComparison, skill: benchmarkComparison }).strict(),
-  cost_summary: z.record(z.enum(["vanilla", "memory", "skill"]), z.object({ total_tokens: nullableCount, model_call_count: nullableCount, tool_call_count: nullableCount, elapsed_ms: z.number().int().nonnegative() }).strict()),
+  comparisons: z.object({ memory: benchmarkComparison, skill: benchmarkComparison, memory_skill: benchmarkComparison.optional() }).strict(),
+  cost_summary: z.union([
+    z.object({ vanilla: benchmarkCost, memory: benchmarkCost, skill: benchmarkCost }).strict(),
+    z.object({ vanilla: benchmarkCost, memory: benchmarkCost, skill: benchmarkCost, memory_skill: benchmarkCost }).strict(),
+  ]),
+  factorial: z.object({
+    comparable_task_count: z.number().int().nonnegative(),
+    combined_minus_memory: z.number().min(-1).max(1).nullable(), combined_minus_skill: z.number().min(-1).max(1).nullable(),
+    interaction_effect: z.number().min(-2).max(2).nullable(),
+    combined_minus_memory_95_ci: z.tuple([z.number(), z.number()]).nullable(),
+    combined_minus_skill_95_ci: z.tuple([z.number(), z.number()]).nullable(),
+    interaction_95_ci: z.tuple([z.number(), z.number()]).nullable(),
+  }).strict().nullable().optional(),
   candidate_hash: z.string().regex(/^[a-f0-9]{64}$/).nullable(), retrieval_coverage: z.record(z.string(), z.number().min(0).max(1)),
   evidence_limitations: z.array(z.string().max(500)).max(20), contamination_findings: z.array(z.string().max(300)).max(100),
 }).strict();
@@ -59,14 +75,14 @@ const benchmarkRunIngestSchema = scopeSchema.extend({
   agent_id: id, task_id: id, run_id: id, session_id: id,
   protocol_hash: z.string().regex(/^[a-f0-9]{64}$/),
   phase: z.enum(["development", "test_checkpoint", "test"]),
-  arm: z.enum(["vanilla", "memory", "skill"]), trial: z.number().int().positive(),
+  arm: z.enum(["vanilla", "memory", "skill", "memory_skill"]), trial: z.number().int().positive(),
   status: z.enum(["TASK_PASS", "TASK_FAIL", "INFRA_ERROR"]), reward: z.number().min(0).max(1),
   candidate_revision: z.number().int().positive().nullable(), candidate_hash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
   task_input: z.string().max(100_000), final_output: z.string().max(100_000),
   tool_events: z.array(z.object({ name: z.string().max(120), arguments: z.string().max(20_000), result: z.string().max(40_000), success: z.boolean(), sequence: z.number().int().nonnegative() }).strict()).max(100),
   usage: z.object({ input_tokens: nullableCount, output_tokens: nullableCount, model_calls: nullableCount, tool_calls: nullableCount }).strict(),
   actual_model: z.string().max(200),
-  injected_assets: z.array(z.object({ id, hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).max(2),
+  injected_assets: z.array(z.object({ id, hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).max(4),
 }).strict();
 
 export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "observation/ingest", "benchmark/run/ingest", "benchmark/attempt/ingest", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
@@ -304,9 +320,10 @@ export class EvolutionService {
         payload: {
           attempt_type: "benchmark_transfer_evaluation", benchmark: "EvoAgentBench-compatible",
           protocol_id: input.protocol_id, protocol_hash: input.protocol_hash, source_hash: input.source_hash,
-          phase: input.phase, comparisons: input.comparisons, cost_summary: input.cost_summary,
-          pairs: input.comparisons.skill.pairs, comparison_summary: {
+          phase: input.phase, comparisons: input.comparisons, cost_summary: input.cost_summary, factorial: input.factorial ?? null,
+          pairs: input.comparisons.memory_skill?.pairs ?? input.comparisons.skill.pairs, comparison_summary: {
             memory: input.comparisons.memory.counts, skill: input.comparisons.skill.counts,
+            ...(input.comparisons.memory_skill ? { memory_skill: input.comparisons.memory_skill.counts } : {}),
           }, candidate_hash: input.candidate_hash, retrieval_coverage: input.retrieval_coverage,
           contamination_findings: input.contamination_findings, evidence_limitations: input.evidence_limitations,
           research_only: true, promotion_allowed: false, test_traces_candidate_eligible: false,

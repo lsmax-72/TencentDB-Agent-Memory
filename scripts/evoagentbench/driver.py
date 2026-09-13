@@ -102,7 +102,11 @@ def setup(root: Path) -> None:
     split_file = EVO_REPO / "benchmark/data/splits/code_implementation.json"
     protocol = json.loads(PROTOCOL_FILE.read_text())
     split = json.loads(split_file.read_text())
-    if protocol.get("protocol_revision") == 4:
+    if protocol.get("protocol_revision") == 5:
+        from .protocol_v5 import validate_frozen_protocol_v5
+
+        validate_frozen_protocol_v5(protocol, split)
+    elif protocol.get("protocol_revision") == 4:
         from .protocol_v4 import validate_frozen_protocol_v4
 
         validate_frozen_protocol_v4(protocol, split)
@@ -189,7 +193,7 @@ def _phase_tasks(protocol: dict[str, Any], phase: str) -> set[str]:
     return set(protocol["selection"][selection_key])
 
 
-def _candidate_assets(root: Path, revision: int, arm: str, candidate_protocol_hash: str) -> tuple[list[dict[str, Any]], str]:
+def _candidate_assets(root: Path, revision: int, arm: str, candidate_protocol_hash: str) -> tuple[Any, str]:
     frozen = root / "frozen" / f"refinement-r{revision}"
     manifest_path = frozen / "manifest.json"
     if not manifest_path.is_file():
@@ -204,11 +208,13 @@ def _candidate_assets(root: Path, revision: int, arm: str, candidate_protocol_ha
     skills = json.loads((frozen / "skills.json").read_text())
     if canonical_hash({"manifest": manifest_without_hash, "memories": memories, "skills": skills}) != artifact_hash:
         raise ValueError("CANDIDATE_ARTIFACT_HASH_MISMATCH")
-    if arm == "skill":
+    if arm in {"skill", "memory_skill"}:
         review_path = frozen / "review.json"
         review = json.loads(review_path.read_text()) if review_path.is_file() else {}
         if review.get("status") != "APPROVED_FOR_DEVELOPMENT":
             raise ValueError("SKILL_NOT_APPROVED_FOR_DEVELOPMENT")
+    if arm == "memory_skill":
+        return {"memory": memories, "skill": skills}, artifact_hash
     return (memories if arm == "memory" else skills), artifact_hash
 
 
@@ -251,7 +257,7 @@ def run_trial(root: Path, phase: str, arm: str, task_id: str, trial: int, infras
     protocol = json.loads(PROTOCOL_FILE.read_text())
     if task_id not in _phase_tasks(protocol, phase):
         raise ValueError("TASK_NOT_IN_FROZEN_PHASE")
-    if arm not in {"vanilla", "memory", "skill"}:
+    if arm not in set(protocol["arms"]):
         raise ValueError("UNKNOWN_ARM")
     if phase in {"smoke", "experience"} and arm != "vanilla":
         raise ValueError("TRAIN_COLLECTION_IS_VANILLA_ONLY")
@@ -259,7 +265,7 @@ def run_trial(root: Path, phase: str, arm: str, task_id: str, trial: int, infras
         raise ValueError("VANILLA_CANDIDATE_REVISION_FORBIDDEN")
     if arm != "vanilla" and candidate_revision is None:
         raise ValueError("CANDIDATE_REVISION_REQUIRED")
-    asset_pool: list[dict[str, Any]] = []
+    asset_pool: Any = []
     candidate_hash = None
     if candidate_revision is not None:
         frozen_candidate = protocol.get("candidate")
@@ -364,6 +370,14 @@ live: false
         if arm != "vanilla":
             pool_path = private / "asset-pool.json"
             write_new(pool_path, asset_pool, private=True)
+            retrieval_algorithm = (
+                json.dumps({
+                    "skill": protocol["retrieval"]["skill_algorithm"],
+                    "memory": protocol["retrieval"]["memory_algorithm"],
+                }, sort_keys=True, separators=(",", ":"))
+                if arm == "memory_skill"
+                else protocol["retrieval"].get(f"{arm}_algorithm", "lexical-idf-v1")
+            )
             env.update({
                 "TDAI_EVO_ASSET_POOL": str(pool_path),
                 "TDAI_EVO_ASSET_KIND": arm,
@@ -371,9 +385,7 @@ live: false
                 "TDAI_EVO_INJECTION_RECEIPT": str(receipt_path),
                 "TDAI_EVO_RUN_PRIVATE": str(private),
                 "TDAI_EVO_CANDIDATE_HASH": candidate_hash or "",
-                "TDAI_EVO_RETRIEVAL_ALGORITHM": protocol["retrieval"].get(
-                    f"{arm}_algorithm", "lexical-idf-v1"
-                ),
+                "TDAI_EVO_RETRIEVAL_ALGORITHM": retrieval_algorithm,
             })
         log_file = private / "official.log"
         with log_file.open("x") as log:
@@ -444,7 +456,7 @@ def main() -> None:
     parser.add_argument("command", choices=["setup", "connectivity", "run", "ingest-run"])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--phase", choices=["smoke", "experience", "development", "test_checkpoint", "test"])
-    parser.add_argument("--arm", choices=["vanilla", "memory", "skill"])
+    parser.add_argument("--arm", choices=["vanilla", "memory", "skill", "memory_skill"])
     parser.add_argument("--task")
     parser.add_argument("--trial", type=int, default=1)
     parser.add_argument("--infrastructure-retry", type=int)

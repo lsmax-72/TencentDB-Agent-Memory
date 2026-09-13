@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and optionally ingest immutable three-arm comparison evidence."""
+"""Build and optionally ingest immutable benchmark comparison evidence."""
 
 from __future__ import annotations
 
@@ -16,7 +16,8 @@ from .metrics import compare
 
 
 def _load_runs(root: Path, phase: str, candidate_revision: int | None = None) -> dict[str, list[dict[str, Any]]]:
-    arms: dict[str, list[dict[str, Any]]] = {"vanilla": [], "memory": [], "skill": []}
+    protocol = json.loads(PROTOCOL_FILE.read_text())
+    arms: dict[str, list[dict[str, Any]]] = {arm: [] for arm in protocol["arms"]}
     for path in sorted((root / "runs").glob(f"{phase}-*/evidence.json")):
         row = json.loads(path.read_text())
         if row.get("phase") != phase:
@@ -25,7 +26,8 @@ def _load_runs(root: Path, phase: str, candidate_revision: int | None = None) ->
             continue
         if row.get("arm") != "vanilla" and candidate_revision is not None and row.get("candidate_revision") != candidate_revision:
             continue
-        arms[row["arm"]].append(row)
+        if row.get("arm") in arms:
+            arms[row["arm"]].append(row)
     return arms
 
 
@@ -86,14 +88,15 @@ def build(root: Path, phase: str, attempt_id: str, candidate_file: Path | None, 
             status, reasons = "FAIL", reasons + ["CANDIDATE_TEST_CONTAMINATION"]
     source_hashes = sorted(row["evidence_hash"] for row in rows)
     attempt = {
-        "schema": "tdai-evoagentbench-comparison-v1",
+        "schema": "tdai-evoagentbench-comparison-v2" if "memory_skill" in arms else "tdai-evoagentbench-comparison-v1",
         "attempt_id": attempt_id,
         "protocol_id": protocol["protocol_id"], "protocol_hash": protocol["protocol_hash"],
         "benchmark": "EvoAgentBench-compatible", "phase": phase, "status": status, "reasons": reasons,
         "comparisons": result["comparisons"], "cost_summary": result["cost_summary"],
+        "factorial": result["factorial"],
         "candidate_hash": candidate_hash,
         "candidate_revision": candidate_revision,
-        "retrieval_coverage": {arm: _coverage(arms[arm]) for arm in ("memory", "skill")},
+        "retrieval_coverage": {arm: _coverage(arms[arm]) for arm in arms if arm != "vanilla"},
         "contamination_findings": contamination, "source_run_hashes": source_hashes,
         "implementation_fix_retries": replacements,
         "source_hash": canonical_hash(source_hashes),
@@ -115,7 +118,7 @@ def ingest(root: Path, attempt: dict[str, Any]) -> Any:
         "team_id": scope["team_id"], "agent_id": scope["agent_id"],
         **{key: attempt[key] for key in (
             "attempt_id", "protocol_id", "protocol_hash", "source_hash", "phase", "status", "comparisons",
-            "cost_summary", "candidate_hash", "retrieval_coverage", "evidence_limitations", "contamination_findings"
+            "cost_summary", "factorial", "candidate_hash", "retrieval_coverage", "evidence_limitations", "contamination_findings"
         )},
     }
     return api("/v3/evolution/benchmark/attempt/ingest", body, user_key)

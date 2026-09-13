@@ -76,8 +76,12 @@ def collect_experience(root: Path) -> None:
 
 def collect_development(root: Path, candidate_revision: int) -> None:
     protocol = json.loads(PROTOCOL_FILE.read_text())
+    if "memory_skill" in protocol["arms"]:
+        from .factorial_preflight import validate as validate_factorial_preflight
+
+        validate_factorial_preflight(root, candidate_revision)
     tasks = protocol["selection"]["development"]
-    arms = ("vanilla", "memory", "skill")
+    arms = tuple(protocol["arms"])
     total = len(tasks) * len(arms)
     position = 0
     for task_id in tasks:

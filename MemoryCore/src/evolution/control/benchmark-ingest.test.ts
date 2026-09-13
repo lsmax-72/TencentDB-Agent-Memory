@@ -54,6 +54,15 @@ describe("EvoAgentBench evidence ingestion", () => {
     expect(await service.invoke("benchmark/attempt/ingest", v4, "owner-key")).toMatchObject({
       payload: { protocol_id: "tdai-evoagentbench-code-v3-suite-generation-v2", promotion_allowed: false },
     });
+    const v5 = { ...input, attempt_id: "factorial-r1", protocol_id: "tdai-evoagentbench-code-v5-factorial-heldout",
+      comparisons: { ...input.comparisons, memory_skill: comparison },
+      cost_summary: { ...input.cost_summary, memory_skill: input.cost_summary.skill },
+      factorial: { comparable_task_count: 1, combined_minus_memory: 0, combined_minus_skill: 0, interaction_effect: 0,
+        combined_minus_memory_95_ci: [0, 0], combined_minus_skill_95_ci: [0, 0], interaction_95_ci: [0, 0] },
+    } as const;
+    expect(await service.invoke("benchmark/attempt/ingest", v5, "owner-key")).toMatchObject({
+      payload: { protocol_id: "tdai-evoagentbench-code-v5-factorial-heldout", factorial: { comparable_task_count: 1 } },
+    });
     await expect(service.invoke("benchmark/attempt/ingest", { ...v2, attempt_id: "unknown", protocol_id: "unknown-protocol" }, "owner-key"))
       .rejects.toThrow();
   });
@@ -86,5 +95,21 @@ describe("EvoAgentBench evidence ingestion", () => {
     } as const;
     const record = await service.invoke("benchmark/run/ingest", body, "owner-key") as EvolutionRecord;
     expect(record.payload).toMatchObject({ arm: "skill", candidate_revision: 2, injected_assets: [], used_asset_versions: {} });
+  });
+
+  it("accepts the bounded combined arm with one frozen candidate binding", async () => {
+    const service = setup();
+    const body = {
+      team_id: "team", agent_id: "agent", task_id: "task", run_id: "development-a-memory_skill-r2-trial-1", session_id: "session-3",
+      protocol_hash: "a".repeat(64), phase: "development", arm: "memory_skill", trial: 1,
+      status: "TASK_PASS", reward: 1, candidate_revision: 2, candidate_hash: "c".repeat(64),
+      task_input: "Solve safely", final_output: "Done", tool_events: [],
+      usage: { input_tokens: 10, output_tokens: 2, model_calls: 1, tool_calls: 0 }, actual_model: "qwen3.8-27b",
+      injected_assets: [
+        { id: "skill-1", hash: "d".repeat(64) }, { id: "memory-1", hash: "e".repeat(64) },
+      ],
+    } as const;
+    const record = await service.invoke("benchmark/run/ingest", body, "owner-key") as EvolutionRecord;
+    expect(record.payload).toMatchObject({ arm: "memory_skill", candidate_revision: 2 });
   });
 });

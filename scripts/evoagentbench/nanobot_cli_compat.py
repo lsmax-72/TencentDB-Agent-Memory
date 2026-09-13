@@ -49,18 +49,46 @@ def _inject_assets(args: list[str], workspace: Path, env: dict[str, str]) -> lis
     if pool_path.parent != run_private or receipt_path.parent != run_private:
         raise ValueError("COMPAT_INJECTION_PATH_OUTSIDE_RUN")
     assets = json.loads(pool_path.read_text())
-    if not isinstance(assets, list):
-        raise ValueError("COMPAT_ASSET_POOL_INVALID")
     decisions = None
-    if algorithm == ALGORITHM:
-        selected = select_assets(args[message_index], kind, assets, top_k=top_k)
-    elif algorithm == APPLICABILITY_ALGORITHM and kind == "skill":
-        selected, decisions = select_skill_assets_for_algorithm(
-            args[message_index], assets, algorithm, top_k=top_k
+    selections = None
+    if kind == "memory_skill":
+        if not isinstance(assets, dict) or set(assets) != {"memory", "skill"} or not all(
+            isinstance(assets[item], list) for item in ("memory", "skill")
+        ):
+            raise ValueError("COMPAT_ASSET_POOL_INVALID")
+        try:
+            algorithms = json.loads(algorithm)
+        except json.JSONDecodeError as error:
+            raise ValueError("COMPAT_RETRIEVAL_ALGORITHM_INVALID") from error
+        if algorithms.get("memory") != ALGORITHM or algorithms.get("skill") != APPLICABILITY_ALGORITHM:
+            raise ValueError("COMPAT_RETRIEVAL_ALGORITHM_INVALID")
+        selected_skill, skill_decisions = select_skill_assets_for_algorithm(
+            args[message_index], assets["skill"], algorithms["skill"], top_k=top_k
         )
+        selected_memory = select_assets(
+            args[message_index], "memory", assets["memory"], top_k=top_k
+        )
+        # Keep the treatment deterministic: reusable rule first, examples second.
+        args[message_index] += injection_text("skill", selected_skill)
+        args[message_index] += injection_text("memory", selected_memory)
+        selected = [*selected_skill, *selected_memory]
+        selections = {
+            "skill": [{"id": row["id"], "hash": row["content_hash"]} for row in selected_skill],
+            "memory": [{"id": row["id"], "hash": row["content_hash"]} for row in selected_memory],
+        }
+        decisions = {"skill": skill_decisions}
     else:
-        raise ValueError("COMPAT_RETRIEVAL_ALGORITHM_INVALID")
-    args[message_index] += injection_text(kind, selected)
+        if not isinstance(assets, list):
+            raise ValueError("COMPAT_ASSET_POOL_INVALID")
+        if algorithm == ALGORITHM:
+            selected = select_assets(args[message_index], kind, assets, top_k=top_k)
+        elif algorithm == APPLICABILITY_ALGORITHM and kind == "skill":
+            selected, decisions = select_skill_assets_for_algorithm(
+                args[message_index], assets, algorithm, top_k=top_k
+            )
+        else:
+            raise ValueError("COMPAT_RETRIEVAL_ALGORITHM_INVALID")
+        args[message_index] += injection_text(kind, selected)
     receipt = {
         "schema": "tdai-evoagentbench-injection-v1",
         "kind": kind,
@@ -68,6 +96,9 @@ def _inject_assets(args: list[str], workspace: Path, env: dict[str, str]) -> lis
         "candidate_artifact_hash": env.get("TDAI_EVO_CANDIDATE_HASH"),
         "assets": [{"id": row["id"], "hash": row["content_hash"]} for row in selected],
     }
+    if selections is not None:
+        receipt["injection_order"] = ["skill", "memory"]
+        receipt["selections"] = selections
     if decisions is not None:
         receipt["applicability_decisions"] = decisions
     _write_new(receipt_path, receipt)

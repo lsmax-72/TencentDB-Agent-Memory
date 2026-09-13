@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Paired transfer metrics for the frozen three-arm research protocol."""
+"""Paired transfer metrics for frozen three- or four-arm research protocols."""
 
 from __future__ import annotations
 
@@ -44,8 +44,9 @@ def _totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def compare(arms: dict[str, list[dict[str, Any]]], seed: str) -> dict[str, Any]:
-    if set(arms) != {"vanilla", "memory", "skill"}:
-        raise ValueError("THREE_ARMS_REQUIRED")
+    supported = {"vanilla", "memory", "skill"}
+    if set(arms) not in (supported, supported | {"memory_skill"}):
+        raise ValueError("SUPPORTED_ARMS_REQUIRED")
     indexed = {}
     for arm, rows in arms.items():
         keys = [(row["task_id"], row["trial"]) for row in rows]
@@ -57,7 +58,8 @@ def compare(arms: dict[str, list[dict[str, Any]]], seed: str) -> dict[str, Any]:
         raise ValueError("PAIRED_TASK_SET_MISMATCH")
 
     comparisons: dict[str, Any] = {}
-    for arm in ("memory", "skill"):
+    evolved_arms = [arm for arm in ("memory", "skill", "memory_skill") if arm in indexed]
+    for arm in evolved_arms:
         pairs = []
         for key in sorted(keys):
             vanilla, evolved = indexed["vanilla"][key], indexed[arm][key]
@@ -84,11 +86,41 @@ def compare(arms: dict[str, list[dict[str, Any]]], seed: str) -> dict[str, Any]:
         }
 
     costs = {arm: _totals(list(indexed[arm].values())) for arm in indexed}
-    for arm in ("memory", "skill"):
+    for arm in evolved_arms:
         baseline_tokens, arm_tokens = costs["vanilla"]["total_tokens"], costs[arm]["total_tokens"]
         comparisons[arm]["token_cost_change"] = (
             (arm_tokens - baseline_tokens) / baseline_tokens
             if isinstance(baseline_tokens, int) and baseline_tokens > 0 and isinstance(arm_tokens, int)
             else None
         )
-    return {"comparisons": comparisons, "cost_summary": costs}
+    factorial = None
+    if "memory_skill" in indexed:
+        complete = [
+            key for key in sorted(keys)
+            if all(indexed[arm][key]["status"] != "INFRA_ERROR" for arm in indexed)
+        ]
+        combined_vs_memory = [
+            indexed["memory_skill"][key]["reward"] - indexed["memory"][key]["reward"]
+            for key in complete
+        ]
+        combined_vs_skill = [
+            indexed["memory_skill"][key]["reward"] - indexed["skill"][key]["reward"]
+            for key in complete
+        ]
+        interaction = [
+            indexed["memory_skill"][key]["reward"]
+            - indexed["memory"][key]["reward"]
+            - indexed["skill"][key]["reward"]
+            + indexed["vanilla"][key]["reward"]
+            for key in complete
+        ]
+        factorial = {
+            "comparable_task_count": len(complete),
+            "combined_minus_memory": mean(combined_vs_memory) if complete else None,
+            "combined_minus_skill": mean(combined_vs_skill) if complete else None,
+            "interaction_effect": mean(interaction) if complete else None,
+            "combined_minus_memory_95_ci": _bootstrap_ci(combined_vs_memory, f"{seed}:combined-vs-memory"),
+            "combined_minus_skill_95_ci": _bootstrap_ci(combined_vs_skill, f"{seed}:combined-vs-skill"),
+            "interaction_95_ci": _bootstrap_ci(interaction, f"{seed}:interaction"),
+        }
+    return {"comparisons": comparisons, "cost_summary": costs, "factorial": factorial}

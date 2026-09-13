@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import scripts.evoagentbench.report as report_module
 from scripts.evoagentbench.adapter import adapt_trial, candidate_contamination
 from scripts.evoagentbench.applicability_artifact import annotate_skill, freeze_projection
 from scripts.evoagentbench.carry_candidate import carry
@@ -15,6 +16,7 @@ from scripts.evoagentbench.protocol import build_protocol, sha256_json
 from scripts.evoagentbench.protocol_v2 import build_protocol as build_protocol_v2
 from scripts.evoagentbench.protocol_v3 import build_protocol as build_protocol_v3
 from scripts.evoagentbench.protocol_v4 import build_protocol as build_protocol_v4
+from scripts.evoagentbench.protocol_v5 import build_protocol as build_protocol_v5
 from scripts.evoagentbench.retrieval import (
     APPLICABILITY_ALGORITHM, injection_text, select_applicable_skills,
     select_assets,
@@ -104,6 +106,24 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(protocol["arms"], v3["arms"])
         self.assertEqual(protocol["candidate_generation"]["source_exact_cluster_count"], 0)
         self.assertFalse(protocol["candidate_generation"]["development_or_test_visible"])
+
+    def test_v5_freezes_candidate_blind_capability_split_and_four_arms(self):
+        v1 = json.loads(Path("scripts/evoagentbench/protocol-code-v1.json").read_text())
+        v4 = json.loads(Path("scripts/evoagentbench/protocol-code-v4.json").read_text())
+        metadata = json.loads(Path("scripts/evoagentbench/protocol-code-v2-metadata.json").read_text())
+        split = {"train": v1["selection"]["final_train"], "test": v1["selection"]["final_test"]}
+        protocol = build_protocol_v5(split, metadata, v4)
+        experience, development = set(protocol["selection"]["experience"]), set(protocol["selection"]["development"])
+        self.assertEqual(len(experience), 24)
+        self.assertEqual(len(development), 12)
+        self.assertFalse(experience & development)
+        self.assertEqual(protocol["arms"], ["vanilla", "memory", "skill", "memory_skill"])
+        self.assertEqual(protocol["retrieval"]["combined_order"], ["skill", "memory"])
+        counts = {}
+        for task_id in experience:
+            family = protocol["selection"]["capability_assignments"][task_id]
+            counts[family] = counts.get(family, 0) + 1
+        self.assertEqual(set(counts.values()), {8})
 
     def test_candidate_carry_preserves_frozen_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -290,6 +310,24 @@ class AdapterTests(unittest.TestCase):
                 adapt_trial(path, arm="skill", phase="development", protocol_hash="h", expected_model="qwen3.8-27b", injected_assets=[{"id": str(i), "hash": "x"} for i in range(3)])
         finally:
             root.cleanup()
+
+    def test_combined_adapter_preserves_fixed_skill_then_memory_receipt(self):
+        result = {"task_name": "tr-1", "trial": 1, "agent_result": {"completion_status": "completed", "response": "ok"}, "verifier_result": {"reward": 1.0}, "token_usage": {"input": 2, "output": 1, "total": 3}}
+        root, path = self.trial(result, [{"role": "assistant", "model": "qwen3.8-27b"}])
+        assets = [{"id": "skill-a", "hash": "a"}, {"id": "memory-a", "hash": "b"}]
+        receipt = {"kind": "memory_skill", "assets": assets, "injection_order": ["skill", "memory"],
+                   "selections": {"skill": [assets[0]], "memory": [assets[1]]}, "candidate_artifact_hash": "candidate"}
+        try:
+            events = path / "proxy.jsonl"
+            events.write_text("\n".join(json.dumps(event) for event in [
+                {"kind": "request", "call_id": 1},
+                {"kind": "response", "call_id": 1, "model": "qwen3.8-27b", "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}},
+            ]) + "\n")
+            row = adapt_trial(path, arm="memory_skill", phase="development", protocol_hash="h", expected_model="qwen3.8-27b", injected_assets=assets, injection_receipt=receipt, proxy_events_path=events)
+        finally:
+            root.cleanup()
+        self.assertEqual(row["retrieval_counts"], {"skill": 1, "memory": 1})
+        self.assertEqual(row["injected_assets"], assets)
 
     def test_benchmark_run_payload_preserves_frozen_asset_hash(self):
         evidence = {
@@ -559,6 +597,39 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(value["assets"], [{"id": "memory-a", "hash": "hash-a"}])
             self.assertEqual(value["candidate_artifact_hash"], "candidate-hash")
 
+    def test_nanobot_compat_combines_identical_per_kind_selections_in_fixed_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            config = workspace / "config.json"
+            pool = workspace / "pool.json"
+            receipt = workspace / "receipt.json"
+            config.write_text(json.dumps({"agents": {"defaults": {"workspace": str(workspace)}}}))
+            skill = self._applicable_pair_skill()
+            memory = {"id": "memory-a", "content_hash": "hash-m", "task_intent": "maximum pair in array", "approach": "enumerate pairs", "key_insight": "compare pairs", "applicability": "small arrays"}
+            pool.write_text(json.dumps({"skill": [skill], "memory": [memory]}))
+            previous = dict(os.environ)
+            os.environ.update({
+                "TDAI_EVO_ASSET_POOL": str(pool), "TDAI_EVO_ASSET_KIND": "memory_skill",
+                "TDAI_EVO_ASSET_TOP_K": "2", "TDAI_EVO_INJECTION_RECEIPT": str(receipt),
+                "TDAI_EVO_RUN_PRIVATE": str(workspace), "TDAI_EVO_CANDIDATE_HASH": "candidate-hash",
+                "TDAI_EVO_RETRIEVAL_ALGORITHM": json.dumps({"memory": "lexical-idf-v1", "skill": APPLICABILITY_ALGORITHM}),
+            })
+            try:
+                command, _ = prepare_invocation([
+                    "agent", "--session", "s", "--message",
+                    "For an array with n <= 50, find the maximum over all pairs.",
+                    "--workspace", str(workspace), "--config", str(config),
+                ])
+            finally:
+                os.environ.clear(); os.environ.update(previous)
+            message = command[command.index("--message") + 1]
+            self.assertLess(message.index("Retrieved strategies"), message.index("Retrieved experiences"))
+            value = json.loads(receipt.read_text())
+            self.assertEqual(value["injection_order"], ["skill", "memory"])
+            self.assertEqual(value["assets"], [
+                {"id": "skill-a", "hash": "hash-a"}, {"id": "memory-a", "hash": "hash-m"},
+            ])
+
     def test_refinement_rejects_single_source_or_case_specific_skill(self):
         quote_a = "Use bitmask dynamic programming to evaluate every subset transition."
         quote_b = "Apply bitmask dynamic programming over subset states and valid moves."
@@ -617,6 +688,45 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(result["comparisons"]["skill"]["counts"]["newly_fixed"], 1)
         self.assertEqual(result["comparisons"]["skill"]["counts"]["newly_broken"], 1)
         self.assertEqual(result["comparisons"]["skill"]["transfer_gain"], 0)
+
+    def test_four_arm_factorial_reports_combined_increment_and_interaction(self):
+        arms = {
+            "vanilla": [self.row("a", "vanilla", 0, "TASK_FAIL"), self.row("b", "vanilla", 1)],
+            "memory": [self.row("a", "memory", 1), self.row("b", "memory", 1)],
+            "skill": [self.row("a", "skill", 0, "TASK_FAIL"), self.row("b", "skill", 1)],
+            "memory_skill": [self.row("a", "memory_skill", 1), self.row("b", "memory_skill", 1)],
+        }
+        result = compare(arms, "seed")
+        self.assertEqual(result["comparisons"]["memory_skill"]["counts"]["newly_fixed"], 1)
+        self.assertEqual(result["factorial"]["combined_minus_memory"], 0)
+        self.assertEqual(result["factorial"]["combined_minus_skill"], 0.5)
+        self.assertEqual(result["factorial"]["interaction_effect"], 0)
+
+    def test_four_arm_report_uses_versioned_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            protocol_file = root / "protocol.json"
+            protocol_file.write_text(json.dumps({
+                "protocol_id": "factorial", "protocol_hash": "p",
+                "arms": ["vanilla", "memory", "skill", "memory_skill"],
+                "selection": {"final_test": []},
+            }))
+            for arm, reward in (("vanilla", 0), ("memory", 0), ("skill", 1), ("memory_skill", 1)):
+                directory = root / "runs" / f"development-a-{arm}-trial-1"
+                directory.mkdir(parents=True)
+                row = self.row("a", arm, reward, "TASK_PASS" if reward else "TASK_FAIL")
+                row.update({"phase": "development", "candidate_revision": None if arm == "vanilla" else 2,
+                            "evidence_hash": arm, "retrieval_count": 0 if arm == "vanilla" else 1})
+                (directory / "evidence.json").write_text(json.dumps(row))
+            previous = report_module.PROTOCOL_FILE
+            report_module.PROTOCOL_FILE = protocol_file
+            try:
+                attempt = build_report(root, "development", "factorial-r1", None, 2)
+            finally:
+                report_module.PROTOCOL_FILE = previous
+        self.assertEqual(attempt["schema"], "tdai-evoagentbench-comparison-v2")
+        self.assertIn("memory_skill", attempt["comparisons"])
+        self.assertEqual(attempt["factorial"]["combined_minus_skill"], 0)
 
     def test_unpaired_runs_are_rejected(self):
         arms = {"vanilla": [self.row("a", "vanilla", 0)], "memory": [], "skill": []}

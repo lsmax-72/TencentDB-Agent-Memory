@@ -2,7 +2,7 @@
 
 This integration pins the official EvoAgentBench and LiveCodeBench revisions and keeps benchmark execution outside MemoryCore. The official verifier remains the source of task reward; the local adapter only normalizes evidence for the existing Evolution UI and research reports.
 
-The three arms are `vanilla`, `memory`, and `skill`. Only official train tasks may produce Memory or Skill candidates. Official test traces are observation-only. Candidate assets are evaluation-only and must never be promoted by this runner.
+The original protocols use `vanilla`, `memory`, and `skill`. Protocol v5 adds a fourth `memory_skill` arm. It reuses each standalone selector and injects Skill before Memory; it does not cherry-pick different combined assets. Only official train tasks may produce Memory or Skill candidates. Official test traces are observation-only. Candidate assets are evaluation-only and must never be promoted by this runner.
 
 The frozen protocol is `protocol-code-v1.json`. Regenerate it only when intentionally creating a new protocol revision:
 
@@ -83,6 +83,32 @@ rejection reason, handles common numeric-bound formats, and requires matching
 task-family plus objective/entity signals. It may inject zero Skills. Existing
 frozen protocols continue to default to `lexical-idf-v1`; intermediate offline
 diagnostic revisions remain artifacts rather than supported runtime algorithms.
+
+Protocol v5 is a separate candidate-blind pilot over previously unused official
+train tasks. It freezes 24 experience and 12 held-out development tasks across
+three title-only capability families before generating any Candidate:
+
+```bash
+export TDAI_EVO_PROTOCOL_FILE=$PWD/scripts/evoagentbench/protocol-code-v5.json
+python3 -m scripts.evoagentbench.driver setup --root /path/to/code-v5-factorial
+python3 -m scripts.evoagentbench.subset_cache --root /path/to/code-v5-factorial --phase experience
+python3 -m scripts.evoagentbench.subset_cache --root /path/to/code-v5-factorial --phase development
+```
+
+After train-only Memory and Skill artifacts are frozen, run the mandatory
+retrieval preflight. Development execution is blocked unless at least one
+held-out task receives a Skill and the Candidate contains no held-out ID:
+
+```bash
+python3 -m scripts.evoagentbench.factorial_preflight \
+  --root /path/to/code-v5-factorial --candidate-revision 2
+python3 -m scripts.evoagentbench.batch development \
+  --root /path/to/code-v5-factorial --candidate-revision 2
+```
+
+The report includes all evolved-vs-Vanilla comparisons, combined-vs-single-arm
+increments, and a secondary factorial interaction estimate. Combined context
+cost is reported as a real treatment cost, not normalized away.
 
 Before spending model tokens, replay previously frozen vanilla prompts through
 both selectors. This is a retrieval diagnostic only and must not be reported as
