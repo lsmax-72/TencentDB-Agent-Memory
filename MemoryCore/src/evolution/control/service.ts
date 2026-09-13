@@ -41,7 +41,12 @@ const benchmarkComparison = z.object({
 const benchmarkIngestSchema = scopeSchema.extend({
   agent_id: id, attempt_id: id,
   // Keep research imports allow-listed so a caller cannot label arbitrary evidence as a frozen protocol.
-  protocol_id: z.enum(["tdai-evoagentbench-code-v1", "tdai-evoagentbench-code-v2-discriminative"]),
+  protocol_id: z.enum([
+    "tdai-evoagentbench-code-v1",
+    "tdai-evoagentbench-code-v2-discriminative",
+    "tdai-evoagentbench-code-v3-trace2skill",
+    "tdai-evoagentbench-code-v3-suite-generation-v2",
+  ]),
   protocol_hash: z.string().regex(/^[a-f0-9]{64}$/), source_hash: z.string().regex(/^[a-f0-9]{64}$/),
   phase: z.enum(["development", "test_checkpoint", "test"]), status: z.enum(["PASS", "FAIL", "INFRA_ERROR"]),
   comparisons: z.object({ memory: benchmarkComparison, skill: benchmarkComparison }).strict(),
@@ -316,8 +321,10 @@ export class EvolutionService {
         || task.creator_user_id !== actor.id || agent.owner_user_id !== actor.id || agent.status !== "active") {
         throw new EvolutionError(403, "TASK_OWNER_REQUIRED");
       }
-      if ((input.arm === "vanilla") !== (input.injected_assets.length === 0)
-        || (input.arm === "vanilla") !== (input.candidate_hash === null && input.candidate_revision === null)) {
+      const vanilla = input.arm === "vanilla";
+      // An evolved retrieval arm may legitimately abstain while still binding the frozen candidate.
+      if ((vanilla && (input.injected_assets.length !== 0 || input.candidate_hash !== null || input.candidate_revision !== null))
+        || (!vanilla && (input.candidate_hash === null || input.candidate_revision === null))) {
         throw new EvolutionError(400, "BENCHMARK_ASSET_PROVENANCE_INVALID");
       }
       const inputText = redactEvidence(input.task_input), outputText = redactEvidence(input.final_output);
