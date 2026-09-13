@@ -47,9 +47,17 @@ def synthesize(
         raise ValueError("TRACE_SKILL_PROTOCOL_MISMATCH")
     if not clusters:
         raise ValueError("TRACE_SKILL_NO_ELIGIBLE_CLUSTER")
-    memories, source_candidate_hash = _candidate_assets(
-        root, source_revision, "memory", protocol["protocol_hash"]
+    source_protocol_hash = protocol.get("candidate_generation", {}).get(
+        "source_protocol_hash", protocol["protocol_hash"]
     )
+    memories, source_candidate_hash = _candidate_assets(
+        root, source_revision, "memory", source_protocol_hash
+    )
+    expected_source_hash = protocol.get("candidate_generation", {}).get(
+        "source_memory_artifact_hash"
+    )
+    if expected_source_hash and source_candidate_hash != expected_source_hash:
+        raise ValueError("TRACE_SKILL_SOURCE_CANDIDATE_MISMATCH")
     by_memory = {row["source_task_id"]: row for row in memories}
     by_patch = {row["source_task_id"]: row for row in patches}
     if set(by_memory) != set(by_patch):

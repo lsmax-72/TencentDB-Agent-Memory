@@ -1,5 +1,13 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-13 Trace2Skill v3/v4：训练完成，语义聚类 Candidate 已冻结
+
+- v3 的 48 条真实 experience 全部完成：41 PASS / 7 TASK_FAIL / 0 INFRA_ERROR；失败原样保留。48 条 train-only Memory 已冻结为 r1，artifact `8d7b87efe775288d42bb0d4e4de68c3ef1bc450d4e7edeb244856d5024815803`，生成成本 61,582 tokens / 48 model calls。
+- 逐轨迹 patch 全部完成，artifact `d5be8dce710d7da0311d411a013c214499ef3ede9fc1344299e38b3f43688aab`，成本 78,938 tokens / 48 model calls。原冻结 exact-key clustering 得到 0 cluster，因此 v3 没有伪造 Candidate，也没有打开 development。
+- 只依据 train patch 新增独立 generation revision `tdai-evoagentbench-code-v3-suite-generation-v2`；v3 的 24 条未见 development、Agent、模型、budget、toolset、Gate 全部逐字保留，protocol hash `1727f27e8fd248106ba172ac3ac4ce17e0786218bed3b434fe6784a6eb6045f7`。
+- 新的确定性 mutual-best TF-IDF 聚类只接受相似度至少 0.30、互为最近邻的两条 PASS 证据；得到 1 个 cluster（动态 distinct-count 维护），没有使用 development 或 test。模块化 r2 Candidate 已冻结，artifact `bfd247aa3eaf6b100ad317d5e3e9b1978cdc5043b586296c9fe4242884ffdb4b`，1 个 Skill，生成成本 2,873 tokens / 1 model call，仍 `effect_proven=false / promotion_allowed=false`。
+- 新隔离 root `/Users/lsmax/Coder/evoagentbench-artifacts/code-v4-semantic` 已建立，development 24 题缓存冻结完成，artifact `4e4cbac1c333d1b0502a89f4d96b4fb28c5b6f9d7e4fa2a90c79acc4186f03cd`。Candidate 公开内容未命中 development ID；下一步运行 24 题 × Vanilla / Memory / Skill 共 72 个真实 arm，再按原 Pilot Gate 出具结论。
+
 ## 2026-09-12 Trace2Skill v3：协议冻结并开始真实 train 收集
 
 - 冻结 `tdai-evoagentbench-code-v3-trace2skill`，hash `bab5d58fdb5650af55bbfd9e071210d89e86bfafe6d06b584fc77d14279ec97b`。仅从官方 train 按固定种子/难度配额选择 48 条 experience、24 条 development；与 v1/v2 已使用的 60 条 train 全部不重叠。协议不包含 official test ID，pilot PASS 前无法误开 test。

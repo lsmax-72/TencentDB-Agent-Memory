@@ -1,0 +1,12 @@
+{
+  "schema": "tdai-evoagentbench-code-v4-source-v1",
+  "source_protocol_hash": "bab5d58fdb5650af55bbfd9e071210d89e86bfafe6d06b584fc77d14279ec97b",
+  "source_memory_revision": 1,
+  "source_memory_artifact_hash": "8d7b87efe775288d42bb0d4e4de68c3ef1bc450d4e7edeb244856d5024815803",
+  "source_patch_artifact_hash": "d5be8dce710d7da0311d411a013c214499ef3ede9fc1344299e38b3f43688aab",
+  "source_task_count": 48,
+  "source_pass_count": 41,
+  "source_fail_count": 7,
+  "source_infra_error_count": 0,
+  "source_exact_cluster_count": 0
+}

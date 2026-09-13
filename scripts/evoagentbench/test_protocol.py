@@ -14,6 +14,7 @@ from scripts.evoagentbench.official_runner import raw_final_assistant_response
 from scripts.evoagentbench.protocol import build_protocol, sha256_json
 from scripts.evoagentbench.protocol_v2 import build_protocol as build_protocol_v2
 from scripts.evoagentbench.protocol_v3 import build_protocol as build_protocol_v3
+from scripts.evoagentbench.protocol_v4 import build_protocol as build_protocol_v4
 from scripts.evoagentbench.retrieval import (
     APPLICABILITY_ALGORITHM, injection_text, select_applicable_skills,
     select_assets,
@@ -93,6 +94,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(protocol["candidate_generation"]["development_or_test_visible"])
         self.assertTrue(protocol["governance"]["official_test_locked_until_pilot_pass"])
 
+    def test_v4_changes_only_train_generation_and_keeps_v3_suite_unopened(self):
+        v3 = json.loads(Path("scripts/evoagentbench/protocol-code-v3.json").read_text())
+        source = json.loads(Path("scripts/evoagentbench/protocol-code-v4-source.json").read_text())
+        protocol = build_protocol_v4(v3, source)
+        self.assertEqual(protocol["selection"], v3["selection"])
+        self.assertEqual(protocol["agent"], v3["agent"])
+        self.assertEqual(protocol["pilot_gate"], v3["pilot_gate"])
+        self.assertEqual(protocol["arms"], v3["arms"])
+        self.assertEqual(protocol["candidate_generation"]["source_exact_cluster_count"], 0)
+        self.assertFalse(protocol["candidate_generation"]["development_or_test_visible"])
+
     def test_candidate_carry_preserves_frozen_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -110,6 +122,30 @@ class ProtocolTests(unittest.TestCase):
             receipt = carry(root / "source", target, 3, protocol)
             self.assertEqual(receipt["candidate_artifact_hash"], manifest["artifact_hash"])
             self.assertEqual((target / "frozen/refinement-r3/skills.json").read_bytes(), (source / "skills.json").read_bytes())
+
+    def test_train_memory_carry_does_not_require_skill_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source/frozen/refinement-r1"
+            target = root / "target"
+            source.mkdir(parents=True)
+            memories, skills = [], []
+            manifest = {"protocol_hash": "source-protocol", "revision": 1}
+            manifest["artifact_hash"] = sha256_json({"manifest": manifest, "memories": memories, "skills": skills})
+            for name, value in (("manifest.json", manifest), ("memories.json", memories), ("skills.json", skills)):
+                (source / name).write_text(json.dumps(value))
+            protocol = root / "protocol.json"
+            protocol.write_text(json.dumps({
+                "protocol_hash": "target-protocol",
+                "candidate_generation": {
+                    "memory_revision": 1,
+                    "source_memory_artifact_hash": manifest["artifact_hash"],
+                    "source_protocol_hash": "source-protocol",
+                },
+            }))
+            receipt = carry(root / "source", target, 1, protocol)
+            self.assertEqual(receipt["candidate_artifact_hash"], manifest["artifact_hash"])
+            self.assertFalse((target / "frozen/refinement-r1/review.json").exists())
 
     def test_hub_export_keeps_one_memory_snapshot_and_both_skill_revisions(self):
         with tempfile.TemporaryDirectory() as tmp:

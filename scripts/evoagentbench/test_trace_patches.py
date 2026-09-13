@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 
 from scripts.evoagentbench.trace_patches import (
-    cluster_strategy_patches, freeze_patch_artifact, load_patch_artifact,
+    cluster_strategy_patches, cluster_strategy_patches_semantic_v2,
+    freeze_patch_artifact, freeze_semantic_recluster, load_patch_artifact,
     patch_response_format, validate_patch,
 )
 from scripts.evoagentbench.trace_patch_runner import _reused_attempt
@@ -68,6 +69,66 @@ class TracePatchTest(unittest.TestCase):
         unrelated["task_family"] = "palindrome prefix construction"
         unrelated["patch_hash"] = "changed"
         self.assertEqual(cluster_strategy_patches([first, unrelated]), [])
+
+    def test_semantic_cluster_pairs_only_mutual_nearest_supported_strategies(self):
+        first_value = self.patch()
+        first_value.update({
+            "mechanism_key": "incremental_frequency_map_maintenance",
+            "task_family": "dynamic distinct count",
+            "trigger": "Track the number of distinct values after many point updates.",
+            "action": "Maintain a frequency map and remove keys when counts reach zero.",
+        })
+        second_value = self.patch()
+        second_value.update({
+            "mechanism_key": "incremental_distinct_counter",
+            "task_family": "dynamic multiset queries",
+            "trigger": "Track distinct values during many insertions and deletions.",
+            "action": "Maintain a frequency map and change the distinct counter at zero crossings.",
+        })
+        unrelated_value = self.patch()
+        unrelated_value.update({
+            "mechanism_key": "binary_tree_path_sum",
+            "task_family": "tree path aggregation",
+            "trigger": "Aggregate weights along root to leaf paths.",
+            "action": "Traverse the tree and accumulate each path sum.",
+        })
+        source_ids = {"train-a", "train-b", "train-c"}
+        patches = [
+            validate_patch(first_value, self.source("train-a"), source_ids),
+            validate_patch(second_value, self.source("train-b"), source_ids),
+            validate_patch(unrelated_value, self.source("train-c"), source_ids),
+        ]
+        clusters = cluster_strategy_patches_semantic_v2(patches, minimum_similarity=0.20)
+        self.assertEqual(len(clusters), 1)
+        self.assertEqual(clusters[0]["support_task_ids"], ["train-a", "train-b"])
+        self.assertEqual(clusters[0]["cluster_algorithm"], "mutual-best-tfidf-v1")
+
+    def test_semantic_recluster_is_versioned_and_uses_no_new_model_calls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memories = [self.source("train-a"), self.source("train-b")]
+            responses = [
+                {"source_task_id": source["source_task_id"], "patch": self.patch()}
+                for source in memories
+            ]
+            memory_file = root / "memories.json"
+            response_file = root / "responses.json"
+            source_dir = root / "source"
+            target_dir = root / "target"
+            memory_file.write_text(json.dumps(memories))
+            response_file.write_text(json.dumps(responses))
+            source_manifest = freeze_patch_artifact(
+                memory_file, response_file, source_dir,
+                protocol_hash="old-protocol", model="model",
+                usage={"model_calls": 2},
+            )
+            manifest = freeze_semantic_recluster(
+                source_dir, memory_file, target_dir,
+                protocol_hash="new-protocol", minimum_similarity=0,
+            )
+            self.assertEqual(manifest["usage"]["model_calls"], 0)
+            self.assertEqual(manifest["source_patch_artifact_hash"], source_manifest["artifact_hash"])
+            self.assertEqual(load_patch_artifact(target_dir)[0]["artifact_hash"], manifest["artifact_hash"])
 
     def test_freeze_is_immutable_and_records_no_candidate_claim(self):
         with tempfile.TemporaryDirectory() as tmp:

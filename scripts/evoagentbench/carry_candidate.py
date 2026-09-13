@@ -28,6 +28,13 @@ def carry(source_root: Path, target_root: Path, revision: int, protocol_file: Pa
         raise FileExistsError("TARGET_CANDIDATE_ALREADY_EXISTS")
     protocol = json.loads(protocol_file.read_text())
     frozen = protocol.get("candidate") or {}
+    generation = protocol.get("candidate_generation") or {}
+    if not frozen and generation.get("memory_revision") == revision:
+        frozen = {
+            "revision": revision,
+            "artifact_hash": generation.get("source_memory_artifact_hash"),
+            "source_protocol_hash": generation.get("source_protocol_hash"),
+        }
     if frozen.get("revision") != revision:
         raise ValueError("CANDIDATE_REVISION_NOT_FROZEN_FOR_PROTOCOL")
     manifest = json.loads((source / "manifest.json").read_text())
@@ -41,7 +48,8 @@ def carry(source_root: Path, target_root: Path, revision: int, protocol_file: Pa
         raise ValueError("SOURCE_CANDIDATE_NOT_FROZEN_FOR_PROTOCOL")
 
     target.mkdir(parents=True, mode=0o700)
-    files = ("manifest.json", "memories.json", "skills.json", "review.json")
+    required_files = ("manifest.json", "memories.json", "skills.json")
+    files = required_files + (("review.json",) if (source / "review.json").is_file() else ())
     for name in files:
         destination = target / name
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
