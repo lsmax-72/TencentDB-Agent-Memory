@@ -219,8 +219,8 @@ class TracePatchTest(unittest.TestCase):
                 "shared_mechanism_key": "bounded_pair_enumeration",
                 "rationale": "Both patches enumerate the complete bounded pair space once.",
                 "evidence": [
-                    {"task_id": "train-a", "quote": first["trigger"]},
-                    {"task_id": "train-b", "quote": second["trigger"]},
+                    {"task_id": "train-a", "evidence_field": "trigger"},
+                    {"task_id": "train-b", "evidence_field": "trigger"},
                 ],
             }]
             review_file = root / "reviews.json"

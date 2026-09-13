@@ -15,7 +15,7 @@ from .driver import DEFAULT_ROOT, PROTOCOL_FILE
 
 SOURCE_ROOT = Path("/Users/lsmax/Coder/evoagentbench-artifacts/code-v5-factorial")
 SOURCE_PATCHES = SOURCE_ROOT / "frozen/trace-patches-factorial-semantic-r1"
-CLUSTER_ATTEMPT = "factorial-cluster-review-r1-a1"
+CLUSTER_ATTEMPT = "factorial-cluster-review-r1-a2-implementation-fix"
 SKILL_ATTEMPT = "factorial-skills-r2-a1"
 REPORT_ATTEMPT = "factorial-generation-v2-r2-main"
 

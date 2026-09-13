@@ -92,15 +92,19 @@ def generate(
                 ],
             }
             text, usage, response_hash = _chat(body, headers)
-            parsed = validate_review(_response_json(text), proposal, by_patch)
-            responses.append(parsed)
+            write_new(attempt / "raw" / f"{position:02d}.json", {
+                "proposal_id": proposal["proposal_id"], "content": text,
+                "response_hash": response_hash,
+            }, private=True)
             event = {
                 "proposal_id": proposal["proposal_id"], "usage": usage,
                 "response_hash": response_hash,
             }
             events.append(event)
-            write_new(attempt / "responses" / f"{position:02d}.json", parsed, private=True)
             write_new(attempt / "events" / f"{position:02d}.json", event, private=True)
+            parsed = validate_review(_response_json(text), proposal, by_patch)
+            responses.append(parsed)
+            write_new(attempt / "responses" / f"{position:02d}.json", parsed, private=True)
             print(json.dumps({
                 "position": position, "total": len(proposals),
                 "proposal_id": proposal["proposal_id"],
