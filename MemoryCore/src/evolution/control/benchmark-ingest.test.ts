@@ -63,6 +63,15 @@ describe("EvoAgentBench evidence ingestion", () => {
     expect(await service.invoke("benchmark/attempt/ingest", v5, "owner-key")).toMatchObject({
       payload: { protocol_id: "tdai-evoagentbench-code-v5-factorial-heldout", factorial: { comparable_task_count: 1 } },
     });
+    for (const protocol_id of [
+      "tdai-evoagentbench-code-v5-factorial-generation-v2",
+      "tdai-evoagentbench-code-v5-factorial-generation-v3",
+      "tdai-evoagentbench-code-v5-factorial-frozen-composite-v1",
+    ] as const) {
+      expect(await service.invoke("benchmark/attempt/ingest", {
+        ...v5, attempt_id: protocol_id, protocol_id,
+      }, "owner-key")).toMatchObject({ payload: { protocol_id, promotion_allowed: false } });
+    }
     await expect(service.invoke("benchmark/attempt/ingest", { ...v2, attempt_id: "unknown", protocol_id: "unknown-protocol" }, "owner-key"))
       .rejects.toThrow();
   });
