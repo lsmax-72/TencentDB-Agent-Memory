@@ -63,6 +63,15 @@ Each official task gets a fresh Hub Task, nanobot workspace, session and loopbac
 
 Development Gate reports include only outer trial 1. Diagnostic stability trials stay in separate immutable probe artifacts and never replace or silently join the main Attempt. Legacy probes with incorrect inner-run trial labels may be summarized in a new implementation-fix artifact by recovering the outer trial from the immutable run ID; source evidence is not rewritten.
 
+Before preparing the official Information Retrieval domain, run its read-only readiness gate. It does not download data, install dependencies, choose a judge, or call a model:
+
+```bash
+python3 -m scripts.evoagentbench.ir_preflight \
+  --judge-mode unresolved --output /path/to/new/ir-preflight.json
+```
+
+`READY` requires the pinned repository revision, official 154/65 split, decrypted dataset, complete selected index, Java, required Python modules, disk headroom, and an explicitly frozen judge mode. A blocked report is a planning artifact, not permission to start a benchmark.
+
 After all three arms of a frozen phase exist, build and ingest one immutable comparison:
 
 ```bash

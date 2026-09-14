@@ -8,6 +8,7 @@
 - bridge 已改为现有 `/dsh/default/...` auxiliary 隔离路径；未来 evidence 强制记录 `evaluation_auxiliary`，缺失按 INFRA_ERROR。development 主报告明确排除 trial 2/3。
 - Python 55 tests PASS；MemoryProxy dsh 分类 targeted test PASS；`git diff --check` PASS。MemoryProxy 全仓 typecheck 因当前 node_modules/仓库既有大量缺失依赖和既有类型错误失败，本轮新增 targeted test 不受影响。
 - 官方新域审计结论：Information Retrieval 最值得后续尝试，但本机目前缺 corpus/index、Java、FAISS/Pyserini，官方默认又使用 LLM Judge；Knowledge Work 更贵、SWE-bench 不适合当前 arm64 Mac。未下载、未安装、未调用 vLLM。
+- 新增只读 IR preflight；校正后的 `ir-preflight-audit-2.json` 为 `BLOCKED`，hash `a60920cdd9dcd6724404b3505b05a22a51bf9d29bb304023636bf05c9b82c44c`。首个 symlink 误判的 `audit-1` 保留为实现失败记录。
 - 下一步只允许低成本准备：冻结 IR 离线 preflight 与评分方式，先 1 个 Vanilla smoke，再最多 4 题/16 arm 校准；任何隔离失败、0 Candidate 暴露或 Vanilla 饱和都立即停止，不再直接大批重跑。
 - 完整结论见 `docs/evoagentbench-factorial-v8-report.md` 和 `docs/evoagentbench-next-domain-audit-2026-09-14.md`。
 

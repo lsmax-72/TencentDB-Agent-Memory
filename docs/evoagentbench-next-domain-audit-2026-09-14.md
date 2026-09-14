@@ -30,3 +30,5 @@
 5. 只有 Candidate 实际检索覆盖大于 0、Vanilla 未全通过、无正式资产污染、无 INFRA_ERROR，才允许扩大；否则立即停止。
 
 本审计没有下载数据、安装依赖或调用 vLLM，也没有创建新 Candidate 或修改任何历史 Gate。
+
+可重复 preflight 已输出 `/Users/lsmax/Coder/evoagentbench-artifacts/ir-preflight-audit-2.json`，状态为 `BLOCKED`，artifact hash `a60920cdd9dcd6724404b3505b05a22a51bf9d29bb304023636bf05c9b82c44c`。它确认 pinned revision、154/65 split 与磁盘余量合格，同时准确列出数据、索引、Java、Python 模块和评分模式五类未完成项。`audit-1` 因错误解析虚拟环境 symlink 而误报依赖，作为实现失败记录保留，未覆盖。
