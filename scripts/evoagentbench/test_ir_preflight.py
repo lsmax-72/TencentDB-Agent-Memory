@@ -5,7 +5,7 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
-from scripts.evoagentbench.ir_preflight import python_modules, split_counts
+from scripts.evoagentbench.ir_preflight import protocol_state, python_modules, split_counts
 
 
 class InformationRetrievalPreflightTest(unittest.TestCase):
@@ -31,6 +31,22 @@ class InformationRetrievalPreflightTest(unittest.TestCase):
             run.return_value = CompletedProcess([], 0, json.dumps(payload), "")
             self.assertEqual(python_modules(requested), payload)
         self.assertEqual(run.call_args.args[0][0], str(requested))
+
+    def test_protocol_requires_stable_semantic_judge_without_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "protocol.json"
+            protocol = {
+                "benchmark": {"official_split_hash": "split"},
+                "judge": {
+                    "primary": "llm_judge", "temperature": 0,
+                    "fallback": "disabled", "shadow_metric": "normalized_exact_match",
+                },
+            }
+            payload = json.dumps(protocol, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+            protocol["protocol_hash"] = __import__("hashlib").sha256(payload).hexdigest()
+            path.write_text(json.dumps(protocol))
+            _, checks = protocol_state(path, "split")
+        self.assertTrue(all(checks.values()))
 
 
 if __name__ == "__main__":

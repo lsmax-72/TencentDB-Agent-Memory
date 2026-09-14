@@ -19,6 +19,7 @@ from typing import Any
 PINNED_EVO_REVISION = "948a17288782d5120778da16b4cf1cad9305d8b4"
 REQUIRED_MODULES = ("datasets", "faiss", "fastmcp", "huggingface_hub", "tevatron", "torch", "transformers")
 OPTIONAL_BM25_MODULES = ("pyserini",)
+DEFAULT_PROTOCOL = Path(__file__).resolve().parent / "protocol-ir-v1.json"
 
 
 def sha256_file(path: Path) -> str:
@@ -52,7 +53,29 @@ def python_modules(python: Path) -> dict[str, bool]:
         return {name: False for name in REQUIRED_MODULES + OPTIONAL_BM25_MODULES}
 
 
-def build_report(evo_repo: Path, python: Path, judge_mode: str, min_free_gb: float) -> dict[str, Any]:
+def protocol_state(path: Path, split_hash: str | None) -> tuple[dict[str, Any], dict[str, bool]]:
+    if not path.is_file():
+        return {}, {"protocol_present": False, "protocol_hash_valid": False, "protocol_split_binding": False, "judge_mode_frozen": False}
+    protocol = json.loads(path.read_text())
+    expected_hash = protocol.get("protocol_hash")
+    unhashed = {key: value for key, value in protocol.items() if key != "protocol_hash"}
+    actual_hash = hashlib.sha256(json.dumps(unhashed, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    judge = protocol.get("judge", {})
+    checks = {
+        "protocol_present": True,
+        "protocol_hash_valid": expected_hash == actual_hash,
+        "protocol_split_binding": protocol.get("benchmark", {}).get("official_split_hash") == split_hash,
+        "judge_mode_frozen": (
+            judge.get("primary") == "llm_judge"
+            and judge.get("temperature") == 0
+            and judge.get("fallback") == "disabled"
+            and judge.get("shadow_metric") == "normalized_exact_match"
+        ),
+    }
+    return protocol, checks
+
+
+def build_report(evo_repo: Path, python: Path, protocol_path: Path, min_free_gb: float) -> dict[str, Any]:
     benchmark = evo_repo / "benchmark"
     split = benchmark / "data/splits/information_retrieval.json"
     dataset = benchmark / "data/BrowseComp-Plus/browsecomp_plus_decrypted.jsonl"
@@ -60,6 +83,8 @@ def build_report(evo_repo: Path, python: Path, judge_mode: str, min_free_gb: flo
     index_files = sorted(index_dir.glob("corpus.*.pkl"))
     modules = python_modules(python)
     train_count, test_count = split_counts(split)
+    split_hash = sha256_file(split) if split.is_file() else None
+    protocol, protocol_checks = protocol_state(protocol_path, split_hash)
     try:
         revision = subprocess.run(
             ["git", "-C", str(evo_repo), "rev-parse", "HEAD"],
@@ -84,7 +109,7 @@ def build_report(evo_repo: Path, python: Path, judge_mode: str, min_free_gb: flo
         "python_environment_present": python.is_file(),
         "faiss_python_modules_present": all(modules[name] for name in REQUIRED_MODULES),
         "disk_headroom": free_bytes >= int(min_free_gb * 1024**3),
-        "judge_mode_frozen": judge_mode in {"exact_match", "llm_judge"},
+        **protocol_checks,
     }
     reasons = [name.upper() for name, passed in checks.items() if not passed]
     report = {
@@ -100,9 +125,14 @@ def build_report(evo_repo: Path, python: Path, judge_mode: str, min_free_gb: flo
         "python_modules": modules,
         "java": java,
         "optional_bm25": {"java_available": java_works, "pyserini_available": modules["pyserini"]},
-        "judge_mode": judge_mode,
+        "protocol": {
+            "path": str(protocol_path),
+            "protocol_id": protocol.get("protocol_id"),
+            "protocol_hash": protocol.get("protocol_hash"),
+            "judge": protocol.get("judge"),
+        },
         "split": {
-            "path": str(split), "sha256": sha256_file(split) if split.is_file() else None,
+            "path": str(split), "sha256": split_hash,
             "train": train_count, "test": test_count,
         },
         "dataset": {"path": str(dataset), "present": dataset.is_file()},
@@ -120,14 +150,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--evo-repo", type=Path, default=Path("/Users/lsmax/Coder/EvoAgentBench"))
     parser.add_argument("--python", type=Path)
-    parser.add_argument("--judge-mode", choices=("unresolved", "exact_match", "llm_judge"), default="unresolved")
+    parser.add_argument("--protocol", type=Path, default=DEFAULT_PROTOCOL)
     parser.add_argument("--min-free-gb", type=float, default=4.0)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    python = args.python or args.evo_repo / ".venv-tdai/bin/python"
+    python = args.python or args.evo_repo / ".venv-ir/bin/python"
     # Keep the venv entrypoint path intact. Resolving its interpreter symlink
     # would silently drop the virtual environment's site-packages.
-    report = build_report(args.evo_repo.resolve(), python.expanduser().absolute(), args.judge_mode, args.min_free_gb)
+    report = build_report(
+        args.evo_repo.resolve(), python.expanduser().absolute(),
+        args.protocol.expanduser().absolute(), args.min_free_gb,
+    )
     rendered = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

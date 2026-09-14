@@ -67,7 +67,8 @@ Before preparing the official Information Retrieval domain, run its read-only re
 
 ```bash
 python3 -m scripts.evoagentbench.ir_preflight \
-  --judge-mode unresolved --output /path/to/new/ir-preflight.json
+  --protocol scripts/evoagentbench/protocol-ir-v1.json \
+  --output /path/to/new/ir-preflight.json
 ```
 
 `READY` requires the pinned repository revision, official 154/65 split, decrypted dataset, complete selected index, Java, required Python modules, disk headroom, and an explicitly frozen judge mode. A blocked report is a planning artifact, not permission to start a benchmark.
