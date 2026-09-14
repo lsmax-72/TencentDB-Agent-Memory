@@ -1,5 +1,16 @@
 # Autonomous Evolution Checkpoint
 
+## 2026-09-14 EvoAgentBench v8 收尾：发现对照污染，停止盲目重跑
+
+- 历史 `factorial-frozen-composite-r2-main` 保持 `FAIL (SKILL_TRANSFER_GAIN_NOT_POSITIVE)`；12 题中 Vanilla/Skill 12 PASS、Memory/组合各 10 PASS，Skill 只有 1/12 实际命中，不能证明新增能力。
+- Stability Probe 的 24 个错误 outer-trial 标签已在新派生 artifact 中校正，hash `21973a6916ba2d7c3880bc872c108c3593593c2dd3d1afe4afed171a3b4ba8ee`；原 evidence/Probe 均未覆盖，没有模型调用。
+- 新审计确认旧 bridge 走 `/proxy/default/...` 时会进入正式资产主路径；48 个主 arm 中至少 30 个 session 出现正式 Skill `competitive-programming-verification`，Vanilla 也有 7/12，因此旧 Attempt 归因无效但仍作为历史失败保留。
+- bridge 已改为现有 `/dsh/default/...` auxiliary 隔离路径；未来 evidence 强制记录 `evaluation_auxiliary`，缺失按 INFRA_ERROR。development 主报告明确排除 trial 2/3。
+- Python 55 tests PASS；MemoryProxy dsh 分类 targeted test PASS；`git diff --check` PASS。MemoryProxy 全仓 typecheck 因当前 node_modules/仓库既有大量缺失依赖和既有类型错误失败，本轮新增 targeted test 不受影响。
+- 官方新域审计结论：Information Retrieval 最值得后续尝试，但本机目前缺 corpus/index、Java、FAISS/Pyserini，官方默认又使用 LLM Judge；Knowledge Work 更贵、SWE-bench 不适合当前 arm64 Mac。未下载、未安装、未调用 vLLM。
+- 下一步只允许低成本准备：冻结 IR 离线 preflight 与评分方式，先 1 个 Vanilla smoke，再最多 4 题/16 arm 校准；任何隔离失败、0 Candidate 暴露或 Vanilla 饱和都立即停止，不再直接大批重跑。
+- 完整结论见 `docs/evoagentbench-factorial-v8-report.md` 和 `docs/evoagentbench-next-domain-audit-2026-09-14.md`。
+
 ## 2026-09-13 EvoAgentBench v5：四组候选盲实验已冻结并开始
 
 - 新独立协议 `tdai-evoagentbench-code-v5-factorial-heldout` 已冻结，hash `194b6bbff99a403fb9c03a38cfd18122875a2171b593b1ef8d6c8d45c6b5f525`；commit `a7d29d0`。历史三组 Attempt、旧 Suite 和结论均未修改。

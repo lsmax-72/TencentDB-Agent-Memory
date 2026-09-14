@@ -59,7 +59,9 @@ selection, model, budget, development gate, official test gate, or promotion
 rules. The repair receipt can authorize development evaluation, never test
 access or production adoption.
 
-Each official task gets a fresh Hub Task, nanobot workspace, session and loopback identity bridge. The bridge permits only OpenAI-compatible chat completions to the existing MemoryProxy and stores usage/model hashes without retaining request or response bodies.
+Each official task gets a fresh Hub Task, nanobot workspace, session and loopback identity bridge. The bridge permits only OpenAI-compatible chat completions to the existing MemoryProxy and stores usage/model hashes without retaining request or response bodies. It must use the Proxy's `/dsh/<spaceId>/...` route with the existing auxiliary marker so formal Memory/Skill hooks cannot contaminate any arm. Future trial evidence is fail-closed unless the bridge records `evaluation_auxiliary`; Candidate assets remain explicit adapter injections.
+
+Development Gate reports include only outer trial 1. Diagnostic stability trials stay in separate immutable probe artifacts and never replace or silently join the main Attempt. Legacy probes with incorrect inner-run trial labels may be summarized in a new implementation-fix artifact by recovering the outer trial from the immutable run ID; source evidence is not rewritten.
 
 After all three arms of a frozen phase exist, build and ingest one immutable comparison:
 
