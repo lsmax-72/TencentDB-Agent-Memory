@@ -1,6 +1,10 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
-from scripts.evoagentbench.stability_probe import run_id, summarize
+from scripts.evoagentbench.stability_probe import collect, run_id, summarize
 
 
 class StabilityProbeTest(unittest.TestCase):
@@ -22,6 +26,37 @@ class StabilityProbeTest(unittest.TestCase):
         self.assertEqual(result["mean_reward"], 0.5)
         self.assertEqual(result["mean_total_tokens"], 15)
         self.assertEqual(len(result["injected_asset_sets"]), 1)
+
+    def test_collect_recovers_legacy_outer_trial_labels_without_rewriting_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "runs").mkdir()
+            for trial in (1, 2):
+                identifier = run_id("3000", "memory", trial, 2)
+                target = root / "runs" / identifier
+                target.mkdir()
+                row = {
+                    "task_id": "3000", "arm": "memory", "trial": 1,
+                    "status": "TASK_PASS", "reward": 1, "run_id": identifier,
+                    "usage": {"total_tokens": 10}, "injected_assets": [],
+                    "candidate_artifact_hash": "c" * 64, "evidence_hash": str(trial) * 64,
+                }
+                (target / "evidence.json").write_text(json.dumps(row))
+            protocol = {
+                "protocol_id": "test", "protocol_hash": "p" * 64,
+                "selection": {"development": ["3000"]}, "arms": ["memory"],
+            }
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as handle:
+                json.dump(protocol, handle); handle.flush()
+                with patch("scripts.evoagentbench.stability_probe.PROTOCOL_FILE", Path(handle.name)):
+                    output = collect(root, "probe", ["3000"], ["memory"], [1, 2], 2)
+            report = json.loads(output.read_text())
+            self.assertEqual(report["results"]["3000"]["memory"]["trials"], [1, 2])
+            self.assertEqual(report["trial_label_corrections"], [{
+                "run_id": "development-3000-memory-r2-trial-2",
+                "source_reported_trial": 1,
+                "recovered_trial": 2,
+            }])
 
 
 if __name__ == "__main__":

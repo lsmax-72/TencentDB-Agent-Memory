@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,12 @@ def _load_runs(root: Path, phase: str, candidate_revision: int | None = None) ->
     for path in sorted((root / "runs").glob(f"{phase}-*/evidence.json")):
         row = json.loads(path.read_text())
         if row.get("phase") != phase:
+            continue
+        # Development is a one-trial Gate. Diagnostic stability runs are kept
+        # as evidence but must never be folded into the main Attempt.
+        run_id = row.get("run_id", "")
+        trial_match = re.search(r"-trial-(\d+)(?:-|$)", run_id)
+        if phase == "development" and trial_match and trial_match.group(1) != "1":
             continue
         if row.get("implementation_fix_retry"):
             continue

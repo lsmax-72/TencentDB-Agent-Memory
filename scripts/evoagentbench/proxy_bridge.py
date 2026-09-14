@@ -32,6 +32,29 @@ class BridgeState:
             return self.sequence
 
 
+def upstream_headers(config: dict) -> dict[str, str]:
+    """Keep benchmark calls observable while excluding all formal asset hooks."""
+    return {
+        "content-type": "application/json",
+        "authorization": f"Bearer {config['user_key']}",
+        "x-tdai-user-key": config["user_key"],
+        "x-team-id": config["team_id"],
+        "x-agent-id": config["agent_id"],
+        "x-task-id": config["task_id"],
+        "x-session-id": config["session_id"],
+        # The bridge uses Proxy's dsh auxiliary route so formal Skill/Memory
+        # hooks stay disabled. Candidate assets are injected by the adapter.
+        "x-deepseek-harness-compact": "1",
+    }
+
+
+def validate_config(config: dict) -> None:
+    required = {"client_token", "user_key", "team_id", "agent_id", "task_id", "session_id", "model", "memory_proxy_url"}
+    proxy_url = config.get("memory_proxy_url", "")
+    if set(config) < required or not proxy_url.startswith("http://127.0.0.1:") or "/dsh/" not in proxy_url:
+        raise ValueError("PRIVATE_BRIDGE_CONFIG_INVALID")
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "tdai-evoagentbench-bridge/1"
 
@@ -74,17 +97,10 @@ class Handler(BaseHTTPRequestHandler):
             "call_id": call_id,
             "model": body.get("model"),
             "temperature": body.get("temperature"),
+            "isolation_mode": "evaluation_auxiliary",
             "body_sha256": hashlib.sha256(raw).hexdigest(),
         })
-        headers = {
-            "content-type": "application/json",
-            "authorization": f"Bearer {state.config['user_key']}",
-            "x-tdai-user-key": state.config["user_key"],
-            "x-team-id": state.config["team_id"],
-            "x-agent-id": state.config["agent_id"],
-            "x-task-id": state.config["task_id"],
-            "x-session-id": state.config["session_id"],
-        }
+        headers = upstream_headers(state.config)
         request = urllib.request.Request(state.config["memory_proxy_url"], raw, headers, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=state.config.get("timeout_seconds", 1860)) as response:
@@ -123,9 +139,7 @@ def main() -> None:
     parser.add_argument("--port-file", type=Path, required=True)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
-    required = {"client_token", "user_key", "team_id", "agent_id", "task_id", "session_id", "model", "memory_proxy_url"}
-    if set(config) < required or not config["memory_proxy_url"].startswith("http://127.0.0.1:"):
-        raise ValueError("PRIVATE_BRIDGE_CONFIG_INVALID")
+    validate_config(config)
     args.events.parent.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.state = BridgeState(config, args.events)  # type: ignore[attr-defined]

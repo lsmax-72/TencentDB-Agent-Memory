@@ -31,7 +31,9 @@ NANOBOT = EVO_REPO / ".venv-tdai/bin/nanobot"
 NANOBOT_COMPAT = REPO / "scripts/evoagentbench/nanobot_cli_compat.py"
 DEFAULT_ROOT = Path("/Users/lsmax/Coder/evoagentbench-artifacts/code-v1")
 CORE_URL = "http://127.0.0.1:8420"
-PROXY_URL = "http://127.0.0.1:8096/proxy/default/v1/chat/completions"
+# The dsh-prefixed route lets the bridge opt into Proxy's existing auxiliary
+# classification, which preserves routing/usage while skipping formal assets.
+PROXY_URL = "http://127.0.0.1:8096/dsh/default/v1/chat/completions"
 UPSTREAM_MODELS = "http://10.195.214.152:8100/v1/models"
 TEAM_NAME = "EvoAgentBench / Algorithmic Reasoning"
 AGENT_NAME = "nanobot-evoagentbench-code"
@@ -425,7 +427,11 @@ live: false
             trial_dir, arm=arm, phase=phase, protocol_hash=protocol["protocol_hash"],
             expected_model=protocol["agent"]["model"], proxy_events_path=events_file,
             injected_assets=receipt["assets"] if receipt else [], injection_receipt=receipt,
+            expected_proxy_isolation_mode="evaluation_auxiliary",
         )
+        # The official runner always labels its single inner trial as 1. Keep
+        # the outer immutable trial identity used by stability experiments.
+        evidence["trial"] = trial
         evidence["candidate_revision"] = candidate_revision
         evidence["source_artifacts"]["injection_receipt_sha256"] = sha256_file(receipt_path) if receipt else None
         evidence["evidence_hash"] = canonical_hash({key: value for key, value in evidence.items() if key != "evidence_hash"})

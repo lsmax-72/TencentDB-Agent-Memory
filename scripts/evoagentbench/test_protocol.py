@@ -25,7 +25,7 @@ from scripts.evoagentbench.retrieval import (
     APPLICABILITY_ALGORITHM, injection_text, select_applicable_skills,
     select_assets,
 )
-from scripts.evoagentbench.report import _replace_runs, build as build_report
+from scripts.evoagentbench.report import _load_runs, _replace_runs, build as build_report
 from scripts.evoagentbench.refine import _response_json, _skill_response_format, _validate_memory, _validate_skills
 from scripts.evoagentbench.hub_export import build_bundle
 from scripts.evoagentbench.repair_candidate import repair
@@ -354,10 +354,10 @@ class AdapterTests(unittest.TestCase):
         try:
             events = path / "proxy.jsonl"
             events.write_text("\n".join(json.dumps(event) for event in [
-                {"kind": "request", "call_id": 1},
+                {"kind": "request", "call_id": 1, "isolation_mode": "evaluation_auxiliary"},
                 {"kind": "response", "call_id": 1, "model": "qwen3.8-27b", "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}},
             ]) + "\n")
-            row = adapt_trial(path, arm="vanilla", phase="smoke", protocol_hash="h", expected_model="qwen3.8-27b", proxy_events_path=events)
+            row = adapt_trial(path, arm="vanilla", phase="smoke", protocol_hash="h", expected_model="qwen3.8-27b", proxy_events_path=events, expected_proxy_isolation_mode="evaluation_auxiliary")
         finally:
             root.cleanup()
         self.assertEqual(row["status"], "TASK_PASS")
@@ -366,6 +366,26 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(row["task_input"], "Solve the hidden-test task.")
         self.assertTrue(row["tool_events"][0]["success"])
         self.assertEqual(row["host_completion"], "host_task_complete")
+        self.assertEqual(row["proxy_isolation_mode"], "evaluation_auxiliary")
+
+    def test_missing_isolation_evidence_is_infrastructure_error_when_required(self):
+        result = {"task_name": "tr-1", "agent_result": {"completion_status": "completed"}, "verifier_result": {"reward": 1.0}}
+        root, path = self.trial(result, [])
+        try:
+            events = path / "proxy.jsonl"
+            events.write_text("\n".join(json.dumps(event) for event in [
+                {"kind": "request", "call_id": 1},
+                {"kind": "response", "call_id": 1, "model": "qwen3.8-27b", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            ]) + "\n")
+            row = adapt_trial(
+                path, arm="vanilla", phase="smoke", protocol_hash="h",
+                expected_model="qwen3.8-27b", proxy_events_path=events,
+                expected_proxy_isolation_mode="evaluation_auxiliary",
+            )
+        finally:
+            root.cleanup()
+        self.assertEqual(row["status"], "INFRA_ERROR")
+        self.assertEqual(row["failure_reason"], "EVALUATION_ISOLATION_EVIDENCE_MISSING")
 
     def test_missing_usage_is_infrastructure_error(self):
         result = {"task_name": "tr-1", "agent_result": {"completion_status": "completed", "response": "no usage"}, "verifier_result": {"reward": 0.0}}
@@ -820,6 +840,24 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(attempt["schema"], "tdai-evoagentbench-comparison-v2")
         self.assertIn("memory_skill", attempt["comparisons"])
         self.assertEqual(attempt["factorial"]["combined_minus_skill"], 0)
+
+    def test_main_development_report_excludes_explicit_stability_trials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for trial in (1, 2):
+                directory = root / "runs" / f"development-a-vanilla-trial-{trial}"
+                directory.mkdir(parents=True)
+                row = self.row("a", "vanilla", 1)
+                row.update({
+                    "phase": "development",
+                    "run_id": f"development-a-vanilla-trial-{trial}",
+                    "evidence_hash": str(trial),
+                })
+                (directory / "evidence.json").write_text(json.dumps(row))
+            rows = _load_runs(root, "development")
+        self.assertEqual([row["run_id"] for row in rows["vanilla"]], [
+            "development-a-vanilla-trial-1",
+        ])
 
     def test_unpaired_runs_are_rejected(self):
         arms = {"vanilla": [self.row("a", "vanilla", 0)], "memory": [], "skill": []}

@@ -122,6 +122,7 @@ def parse_proxy_events(path: Path | None) -> dict[str, Any]:
             "model_call_count": None,
             "actual_models": [],
             "events_hash": None,
+            "isolation_mode": None,
         }
     requests: dict[int, dict[str, Any]] = {}
     responses: dict[int, dict[str, Any]] = {}
@@ -139,9 +140,12 @@ def parse_proxy_events(path: Path | None) -> dict[str, Any]:
             "model_call_count": None,
             "actual_models": [],
             "events_hash": sha256_file(path),
+            "isolation_mode": None,
         }
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     models: set[str] = set()
+    isolation_modes = {request.get("isolation_mode") for request in requests.values()}
+    isolation_mode = next(iter(isolation_modes)) if len(isolation_modes) == 1 else None
     for response in responses.values():
         raw = response.get("usage") or {}
         values = (
@@ -155,6 +159,7 @@ def parse_proxy_events(path: Path | None) -> dict[str, Any]:
                 "model_call_count": len(requests),
                 "actual_models": sorted(models),
                 "events_hash": sha256_file(path),
+                "isolation_mode": isolation_mode,
             }
         usage["input_tokens"] += values[0]
         usage["output_tokens"] += values[1]
@@ -166,6 +171,7 @@ def parse_proxy_events(path: Path | None) -> dict[str, Any]:
         "model_call_count": len(requests),
         "actual_models": sorted(models),
         "events_hash": sha256_file(path),
+        "isolation_mode": isolation_mode,
     }
 
 
@@ -192,6 +198,7 @@ def adapt_trial(
     injected_assets: list[dict[str, str]] | None = None,
     injection_receipt: dict[str, Any] | None = None,
     proxy_events_path: Path | None = None,
+    expected_proxy_isolation_mode: str | None = None,
 ) -> dict[str, Any]:
     if arm not in {"vanilla", "memory", "skill", "memory_skill"}:
         raise ValueError("UNKNOWN_ARM")
@@ -231,6 +238,8 @@ def adapt_trial(
     actual_models = proxy["actual_models"] or session["actual_models"]
     if actual_models and any(model != expected_model for model in actual_models):
         status, failure = "INFRA_ERROR", "ACTUAL_MODEL_MISMATCH"
+    if expected_proxy_isolation_mode and proxy["isolation_mode"] != expected_proxy_isolation_mode:
+        status, failure = "INFRA_ERROR", "EVALUATION_ISOLATION_EVIDENCE_MISSING"
 
     assets = injected_assets or []
     if arm == "vanilla" and assets:
@@ -281,6 +290,7 @@ def adapt_trial(
         "tool_events": session["tool_events"],
         "actual_model": actual_models[0] if len(actual_models) == 1 else None,
         "expected_model": expected_model,
+        "proxy_isolation_mode": proxy["isolation_mode"],
         "injected_assets": assets,
         "retrieval_count": len(assets),
         "retrieval_counts": {

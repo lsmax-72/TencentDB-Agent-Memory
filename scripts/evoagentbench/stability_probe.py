@@ -80,11 +80,20 @@ def collect(root: Path, probe_id: str, tasks: list[str], arms: list[str], trials
                     raise RuntimeError(f"PROBE_RUN_FAILED:{identifier}:{completed.returncode}")
 
     rows = []
+    trial_label_corrections = []
     for task_id in tasks:
         for arm in arms:
             for trial in trials:
                 evidence = root / "runs" / run_id(task_id, arm, trial, candidate_revision) / "evidence.json"
-                rows.append(json.loads(evidence.read_text()))
+                row = json.loads(evidence.read_text())
+                if row.get("trial") != trial:
+                    trial_label_corrections.append({
+                        "run_id": row.get("run_id"),
+                        "source_reported_trial": row.get("trial"),
+                        "recovered_trial": trial,
+                    })
+                    row = {**row, "trial": trial}
+                rows.append(row)
     candidate_hashes = {row.get("candidate_artifact_hash") for row in rows if row.get("candidate_artifact_hash")}
     if len(candidate_hashes) != 1:
         raise RuntimeError("PROBE_CANDIDATE_BINDING_INCONSISTENT")
@@ -103,6 +112,7 @@ def collect(root: Path, probe_id: str, tasks: list[str], arms: list[str], trials
         "trials": trials,
         "results": summarize(rows),
         "source_run_hashes": sorted(row["evidence_hash"] for row in rows),
+        "trial_label_corrections": trial_label_corrections,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     report["artifact_hash"] = canonical_hash(report)
