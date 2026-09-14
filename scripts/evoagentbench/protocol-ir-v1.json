@@ -1,0 +1,160 @@
+{
+  "schema": "tdai-evoagentbench-ir-protocol-v1",
+  "protocol_id": "tdai-evoagentbench-ir-v1-low-cost-calibration",
+  "protocol_revision": 1,
+  "benchmark": {
+    "name": "EvoAgentBench-compatible / Information Retrieval",
+    "dataset": "BrowseComp-Plus",
+    "evoagentbench_revision": "948a17288782d5120778da16b4cf1cad9305d8b4",
+    "official_split_hash": "71e9d2d5bb3ae5d8c49823698e5c32cca60dade4a88e7f8fcf80d8198dd9c794",
+    "official_train_count": 154,
+    "official_test_count": 65,
+    "official_adapter_hash": "31518dc724033c80221ac69ad710ed66706402d052e8855babb4e32a5383ddfa",
+    "official_prompt_hash": "0a29821f4e6273086750a4f3110c9f241e8b990755e78959b33f25388717d24d",
+    "official_config_hash": "e699d05c92ff7360b78ab3366704acc725a4a1c6143fa63883307f34a253a6d2",
+    "official_test_opened": false
+  },
+  "selection": {
+    "seed": "tdai-evoagentbench-ir-v1",
+    "cluster_order": [
+      "GEO_LANDMARK",
+      "HISTORICAL_FIGURE",
+      "MUSIC_PERSON",
+      "RESEARCH_PAPER"
+    ],
+    "by_cluster": {
+      "GEO_LANDMARK": {
+        "experience": [
+          "672",
+          "763"
+        ],
+        "development": [
+          "590"
+        ]
+      },
+      "HISTORICAL_FIGURE": {
+        "experience": [
+          "1237",
+          "665"
+        ],
+        "development": [
+          "1258"
+        ]
+      },
+      "MUSIC_PERSON": {
+        "experience": [
+          "174",
+          "1012"
+        ],
+        "development": [
+          "1147"
+        ]
+      },
+      "RESEARCH_PAPER": {
+        "experience": [
+          "1048",
+          "1107"
+        ],
+        "development": [
+          "785"
+        ]
+      }
+    },
+    "smoke": [
+      "672"
+    ],
+    "experience": [
+      "672",
+      "763",
+      "1237",
+      "665",
+      "174",
+      "1012",
+      "1048",
+      "1107"
+    ],
+    "development": [
+      "590",
+      "1258",
+      "1147",
+      "785"
+    ],
+    "official_test": []
+  },
+  "arms": [
+    "vanilla",
+    "memory",
+    "skill",
+    "memory_skill"
+  ],
+  "agent": {
+    "host": "nanobot-ai==0.1.4.post3",
+    "provider": "vllm-via-memory-proxy",
+    "model": "qwen3.8-27b",
+    "temperature": 0,
+    "fallback": "disabled",
+    "max_retries": 0,
+    "agent_timeout_seconds": 900,
+    "max_tool_iterations": 8,
+    "max_output_tokens_per_call": 4096,
+    "context_window_tokens": 65536
+  },
+  "judge": {
+    "primary": "llm_judge",
+    "model": "qwen3.8-27b",
+    "provider": "vllm-via-isolated-memory-proxy",
+    "temperature": 0,
+    "max_output_tokens": 2048,
+    "fallback": "disabled",
+    "shadow_metric": "normalized_exact_match",
+    "judge_usage_separate_from_agent_usage": true
+  },
+  "retrieval_environment": {
+    "searcher": "faiss",
+    "index": "qwen3-embedding-0.6b",
+    "search_top_k": 5,
+    "snippet_max_tokens": 512,
+    "network_search_disabled": true
+  },
+  "candidate_generation": {
+    "source": "experience_only",
+    "memory_per_task_max": 1,
+    "skill_min_independent_support": 2,
+    "skill_count_max": 4,
+    "semantic_revisions_max": 1,
+    "development_or_test_visible": false
+  },
+  "candidate_retrieval": {
+    "top_k_per_kind": 2,
+    "combined_order": [
+      "skill",
+      "memory"
+    ],
+    "combined_reuses_standalone_selection": true
+  },
+  "calibration_gate": {
+    "smoke_requires": [
+      "evaluation_auxiliary_isolation",
+      "complete_usage",
+      "at_least_one_real_search_tool_event",
+      "llm_judge_result",
+      "exact_match_shadow_result"
+    ],
+    "development_requires": [
+      "zero_infra_error",
+      "candidate_retrieval_coverage_gt_zero",
+      "vanilla_pass_count_lt_four",
+      "formal_asset_snapshot_unchanged"
+    ],
+    "stop_after_development": true,
+    "promotion_allowed": false
+  },
+  "governance": {
+    "research_only": true,
+    "candidate_evaluation_only": true,
+    "historical_attempts_immutable": true,
+    "test_traces_cannot_generate_assets": true,
+    "no_suite_change_after_first_run": true
+  },
+  "protocol_hash": "fa492700496c41d572b8f329295218c3b6e371256bd5105ef5a64ac7f0fb4a06"
+}
