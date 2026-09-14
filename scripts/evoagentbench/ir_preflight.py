@@ -17,7 +17,8 @@ from typing import Any
 
 
 PINNED_EVO_REVISION = "948a17288782d5120778da16b4cf1cad9305d8b4"
-REQUIRED_MODULES = ("datasets", "faiss", "fastmcp", "huggingface_hub", "pyserini", "tevatron", "torch", "transformers")
+REQUIRED_MODULES = ("datasets", "faiss", "fastmcp", "huggingface_hub", "tevatron", "torch", "transformers")
+OPTIONAL_BM25_MODULES = ("pyserini",)
 
 
 def sha256_file(path: Path) -> str:
@@ -42,13 +43,13 @@ def split_counts(path: Path) -> tuple[int, int]:
 def python_modules(python: Path) -> dict[str, bool]:
     program = (
         "import importlib.util,json;"
-        f"print(json.dumps({{m: importlib.util.find_spec(m) is not None for m in {REQUIRED_MODULES!r}}}))"
+        f"print(json.dumps({{m: importlib.util.find_spec(m) is not None for m in {(REQUIRED_MODULES + OPTIONAL_BM25_MODULES)!r}}}))"
     )
     try:
         completed = subprocess.run([str(python), "-c", program], capture_output=True, text=True, timeout=30, check=True)
         return json.loads(completed.stdout)
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        return {name: False for name in REQUIRED_MODULES}
+        return {name: False for name in REQUIRED_MODULES + OPTIONAL_BM25_MODULES}
 
 
 def build_report(evo_repo: Path, python: Path, judge_mode: str, min_free_gb: float) -> dict[str, Any]:
@@ -80,9 +81,8 @@ def build_report(evo_repo: Path, python: Path, judge_mode: str, min_free_gb: flo
         "official_split_shape": (train_count, test_count) == (154, 65),
         "dataset_present": dataset.is_file(),
         "small_index_complete": len(index_files) == 4,
-        "java_available": java_works,
         "python_environment_present": python.is_file(),
-        "python_modules_present": all(modules.values()),
+        "faiss_python_modules_present": all(modules[name] for name in REQUIRED_MODULES),
         "disk_headroom": free_bytes >= int(min_free_gb * 1024**3),
         "judge_mode_frozen": judge_mode in {"exact_match", "llm_judge"},
     }
@@ -99,6 +99,7 @@ def build_report(evo_repo: Path, python: Path, judge_mode: str, min_free_gb: flo
         "python": str(python),
         "python_modules": modules,
         "java": java,
+        "optional_bm25": {"java_available": java_works, "pyserini_available": modules["pyserini"]},
         "judge_mode": judge_mode,
         "split": {
             "path": str(split), "sha256": sha256_file(split) if split.is_file() else None,
