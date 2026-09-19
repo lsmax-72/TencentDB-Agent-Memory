@@ -694,6 +694,44 @@ content  = 18512 字符
 
 - **CREATE 型技能候选无法做配对评测**：`candidateToEvaluationArtifact` 明确拒绝 `operation !== "UPDATE" || base_version <= 0`（`NEW_SKILL_CANDIDATE_NOT_SUPPORTED_BY_PAIRED_EVALUATION_V1`）。而诊断在"缺少某条 SOP"时**很容易**提出 CREATE（实测两次都是新建技能）。也就是说：**系统能生成新技能候选，但 v1 的评测接缝评不了它，因此它永远拿不到 adoption proof、永远无法被采用。** 这是链路里唯一一段"生成能力超出评测能力"的缺口，需要单独决策（要么给 CREATE 定义空基线，要么在生成侧就把它约束成 UPDATE）。
 - **诊断路由几乎只出 `skill_defect`**：三次不同写法的证据（明确的配置覆盖、记录过的既定决策、记忆里查不到的事实）都被判成技能缺陷，提案也都是"新增一条 SOP"。`memory_gap` 一次没出现过。不一定是错——把"没遵守已记录的决策"归成 SOP 是合理的——但意味着**记忆路的自动闭环在真实流量下可能永远不被触发**，值得单独看一眼。
+- **CREATE 候选的空基线（已补）**：现在 `CREATE` 会用"同一个 agent、不带任何技能"作为基线，这是新技能唯一诚实的对照，也让"从失败里长出新技能"这条路第一次能走到 adoption。
+
+### 10.6 第十个静默失败，也是最严重的一个：**agent 可以上网把题目抄回来**
+
+这条单独列，因为它**直接推翻了我们唯一一次正结果**。
+
+10.3 里那次"真实 PASS"（后来被 review/decide 批准、写进 `skl-bs5ZZdDcpcit` v26）的 candidate 臂，工具调用记录是这样的：
+
+```
+seq 1   read_file problem.md  →  "1| Heavy Snake  2|  3| Write solution.py implementing the
+                                  problem statement in problem.md."     ← 只有标题，没有题面
+seq 4   curl https://atcoder.jp/search?query=Heavy+Snake
+seq 7   curl https://www.google.com/search?q="Heavy Snake"+atcoder
+seq12   curl https://duckduckgo.com/html/?q="Heavy Snake"+atcoder+problem
+seq17   curl https://atcoder.jp/contests/abc388/tasks/abc388_b        → 18609 bytes  ★ 抓到题面
+seq27   write_file "# Heavy Snake (AtCoder ABC388 B) ## Statement ..."           ← 题面抄进文件
+       ... 写解法、写暴力、随机对拍 ...
+       → 42/42 通过
+```
+
+baseline 臂则是 `read_file` → `list_dir` → 放弃。
+
+**所以那次测的根本不是"技能让 agent 更强"，而是"技能里的 `curl -sSk` 教会了 agent 上网，它上网把自己的题目抓回来了"。**
+
+三点后果：
+
+1. **评测沙箱有不受限的外网出口**。题目 id 和标题就写在 `problem.md` 里，agent 能直接查到原题；原则上也能查到题解/editorial 直接抄。**这个 harness 上的任何测量都不是闭卷测量，holdout 不成立。**
+2. 之前所有的困惑一次性解释清楚：所谓"单次 0 ↔ 100% 抖动"、天花板、地板，**全都取决于 agent 有没有拿到题面**（从 problem.md 拿、从网上抓、还是压根没有）。既不是模型抖动，也不是技能效果。
+3. **"正结果 → 采用 → v26"这条链是假的**——它测的是"能不能上网抄答案"。技能 v26 本身仍是一次真实写入（管道是通的），但它作为"技能有效"的证据**作废**。
+
+**修法（已落地，commit `9c43feb`）**：
+
+- `detectEvaluationEgress` 审计每一条能执行东西的工具调用：外网 URL、`pip install`、`git clone`、`wget/curl`、`urllib/requests/socket` → 命中即把这一臂标成 `INFRA/EVALUATION_EGRESS_DETECTED`，门禁视为不可比，**污染跑出来的分永远进不了 gate**（本地 proxy 主机放行，因为"用 curl 取技能"是设计内的注入路径）。
+- agent 子进程的 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 指向死端口，只把本地服务放进 `NO_PROXY`——行为规矩的客户端直接出不去。
+
+> ⚠️ 这是**检测 + 屏障**，不是沙箱。真正的修法是在容器层面断掉 egress。在此之前，`detectEvaluationEgress` 只能看见工具调用里记录下来的东西，**不能当作唯一防线**。
+
+**方法论教训**：一个能上网的评测环境里，"通过率"这个指标本身没有意义——因为它混着"真的会做"和"会查"。**先证明环境是闭卷的，再谈通过率。**
 
 ---
 
