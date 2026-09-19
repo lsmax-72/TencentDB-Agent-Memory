@@ -600,6 +600,68 @@ suite_kind: z.enum(["AC_REGRESSION_V1", "EVOAGENTBENCH_CODE_V1", ...])
 
 ---
 
+## 十、2026-09-19：链路贯通记录
+
+这一节记录"把线 C 换成线 A 的原生接缝"当天，真正跑起来之后发现的东西。**全部是实测，不是推断。**
+
+### 10.1 现在真的能跑通的链路
+
+```
+task/complete（真实宿主任务 + 失败结果）
+  → diagnosis/request（原生评审模型，15 秒，返回 JSON 裁决）
+  → proposal job（原生 proposal runner，skill / memory_l1 / wiki 三种 stage）
+  → candidate（冻结，immutable，带 artifact_hash）
+  → validation job（内容校验）
+  → evaluation/request（原生 MinimalEvaluationRunner + NanobotAgentAdapter）
+      ├─ baseline arm = 官方技能版本
+      └─ candidate arm = 冻结候选技能
+  → 真 Oracle 判分（LiveCodeBench check_correctness）
+  → gate（newly_fixed / newly_broken / 代价回归 / critical）
+  → review/decide（技能必须人工；记忆在 auto_memory 下自动）
+  → adoption/apply（原生 FrozenAssetWriter 写入 SkillCore / MemoryCore）
+```
+
+实测一次完整配对评测的**有效**结果（3 个 LCB 任务，双臂各跑真实 agent）：
+
+| 案例 | baseline | candidate |
+|---|---|---|
+| abc387_b 9x9 Sum | `TASK_PASS` 43/43 | `TASK_PASS` 43/43 |
+| abc387_a Happy New Year | `TASK_PASS` 44/44 | `TASK_PASS` 44/44 |
+| abc388_b Heavy Snake | `TASK_FAIL`（放弃，未交 solution.py） | `TASK_FAIL`（放弃） |
+
+门禁裁决：`FAIL`，原因**只有一条** `NO_NEW_FIX (observed 0, limit 1)`。没有代价回归、没有预算耗尽、没有仪器故障。**这是一份干净的"无效果"结论——而不是又一份伪装成无效果的故障报告。**
+
+### 10.2 当天发现的 8 个"静默失败"（都会把故障伪装成零效果）
+
+| # | 症状（看起来像什么） | 真正原因 | 修法 |
+|---|---|---|---|
+| 1 | 诊断 `MODEL_UPSTREAM_UNAVAILABLE` | 120s 超时上限 < 一次合法调用（36 tok/s × 8k ≈ 226s） | 上限提到 600s，并把 cause/HTTP 状态带进错误 |
+| 2 | 诊断 `DIAGNOSIS_RUNNER_ERROR` | 模型把 JSON 包在 ```json 围栏里，裸 `JSON.parse` 抛 SyntaxError | 新增 `parseModelJson`，容忍围栏/前后文，并报告原文 |
+| 3 | 诊断慢且偶发失败 | 评审模型在长思维链上烧完输出预算 | `disable_thinking: true`（vLLM `chat_template_kwargs`）：2–3 分钟 → **15 秒** |
+| 4 | 技能候选**永远**评不了 | `target_id !== "skl-workspace"` 这道平行线遗留断言拒绝了每一个真实资产 | 删掉；真正的绑定是 artifact 里的 skill_id + 字节校验 |
+| 5 | 评测 `ENVIRONMENT_SETUP_FAILED` | RunSpec 的 `model_preset` 被转发给 `Nanobot.from_config`，而运维配置里没有这个 preset | 只有配置里真的定义了才转发；model/provider 已直接来自 RunSpec |
+| 6 | 评测 `401 invalid user_key` | 端点写成 `/hermes/evo-skill-eval/`，而用户 key 只对 service `default` 有效 | 走 `/hermes/default/v1` |
+| 7 | 判分器从不报错，但**一个任务都没判过** | 从写死的 macOS 路径导入 `livecode`，容器里不存在 → `ModuleNotFoundError`；Oracle 只看退出码，于是**崩溃被记成任务失败** | 改用 LCB 自己的 `check_correctness`；**跑不起来 exit 2**，fixture 转成 `INFRA/ORACLE_EXECUTION_ERROR` |
+| 8 | 做对了却记 `BUDGET_EXHAUSTED` | `exceedsBudget` 比的是**整轮累计用量**，却被当成单次上限在配（实测解出题的一轮：input 102k / total 108k，预算是 32k/48k） | 按实测最大 arm 的 ~1.5 倍配（40 calls / 600k input / 700k total） |
+
+外加一条**门禁设计**问题：代价回归原本拿"全 suite 总量"比。baseline 因为**放弃**而便宜，candidate 因为**把题做出来**而显得贵 3 倍——**等于把修复的代价算到修复头上**。现在只在 `unchanged_success` / `unchanged_failure` 的案例上比代价，这才是"附带膨胀"的本意。
+
+### 10.3 还剩下的两件事（都不是 bug，是输入）
+
+1. **没有真实 PASS。** `review/decide → adoption/apply` 这两跳在代码和集成测试里都有覆盖（`adoption.test.ts`、`memory-adoption-handler.test.ts` 证明原生写入器能把冻结资产写进 JSONL + 检索索引），但**活的门禁还没有放行过任何一个候选**。原因是数据问题：这个 suite 对当前模型区分度太低——两个任务双臂都过（天花板），一个任务双臂都挂（地板）。
+2. **单案例极不稳定。** 同一个候选在 abc388_b 上：一次 `42/42` 通过（但被预算误杀），两次完全放弃。**单次运行在同一个案例上能从 0 跳到 100%**——这就是"必须重复运行、必须报区间"的实证，不是理论。
+
+> **对最初那个问题的回答**：不是 benchmark 选得不合适，也不是机制无效。
+> 现在有了一个能给出**可复现、可辩护**结论的仪器；它给出的第一份有效结论是"这个候选在这套题上没有效果"。
+> 下一步要的不是再改代码，而是**把生产上真实的失败接进来**（`observation/ingest` 已经在），以及**把 benchmark 选在模型的区分带里（约 30–70% 通过率）**。
+
+### 10.4 顺带发现的产品缺口
+
+- **CREATE 型技能候选无法做配对评测**：`candidateToEvaluationArtifact` 明确拒绝 `operation !== "UPDATE" || base_version <= 0`（`NEW_SKILL_CANDIDATE_NOT_SUPPORTED_BY_PAIRED_EVALUATION_V1`）。而诊断在"缺少某条 SOP"时**很容易**提出 CREATE（实测两次都是新建技能）。也就是说：**系统能生成新技能候选，但 v1 的评测接缝评不了它，因此它永远拿不到 adoption proof、永远无法被采用。** 这是链路里唯一一段"生成能力超出评测能力"的缺口，需要单独决策（要么给 CREATE 定义空基线，要么在生成侧就把它约束成 UPDATE）。
+- **诊断路由几乎只出 `skill_defect`**：三次不同写法的证据（明确的配置覆盖、记录过的既定决策、记忆里查不到的事实）都被判成技能缺陷，提案也都是"新增一条 SOP"。`memory_gap` 一次没出现过。不一定是错——把"没遵守已记录的决策"归成 SOP 是合理的——但意味着**记忆路的自动闭环在真实流量下可能永远不被触发**，值得单独看一眼。
+
+---
+
 ## 附：证据索引
 
 | 结论 | 文件 |
