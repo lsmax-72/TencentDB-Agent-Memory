@@ -141,9 +141,13 @@ const benchmarkTasksSchema = z.object({
 //: model configuration's 4k: the served qwen3.8-27b decodes at ~36 tok/s and
 //: reasons before answering, so an 8k single completion needs ~226s on its own,
 //: longer than the 300s wall several proxies in front of it enforce.
+//: The largest arm that legitimately finished inside the band needed 753k input
+//: tokens and 40 calls. These give headroom for that without letting an agent
+//: grind forever: a run that needs more than 40 calls did not become efficient,
+//: and the wall is what keeps one paired measurement to tens of minutes.
 const BENCHMARK_DEFAULT_LIMITS = {
-  max_model_calls: 40, max_tool_calls: 60, max_input_tokens: 600_000,
-  max_output_tokens: 48_000, max_total_tokens: 700_000, timeout_ms: 1_800_000,
+  max_model_calls: 40, max_tool_calls: 60, max_input_tokens: 900_000,
+  max_output_tokens: 48_000, max_total_tokens: 1_200_000, timeout_ms: 1_800_000,
 };
 
 /** Resolve the frozen task pool into a fixture spec, refusing partial config. */
