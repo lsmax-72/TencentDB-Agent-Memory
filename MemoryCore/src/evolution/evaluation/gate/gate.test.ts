@@ -135,3 +135,24 @@ describe("evaluateGate", () => {
     expect(gate.reasons.map((reason) => reason.code)).toContain("TOKEN_COST_REGRESSION");
   });
 });
+
+describe("cut-off arms", () => {
+  it("does not record an unfinished arm as a wrong answer", () => {
+    // A grader that scores 43/43 while the harness reports BUDGET_EXHAUSTED is
+    // the shape that produced four false negatives: the arm was interrupted, so
+    // nobody judged it. That is "uncomparable", never "unchanged_failure".
+    const baseline = run("grind", "BASELINE", "TASK_FAIL");
+    const candidate = run("grind", "CANDIDATE", "TASK_FAIL");
+    candidate.failure = { kind: "TASK", codes: ["BUDGET_EXHAUSTED"], evidence_refs: [] };
+    const pair = classifyPair(baseline, candidate, false);
+    expect(pair.classification).toBe("uncomparable");
+    expect(evaluateGate([pair], aggregateCosts([pair]), POLICY).status).toBe("INFRA_ERROR");
+  });
+
+  it("treats a wall-clock timeout the same way", () => {
+    const baseline = run("slow", "BASELINE", "TASK_PASS");
+    const candidate = run("slow", "CANDIDATE", "TASK_FAIL");
+    candidate.failure = { kind: "TASK", codes: ["AGENT_TIMEOUT"], evidence_refs: [] };
+    expect(classifyPair(baseline, candidate, false).classification).toBe("uncomparable");
+  });
+});

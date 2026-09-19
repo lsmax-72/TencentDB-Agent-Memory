@@ -1,5 +1,25 @@
 import type { CaseRunResult, PairedCaseResult } from "../contracts/types.js";
 
+/**
+ * True when the arm was stopped by its resource envelope rather than judged.
+ *
+ * `BUDGET_EXHAUSTED` and `AGENT_TIMEOUT` both mean the run was interrupted, so
+ * the oracle never got to express an opinion on the work. Scoring that as a task
+ * failure says "wrong answer" when the truth is "no answer yet", and it does so
+ * asymmetrically: a skill that makes the agent keep working costs more and hits
+ * the envelope sooner, so thoroughness is punished as incorrectness. That is not
+ * hypothetical -- four separate runs produced a submission the grader scored
+ * 42/42 or 43/43 and still recorded the arm as a failure for this reason.
+ *
+ * Cost is not ignored: the gate measures it on the cases whose outcome did not
+ * change. Here the honest label is "uncomparable", which the gate turns into
+ * INFRA_ERROR -- no verdict -- instead of a fabricated one.
+ */
+function cutOff(run: CaseRunResult): boolean {
+  return run.failure?.kind === "TASK"
+    && run.failure.codes.some((code) => code === "BUDGET_EXHAUSTED" || code === "AGENT_TIMEOUT");
+}
+
 export function classifyPair(
   baseline: CaseRunResult,
   candidate: CaseRunResult,
@@ -18,7 +38,8 @@ export function classifyPair(
 
   const fairness = mismatchedFields.length === 0 ? "MATCH" : "MISMATCH";
   let classification: PairedCaseResult["classification"] = "uncomparable";
-  if (fairness === "MATCH" && baseline.status !== "INFRA_ERROR" && candidate.status !== "INFRA_ERROR") {
+  if (fairness === "MATCH" && baseline.status !== "INFRA_ERROR" && candidate.status !== "INFRA_ERROR"
+    && !cutOff(baseline) && !cutOff(candidate)) {
     if (baseline.status === "TASK_PASS" && candidate.status === "TASK_PASS") {
       classification = "unchanged_success";
     } else if (baseline.status === "TASK_FAIL" && candidate.status === "TASK_PASS") {
