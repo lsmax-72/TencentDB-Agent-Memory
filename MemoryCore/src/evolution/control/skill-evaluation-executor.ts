@@ -33,6 +33,37 @@ function executableFile(path: string): void {
   const stat = statSync(realpathSync(path));
   if (!stat.isFile() || (stat.mode & 0o111) === 0) throw new Error("executable required");
 }
+
+/**
+ * Reject a nanobot config whose model endpoint can silently skip injection.
+ *
+ * The dsh adapter classifies a request as `auxiliary` when it carries
+ * `x-deepseek-harness-compact: 1`, and the Proxy skips
+ * `session-init/mem/injection/L0/skill` for auxiliary requests by design
+ * (`MemoryProxy/src/handler.ts:703-705`). An evaluation that runs on that route
+ * measures an agent which received no memory at all, while looking exactly like
+ * an evaluation that measured a null effect. The EvoAgentBench stack spent
+ * weeks on precisely that confusion before it was retired, so the route is now
+ * rejected at binding-resolution time rather than trusted.
+ *
+ * Only a local MemoryProxy can skip injection, so remote endpoints are left
+ * alone: a direct upstream has no hooks to skip. The space segment is required
+ * because it is what scopes recall and writes; a path without one shares the
+ * instance-wide default space and lets treatment arms contaminate each other.
+ */
+function validateEvaluationEndpoint(configPath: string): void {
+  const raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+  const providers = (raw.providers ?? {}) as Record<string, Record<string, unknown>>;
+  for (const [name, provider] of Object.entries(providers)) {
+    const endpoint = provider?.baseUrl ?? provider?.apiBase;
+    if (typeof endpoint !== "string" || endpoint.length === 0) continue;
+    let url: URL;
+    try { url = new URL(endpoint); } catch { throw new Error(`provider ${name} endpoint must be an absolute URL`); }
+    if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) continue;
+    if (/(^|\/)dsh(\/|$)/.test(url.pathname)) throw new Error(`EVALUATION_ENDPOINT_AUXILIARY_ROUTE: provider ${name} must not use /dsh/, which skips injection`);
+    if (!/^\/[^/]+\/[^/]+\/v1(\/|$)/.test(url.pathname)) throw new Error(`EVALUATION_ENDPOINT_MISSING_SPACE: provider ${name} must route as /<agent>/<spaceId>/v1...`);
+  }
+}
 function readEvaluationConfigs(path: string | undefined): EvaluationConfig[] {
   if (!path) throw new Error("evaluation config required");
   privateFile(path, 256_000);
@@ -55,11 +86,19 @@ export function fileSkillEvaluationBindings(path: string | undefined, instanceId
       if (matches.length !== 1) throw new Error("ambiguous binding");
       const config = matches[0];
       executableFile(config.python_executable); privateFile(config.nanobot_config, 4 * 1024 * 1024);
+      validateEvaluationEndpoint(config.nanobot_config);
       const revision = execFileSync("git", ["-C", config.nanobot_repo, "rev-parse", "HEAD"], { encoding: "utf8", timeout: 5000 }).trim();
       if (!/^[0-9a-f]{40}$/.test(revision)) throw new Error("invalid nanobot revision");
       const publicConfig = { ...config, python_executable: "operator-private", nanobot_config: "operator-private", nanobot_repo: "operator-private", nanobot_revision: revision };
       return { id: config.id, fingerprint: contentHash(publicConfig), execute: (candidate, job, grant) => executeSkillEvaluation(store, core, config, revision, candidate, job, grant) };
-    } catch { throw new EvolutionError(503, "EVALUATION_BINDING_INVALID"); }
+    } catch (error) {
+      // Keep the stable code first (callers and tests match on it) but append
+      // the reason. Swallowing it would reproduce the exact failure this guard
+      // exists to prevent: an operator with an injection-skipping endpoint
+      // would see only "INVALID" and have no way to tell why.
+      const detail = error instanceof Error ? error.message : "unrecognised binding failure";
+      throw new EvolutionError(503, `EVALUATION_BINDING_INVALID: ${detail}`);
+    }
   };
 }
 
