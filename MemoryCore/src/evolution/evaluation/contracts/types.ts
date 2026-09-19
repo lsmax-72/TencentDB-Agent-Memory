@@ -154,6 +154,8 @@ export type InfraErrorCode =
   | "TELEMETRY_INCOMPLETE"
   | "RUNSPEC_MISMATCH"
   | "BASELINE_ARTIFACT_MISMATCH"
+  //: The agent under test reached the network. A task is not a holdout if it can be looked up.
+  | "EVALUATION_EGRESS_DETECTED"
   | "RUNNER_INTERNAL_ERROR";
 
 export interface EvidenceRef {

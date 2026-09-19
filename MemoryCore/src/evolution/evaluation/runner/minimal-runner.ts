@@ -21,6 +21,7 @@ import type {
 } from "../contracts/types.js";
 import { aggregateCosts, emptyUsage } from "../gate/cost.js";
 import { evaluateGate } from "../gate/evaluate-gate.js";
+import { detectEvaluationEgress } from "./egress.js";
 import { classifyPair } from "../gate/pair-classifier.js";
 import { runOracle, type OracleContext } from "../oracle/deterministic-oracle.js";
 
@@ -269,6 +270,12 @@ export class MinimalEvaluationRunner {
         runSpec.budget.timeout_ms,
       );
       validateTelemetry(output, runSpec);
+      // Refuse to score an arm that went to the network: a task the agent can look
+      // up is not a holdout, and a contaminated pass is indistinguishable from a
+      // real improvement once it reaches the gate. See egress.ts for the incident.
+      const egress = detectEvaluationEgress(output.tool_calls);
+      if (egress.length) throw new EvaluationExecutionError("INFRA", "EVALUATION_EGRESS_DETECTED",
+        `${egress.length} outbound network indicator(s); first=[seq ${egress[0].sequence} ${egress[0].tool} ${egress[0].indicator}] ${egress[0].detail}`);
       const oracleResults = await runOracle(evaluationCase.oracle, {
         workspace_dir: fixture.workspace_dir,
         changed_paths: await fixture.changed_paths(),

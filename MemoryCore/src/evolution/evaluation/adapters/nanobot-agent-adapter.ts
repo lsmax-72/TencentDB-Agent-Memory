@@ -195,7 +195,22 @@ export async function invokeNanobotBridge(
   return new Promise((resolve, reject) => {
     const child = spawn(options.python_executable, [options.bridge_path], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1",
+        // A dead proxy for everything except the local evaluation services. The
+        // agent under test must not be able to look up the task it is being
+        // graded on: on 2026-09-19 the only positive result this project ever
+        // produced was the agent curling the AtCoder page for its own task.
+        // This blocks the well-behaved clients (curl, wget, pip, requests); it
+        // is a barrier, not a sandbox, so `detectEvaluationEgress` still audits
+        // every tool call and refuses to score an arm that got out.
+        HTTP_PROXY: "http://127.0.0.1:9", HTTPS_PROXY: "http://127.0.0.1:9",
+        http_proxy: "http://127.0.0.1:9", https_proxy: "http://127.0.0.1:9",
+        ALL_PROXY: "http://127.0.0.1:9", all_proxy: "http://127.0.0.1:9",
+        NO_PROXY: "localhost,127.0.0.1,::1,tdai-proxy,memory-proxy",
+        no_proxy: "localhost,127.0.0.1,::1,tdai-proxy,memory-proxy",
+      },
     });
     let stdout = "";
     let stderr = "";
