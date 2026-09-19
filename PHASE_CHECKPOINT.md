@@ -491,3 +491,56 @@
 - Smoke 后正式资产计数与 preflight 一致：Skill 0、Chat Memory 1、Wiki 0、Code Graph 0；Candidate 没有进入正式资产。当前验证：Python 10 tests PASS、Python compile PASS、Core 定向 5 tests PASS、Core plugin build PASS、Panel 与 web build PASS、`git diff --check` PASS。用户 deployment 三个文件仍不暂存、不修改。
 - 可恢复批量调度已完成全部 24 个 frozen experience task（两个 smoke 作为相同 train ID 的有效 experience evidence 复用）：22 PASS、2 TASK_FAIL、0 INFRA_ERROR；合计 1,015,948 tokens、92 model calls、69 tool calls、2,689.7s。失败任务保留并参与诊断，不挑选或重跑业务结果。
 - 下一自主动作：只使用这 24 个 train evidence 生成并冻结 Memory 与至少双来源支持的通用 Skill，记录生成成本和来源/hash；随后生成固定 top-2 注入 cache，跑 12 个 development 三组 Pilot。失败均保留为独立 Attempt，不挑最好结果。
+
+## 2026-09-14 EvoAgentBench 仪器修复与正对照（最新恢复入口）
+
+- 当前分支 `feat/evolution-candidate-refinement`，HEAD `79ca9e3b50baf2673713aeb5a3490c196c3a1e6f`。本节起的工作**全部未提交**；用户的 deployment 改动（`deploy/global-images/start-memory-core.sh` 及两个未跟踪脚本）与未跟踪的 `ir_preflight.py`/`ir_adapter.py`/`ir_driver.py` 一律不动。恢复时以本节为当前入口，上面 09-09 及更早的"下一动作"是历史快照。
+
+### A. 最新有效结论：投递链路对干预有响应（RESPONSIVE）
+
+- 协议 `tdai-evoagentbench-code-v12-positive-control`，`protocol_hash 0776c1711f5e5dff43d428eab12188a628f069292f17fe63e01767bf7757190a`，候选 artifact `bbf30c03dd0c59e2795c15bc715ab3a4ebc63f9d5bd5180423320bf601225efa`。
+- 锚点 `3763`，forced-injection 无条件注入一条**已用官方判分器本地验证过必定有效**的资产（"返回时四舍五入到 5 位小数"）：vanilla **0/5**（全部 `1/2`），forced **5/5**（全部 `42/42`），`forced_runs_without_injection = 0`，`infra_trial_run_ids = []`。
+- 正式判决 `RESPONSIVE / FORCED_INJECTION_CHANGED_OUTCOMES`：`positive-control-v3/positive-control-verdict-a2.json`（首轮含 infra 的判决保留在 `positive-control-verdict.json`）。
+- 报告：`docs/evoagentbench-positive-control-report.md`。**它只证明投递链路可用、结果可归因，不证明任何自动生成资产有迁移价值，不构成 Promotion 依据。**
+
+### B. 仪器诊断：历史"失败"的真实构成
+
+- **退化签名**（`model_call_count==1`、`tool_call_count==0`、`output_tokens` 正好等于上限 8192，`final_output` 是 nanobot 工作区脚手架文本）：全 350 个 run 中 34 个命中；占 code-v2 全部失败的 **73.7%**、code-v4 的 **76.9%**。这些 run 从未产出解题尝试，不携带能力信号。
+- **两类限制已分开归因**：输出截断（完成 token 触顶）34 个；迭代耗尽（`model_call_count >= max_tool_iterations`）如 `abc388_e` 12 次调用但 max completion 仅 6,220。上下文窗口**不是**瓶颈（单次 prompt 最大 18,779 / 声明 65,536），故未改动。
+- **判分器机制（本轮最关键发现）**：官方 verifier 比较**打印表示的 5 位小数字面量**，题面写的"误差 1e-5"与实际不一致；且**首次失败即短路**，后续用例不再执行。故历史 `passed/total`（`7/8`、`1/2`）应读作"在第 k 个用例停止"，不是"N 个错 k 个"。所有基于 `passed/total` 的解读与样本量推算必须据此校准。
+- **preflight 曾预测错误的注入集合**：offline preflight 用 phase-cache 的 `question_content` 打分，而实跑路径打的是拼装后的 agent prompt，导致 6/12 memory 预测与实跑不一致（一致率 0.750）。已修为统一走 `adapter.frozen_task_prompts`（优先 vanilla run 的 session），修复后 24/24 一致；审计侧新增 `prediction_alignment` 在冻结历史 preflight 上复现了 0.750 这个缺陷值。
+- **对照污染范围**：bridge 隔离修复 `0d59ff3` 落于 09-14，此前所有 attempt 走未隔离路由；v8 审计证实正式 Skill 出现在 ≥30/48 个 session（Vanilla 7/12）。
+
+### C. 本轮新增工具与协议（全部未提交）
+
+- `exposure_audit.py`：只读审计 —— 送达率、检索退化度、headroom（trial 从 run_id 解析，不信任 evidence 内层 trial）、失败分类、`verifier.passed/total` 稠密值、资产 provenance、`harness_degeneracy`、`asset_discriminability`、`prediction_alignment`；产物 `audits/exposure-v3-*.json`（v1/v2 为开发期产物，按失败保留惯例未删）。
+- `power.py` + `docs/evoagentbench-power-preregistration.md`：精确配对 McNemar 功效。**n=24 时 MDE = 26.5pp；10pp 净效应需 66 题；15pp 需 44 题**。已冻结官方 train 池约束：`official_train_count=182`、已排除 132、剩 14（easy 9/medium 4/hard 1），**无法从剩余 train 池拼出所需 suite**。文档中的效应量为规划假设，不是已观测效果，且 `passed/total` 部分需按 §B 短路行为重算。
+- `anchor_screening.py` + `protocol-code-v10-anchor-screening.json`：vanilla-only 锚点筛查（4 候选 × 5）。结果 `abc333_d` 竟 5/5 通过、`3613` 4/5 失败但 1 infra、`3559` 4 infra、**`3763` 5/5 失败且全为真实尝试 → `recommended_anchor=3763`**。
+- `positive_control.py`：多锚点注册表、`forced-injection-v1` 无条件注入、预注册判决规则（基线须 ≥4/5 失败；`RESPONSIVE` 须 forced ≥3 且比 vanilla 多 ≥2；空注入或任一 infra 即 `INFRA_ERROR`，** outage 绝不当作疗效证据**）、每 trial 服务门、infra 保留到 `superseded-attempts/` 并重跑、`--score-only` 与版本化判决文件名。协议：v9（`f5de117d…`，锚点 3000，`ANCHOR_UNRELIABLE`）、v11（`793b8761…`，锚点 3763 + 边界资产，`NOT_RESPONSIVE`，两臂各 0/5）、v12（`RESPONSIVE`）。v9 与 v11 的 hash 经回归验证**逐字未变**。
+- 其他：`adapter.parse_proxy_events(output_token_cap=)` 记录截断；`driver` 写入 `failure_class`（仅新 run）；`retrieval.select_assets_for_algorithm` 修复"协议声明的 `memory_algorithm` 被静默忽略"；`factorial_preflight` 新增双向暴露门（Skill 下限 / Memory 上限 / top-2 集中度，阈值校准于实测 0.500 vs 0.312）；`applicability_audit` 新增 decision 直方图。
+- 验证：`python3 -m unittest discover -s scripts/evoagentbench` **164 tests PASS**（须用 Python 3.12，即 `/Users/lsmax/Coder/EvoAgentBench/.venv-tdai/bin/python`；系统 python3 是 3.9，会在 `zip(strict=)` 上报 17 个既有错误）。
+
+### D. 被证据否定的假设（不要重复尝试）
+
+- **放宽 v6 技能门禁**：会重新引入 `2811`/`3613` 误召回而覆盖率几乎不涨（v8dev 仍 1）；`abc388_e` 一直由 constraint 门挡住。v6 的弃权是正确行为。
+- **给 memory 加"弃权下限"**：df-ceiling 0.25–1.0 四档下 min top-1 分数始终 12–25、max 38–52，无可分阈值；24 条 memory 的 `applicability` 是同一模板措辞，池子本身不可区分 → v8 判 `ASSETS_NOT_DISCRIMINATIVE`（top-2 = 0.500）。
+- **锚点 `3000`**：v9 下 vanilla 通过 3/5，太不稳定。
+- **换更小模型做实验**：会把"记忆价值"偷换成"知识蒸馏"，产出方向相反的假阳性；应换资产类型而非模型档位。
+- **v11 的手写"边界/精度"资产**：投递已证实（文本进入 prompt、提交代码相似度 0.41 且采纳了建议），但仍无效果 → 资产不 decisive。这直接导致 v12 先用官方判分器本地验证资产决定性再跑。
+
+### E. 基础设施事件与处置
+
+- **Docker Desktop 两轮掉线**，连带 MemoryCore 8420 / MemoryProxy 8096 中断，污染多个 trial（已保留未改判）。已 `open -a Docker` 恢复并对 `tdai-memory-core`/`tdai-memory-hub`/`tdai-proxy` 设置 `--restart unless-stopped`（可 `docker update --restart no <name>` 撤销）。
+- **run_id 未按协议隔离**：`driver` ingest 以 `run_id` 为键，跨协议复用同 run_id 会 `CORE_HTTP_409`。当前缓解是 harness 识别"evidence 已写但 Hub 同步失败"为副作用并记录 `hub_ingest_errors`；**建议修复（未实施）**：ingest 键加入 `protocol_hash`。
+- **无 evidence 的残留 run 目录会阻断重试**（`run_dir.mkdir` 早于前置校验）；建议修复（未实施）：把 mkdir 移到全部前置校验之后。
+- 磁盘：两个早期失败 smoke attempt 把整个 HuggingFace 数据集下进了 `private/home`（合计 **14.6 GB**），已只删该目录、保留 `evidence.json`/日志/配置；artifact 树 15 GB → 497 MB，整机剩约 96 GB。排查与核对方法记入 `docs/evoagentbench-harness-degeneracy-report.md` §7.1。
+
+### F. 边界
+
+- 未 commit、未 push、未合并；未写入任何正式资产；未改动任何冻结协议或历史 attempt（`historical_results_mutable = false` 维持）。
+- 所有结论标注 `EvoAgentBench-compatible` / research-only；`promotion_allowed = false`，官方 test 继续锁定。
+- 两处 infra 与一次 interrupted 尝试均保留在各自 root 的 `superseded-attempts/`。
+
+### G. 下一自主动作
+
+先接 Phase 4（真实效果实验）：投递已验证，效果结论现在可归因，但必须先解决测量功效 —— 按 `docs/evoagentbench-power-preregistration.md`，要么把样本量提到 66+ 题（官方 train 池已不够，需评估 IR 域 154 train 或自有业务场景），要么改用稠密主指标（`verifier.passed/total`，注意 §B 的短路行为）+ 复用 `code-v2` 的 24 题（须标注为 recycled diagnostic suite，MDE = 26.5pp）；同时把 `docs/skill-applicability-retrieval-report.md` 里"首次调用耗尽预算且无工具调用"的问题按 runner-policy 单独处理。冻结任何新 suite 或新协议前需 Critical Review 放行。
