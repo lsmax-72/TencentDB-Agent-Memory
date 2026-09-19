@@ -10,6 +10,12 @@ const configSchema = z.object({
   // opaque MODEL_UPSTREAM_UNAVAILABLE. 10 minutes is a stall bound, not a latency target.
   token_ceiling: z.number().int().positive(), timeout_ms: z.number().int().min(100).max(600000),
   temperature: z.literal(0), fallback: z.literal(false),
+  //: Ask a reasoning model to answer directly. The reviewer returns a bounded
+  //: JSON verdict, so chain-of-thought buys nothing and costs a lot: at ~36
+  //: tok/s a long internal monologue can eat the whole completion budget, and a
+  //: truncated answer is indistinguishable from an unusable one. Only honoured
+  //: by endpoints that accept vLLM's `chat_template_kwargs`.
+  disable_thinking: z.boolean().optional(),
 }).strict();
 export type ReviewModelConfig = z.infer<typeof configSchema>;
 
@@ -35,6 +41,7 @@ export function createReviewModel(raw: ReviewModelConfig, request: typeof fetch 
         response = await request(`${config.base_url.replace(/\/$/, "")}/chat/completions`, {
           method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${config.api_key}` },
           body: JSON.stringify({ model: config.model, temperature: 0, max_tokens: config.max_output_tokens, stream: false,
+            ...(config.disable_thinking ? { chat_template_kwargs: { enable_thinking: false } } : {}),
             messages: [{ role: "system", content: input.system }, { role: "user", content: input.evidence }] }),
           signal: AbortSignal.timeout(config.timeout_ms),
         });
@@ -50,14 +57,21 @@ export function createReviewModel(raw: ReviewModelConfig, request: typeof fetch 
         throw new EvolutionError(503, `MODEL_UPSTREAM_UNAVAILABLE: HTTP ${response.status} ${detail.slice(0, 200)}`);
       }
       let data: unknown;
-      try { data = await response.json(); } catch { throw new EvolutionError(503, "MODEL_RESPONSE_INVALID"); }
-      const parsed = z.object({ model: z.string(), choices: z.array(z.object({ message: z.object({ content: z.string() }), finish_reason: z.string() })).min(1),
+      try { data = await response.json(); } catch { throw new EvolutionError(503, "MODEL_RESPONSE_INVALID: body is not JSON"); }
+      // `content` is null when a reasoning model spends its whole completion
+      // budget before answering, and `usage` is optional on some gateways. Both
+      // are shape variations of a real response, not a broken one; rejecting
+      // them here replaced a diagnosable "the model returned nothing" with an
+      // opaque MODEL_RESPONSE_INVALID. The non-"stop" finish reason below is
+      // what turns a truncated answer into an explicit unusable result.
+      const parsed = z.object({ model: z.string(), choices: z.array(z.object({ message: z.object({ content: z.string().nullable() }), finish_reason: z.string().optional() })).min(1),
         usage: z.object({ prompt_tokens: z.number().int().nonnegative(), completion_tokens: z.number().int().nonnegative() }).optional(),
       }).safeParse(data);
-      if (!parsed.success) throw new EvolutionError(503, "MODEL_RESPONSE_INVALID");
+      if (!parsed.success) throw new EvolutionError(503, `MODEL_RESPONSE_INVALID: ${parsed.error.issues[0]?.message ?? "shape mismatch"}`);
       if (parsed.data.model !== config.model) throw new EvolutionError(503, "ACTUAL_REVIEW_MODEL_MISMATCH");
       // Truncated output is recorded as an unusable result, never fed to candidate generation.
-      const text = parsed.data.choices[0].finish_reason === "stop" ? parsed.data.choices[0].message.content : "";
+      const choice = parsed.data.choices[0];
+      const text = choice.finish_reason === "stop" ? choice.message.content ?? "" : "";
       return { text, input_tokens: parsed.data.usage?.prompt_tokens ?? null, output_tokens: parsed.data.usage?.completion_tokens ?? null };
     },
   };

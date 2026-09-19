@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { contentHash, EvolutionStore } from "./store.js";
 import { EvolutionError, type EvolutionRecord } from "./types.js";
+import { parseModelJson } from "./model-json.js";
 
 const diagnosisSchema = z.object({
   route: z.enum(["no_change", "skill_defect", "memory_gap", "wiki_gap", "infrastructure", "capability_gap", "unknown"]),
@@ -34,7 +35,11 @@ export async function diagnose(store: EvolutionStore, trace: EvolutionRecord, re
   store.settle(attemptId, usage, 1);
   if (usage === null) throw new EvolutionError(503, "MODEL_USAGE_MISSING");
   if (usage > model.tokenCeiling) throw new EvolutionError(429, "REVIEW_BUDGET_OVERRUN");
-  const parsed = diagnosisSchema.parse(JSON.parse(response.text));
+  // An empty, fenced or non-JSON answer is a statement about the model, not
+  // about the trace. It used to escape as a bare `DIAGNOSIS_RUNNER_ERROR`, which
+  // reads like a defect in this codebase and hides the only useful fact: the
+  // reviewer did not return a usable verdict.
+  const parsed = diagnosisSchema.parse(parseModelJson(response.text, "DIAGNOSIS_OUTPUT"));
   const ids = new Set(records.map(record => record.id));
   if (parsed.evidence.some(item => !ids.has(item.record_id))) throw new EvolutionError(400, "DIAGNOSIS_SOURCE_FABRICATED");
   // Route downgrade is explicit evidence, not a silently forced Skill refinement.
