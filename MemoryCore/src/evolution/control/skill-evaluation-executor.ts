@@ -10,14 +10,25 @@ import { candidateToEvaluationArtifact, loadOfficialEvaluationArtifact } from ".
 import { hashCanonical } from "../evaluation/contracts/hash.js";
 import type { EvaluationAttempt } from "../evaluation/contracts/types.js";
 import { AcceptanceFixtureAdapter, PHASE5_REAL_LIMITS, acceptanceCaseSet, makeAcceptanceSuite, makeNanobotRunSpecFactory } from "../evaluation/fixtures/acceptance-cases.js";
+import { BenchmarkFixtureAdapter, benchmarkCaseSet, makeBenchmarkSuite, type BenchmarkFixtureSpec } from "../evaluation/fixtures/benchmark-code-fixture.js";
 import { MinimalEvaluationRunner } from "../evaluation/runner/minimal-runner.js";
 import { contentHash, type EvolutionStore } from "./store.js";
 import { EvolutionError, type EvolutionProfile, type EvolutionRecord } from "./types.js";
 
 const configSchema = z.object({
   id: z.string().min(1).max(180), instance_id: z.string().min(1), team_id: z.string().min(1), agent_id: z.string().min(1),
-  suite_kind: z.literal("AC_REGRESSION_V1"), python_executable: z.string().min(1), nanobot_repo: z.string().min(1),
+  // Two suites share everything except where the cases come from. `AC_REGRESSION_V1`
+  // is the in-product acceptance set; `BENCHMARK_CODE_V1` reads a frozen external
+  // task pool through `BenchmarkFixtureAdapter`. Widening this enum is the whole
+  // integration: the runner, the agent adapter and the persistence path are reused.
+  suite_kind: z.enum(["AC_REGRESSION_V1", "BENCHMARK_CODE_V1"]),
+  python_executable: z.string().min(1), nanobot_repo: z.string().min(1),
   nanobot_config: z.string().min(1), model_preset: z.string().min(1), provider: z.string().min(1), model_id: z.string().min(1),
+  // Required only by BENCHMARK_CODE_V1; validated at resolve time below.
+  benchmark_pool_path: z.string().min(1).optional(),
+  benchmark_tasks_path: z.string().min(1).optional(),
+  benchmark_lcb_repo: z.string().min(1).optional(),
+  benchmark_solution_path: z.string().min(1).optional(),
 }).strict();
 type EvaluationConfig = z.infer<typeof configSchema>;
 export interface SkillEvaluationBinding { id: string; fingerprint: string; execute(candidate: EvolutionRecord, job: EvolutionRecord, profile: EvolutionProfile): Promise<EvaluationAttempt> }
@@ -59,7 +70,7 @@ function validateEvaluationEndpoint(configPath: string): void {
     if (typeof endpoint !== "string" || endpoint.length === 0) continue;
     let url: URL;
     try { url = new URL(endpoint); } catch { throw new Error(`provider ${name} endpoint must be an absolute URL`); }
-    if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) continue;
+    if (!["127.0.0.1", "localhost", "::1", "tdai-proxy", "memory-proxy"].includes(url.hostname)) continue;
     if (/(^|\/)dsh(\/|$)/.test(url.pathname)) throw new Error(`EVALUATION_ENDPOINT_AUXILIARY_ROUTE: provider ${name} must not use /dsh/, which skips injection`);
     if (!/^\/[^/]+\/[^/]+\/v1(\/|$)/.test(url.pathname)) throw new Error(`EVALUATION_ENDPOINT_MISSING_SPACE: provider ${name} must route as /<agent>/<spaceId>/v1...`);
   }
@@ -90,6 +101,10 @@ export function fileSkillEvaluationBindings(path: string | undefined, instanceId
       const revision = execFileSync("git", ["-C", config.nanobot_repo, "rev-parse", "HEAD"], { encoding: "utf8", timeout: 5000 }).trim();
       if (!/^[0-9a-f]{40}$/.test(revision)) throw new Error("invalid nanobot revision");
       const publicConfig = { ...config, python_executable: "operator-private", nanobot_config: "operator-private", nanobot_repo: "operator-private", nanobot_revision: revision };
+      if (config.suite_kind === "BENCHMARK_CODE_V1") {
+        const spec = benchmarkSpec(config);
+        return { id: config.id, fingerprint: contentHash(publicConfig), execute: (candidate, job, grant) => executeBenchmarkEvaluation(store, core, config, revision, spec, candidate, job, grant) };
+      }
       return { id: config.id, fingerprint: contentHash(publicConfig), execute: (candidate, job, grant) => executeSkillEvaluation(store, core, config, revision, candidate, job, grant) };
     } catch (error) {
       // Keep the stable code first (callers and tests match on it) but append
@@ -102,8 +117,38 @@ export function fileSkillEvaluationBindings(path: string | undefined, instanceId
   };
 }
 
-async function executeSkillEvaluation(store: EvolutionStore, core: SkillCore, config: EvaluationConfig, revision: string,
-  candidate: EvolutionRecord, job: EvolutionRecord, profile: EvolutionProfile): Promise<EvaluationAttempt> {
+const benchmarkTasksSchema = z.object({
+  revision: z.string().min(1),
+  tasks: z.array(z.object({
+    task_id: z.string().min(1), title: z.string().min(1), goal: z.string().min(1),
+    task_input: z.string().min(1), critical: z.boolean().optional(),
+  }).strict()).min(1).max(500),
+}).strict();
+
+//: Budgets generous enough for a competitive-programming task driven by the
+//: nanobot tool loop; per-task overrides may narrow them.
+const BENCHMARK_DEFAULT_LIMITS = {
+  max_model_calls: 24, max_tool_calls: 40, max_input_tokens: 32_000,
+  max_output_tokens: 8_192, max_total_tokens: 48_000, timeout_ms: 600_000,
+};
+
+/** Resolve the frozen task pool into a fixture spec, refusing partial config. */
+function benchmarkSpec(config: EvaluationConfig): BenchmarkFixtureSpec {
+  const { benchmark_pool_path: pool, benchmark_tasks_path: tasksPath, benchmark_lcb_repo: lcbRepo } = config;
+  const solutionPath = config.benchmark_solution_path ?? "solution.py";
+  if (!pool || !tasksPath || !lcbRepo) throw new Error("BENCHMARK_CONFIG_INCOMPLETE");
+  for (const path of [pool, tasksPath, lcbRepo]) if (!isAbsolute(path)) throw new Error("BENCHMARK_PATH_NOT_ABSOLUTE");
+  // The pool is large, so no mode/size gate here; only its existence is required.
+  if (!statSync(pool).isFile()) throw new Error("BENCHMARK_POOL_NOT_FILE");
+  if (!statSync(tasksPath).isFile()) throw new Error("BENCHMARK_TASKS_NOT_FILE");
+  if (!statSync(lcbRepo).isDirectory()) throw new Error("BENCHMARK_LCB_REPO_NOT_DIR");
+  const parsed = benchmarkTasksSchema.parse(JSON.parse(readFileSync(tasksPath, "utf8")));
+  return { revision: parsed.revision, pool_path: pool, python_executable: config.python_executable,
+    solution_path: solutionPath, lcb_repo: lcbRepo, default_limits: BENCHMARK_DEFAULT_LIMITS, tasks: parsed.tasks };
+}
+
+/** Shared candidate checks: the job must name this candidate and the bytes must match. */
+async function loadEvaluationArtifacts(core: SkillCore, candidate: EvolutionRecord, job: EvolutionRecord) {
   if (candidate.kind !== "candidate" || candidate.origin !== "runtime" || candidate.payload.asset_kind !== "skill"
     || job.payload.job_type !== "evaluation" || job.payload.source_id !== candidate.id || job.payload.source_hash !== candidate.artifact_hash) throw new EvolutionError(409, "LIVE_SKILL_EVALUATION_REQUIRED");
   if (candidate.payload.target_id !== "skl-workspace") throw new EvolutionError(409, "NO_FROZEN_SUITE_FOR_SKILL");
@@ -119,23 +164,52 @@ async function executeSkillEvaluation(store: EvolutionStore, core: SkillCore, co
     user_id: candidate.owner_user_id, skill_id: artifact.skill_id, version: artifact.base_version });
   if (baseline.content !== candidate.payload.before || candidateArtifact.content !== candidate.payload.after
     || contentHash(baseline.content) !== candidate.payload.base_hash) throw new EvolutionError(409, "EVALUATION_ARTIFACT_BYTES_MISMATCH");
-  const caseSet = acceptanceCaseSet("phase5-real-1", PHASE5_REAL_LIMITS), suite = makeAcceptanceSuite("evolution-runtime-ac-regression-v1", caseSet.cases);
-  const maxTokens = caseSet.cases.reduce((sum, item) => sum + item.limits.max_total_tokens * 2, 0);
-  const maxCalls = caseSet.cases.reduce((sum, item) => sum + item.limits.max_model_calls * 2, 0);
+  return { candidateArtifact, baseline };
+}
+
+/** Reserve, run both arms, settle. Every suite differs only in its cases and fixture. */
+async function runPairedEvaluation(
+  core: SkillCore, store: EvolutionStore, config: EvaluationConfig, revision: string,
+  candidate: EvolutionRecord, job: EvolutionRecord,
+  suiteInput: { cases: EvaluationCase[]; suite: EvaluationSuite; fixture: FixtureAdapter },
+): Promise<EvaluationAttempt> {
+  const { candidateArtifact, baseline } = await loadEvaluationArtifacts(core, candidate, job);
+  const maxTokens = suiteInput.cases.reduce((sum, item) => sum + item.limits.max_total_tokens * 2, 0);
+  const maxCalls = suiteInput.cases.reduce((sum, item) => sum + item.limits.max_model_calls * 2, 0);
   const reservation = `${job.id}/evaluation-budget`;
   store.reserve(reservation, candidate.team_id, candidate.agent_id, maxTokens, maxCalls, 0);
   const allowedTools = ["apply_patch", "edit_file", "exec", "find_files", "grep", "list_dir", "read_file", "write_file"];
-  const runner = new MinimalEvaluationRunner({ fixture: new AcceptanceFixtureAdapter(caseSet.fixtures),
+  const runner = new MinimalEvaluationRunner({ fixture: suiteInput.fixture,
     agent: new NanobotAgentAdapter({ python_executable: config.python_executable, config_path: config.nanobot_config, model_preset: config.model_preset, allowed_tools: allowedTools }),
     runSpecFactory: makeNanobotRunSpecFactory({ nanobot_revision: revision, provider: config.provider, model_id: config.model_id,
       tool_schema_hash: hashCanonical({ allowed_tools: allowedTools, state_tools: ["state_read", "state_apply", "state_verify"], nanobot_revision: revision }) }),
   });
-  const attempt = await runner.run({ candidate_id: candidate.id, suite, cases: caseSet.cases, baseline_artifact: baseline, candidate_artifact: candidateArtifact });
+  const attempt = await runner.run({ candidate_id: candidate.id, suite: suiteInput.suite, cases: suiteInput.cases, baseline_artifact: baseline, candidate_artifact: candidateArtifact });
   // Infrastructure failures can have charged calls with missing telemetry; retain the full reservation.
   if (attempt.outcome !== "INFRA_ERROR" && attempt.result) store.settle(reservation,
     attempt.result.cost_summary.baseline.total_tokens + attempt.result.cost_summary.candidate.total_tokens,
     attempt.result.cost_summary.baseline.model_call_count + attempt.result.cost_summary.candidate.model_call_count);
   return attempt;
+}
+
+async function executeSkillEvaluation(store: EvolutionStore, core: SkillCore, config: EvaluationConfig, revision: string,
+  candidate: EvolutionRecord, job: EvolutionRecord, _profile: EvolutionProfile): Promise<EvaluationAttempt> {
+  const caseSet = acceptanceCaseSet("phase5-real-1", PHASE5_REAL_LIMITS);
+  return runPairedEvaluation(core, store, config, revision, candidate, job, {
+    cases: caseSet.cases,
+    suite: makeAcceptanceSuite("evolution-runtime-ac-regression-v1", caseSet.cases),
+    fixture: new AcceptanceFixtureAdapter(caseSet.fixtures),
+  });
+}
+
+async function executeBenchmarkEvaluation(store: EvolutionStore, core: SkillCore, config: EvaluationConfig, revision: string,
+  spec: BenchmarkFixtureSpec, candidate: EvolutionRecord, job: EvolutionRecord, _profile: EvolutionProfile): Promise<EvaluationAttempt> {
+  const caseSet = benchmarkCaseSet(spec);
+  return runPairedEvaluation(core, store, config, revision, candidate, job, {
+    cases: caseSet.cases,
+    suite: makeBenchmarkSuite(`${config.id}-benchmark-code`, caseSet.cases),
+    fixture: new BenchmarkFixtureAdapter(spec),
+  });
 }
 
 export function persistSkillEvaluation(store: EvolutionStore, candidate: EvolutionRecord, job: EvolutionRecord, attempt: EvaluationAttempt): EvolutionRecord {

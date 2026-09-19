@@ -5,7 +5,10 @@ import { EvolutionError } from "./types.js";
 const configSchema = z.object({
   provider: z.literal("openai-compatible"), model: z.string().min(1).max(200), base_url: z.string().url(),
   api_key: z.string().min(1), max_output_tokens: z.number().int().positive(),
-  token_ceiling: z.number().int().positive(), timeout_ms: z.number().int().min(100).max(120000),
+  // The cap used to be 120s. A single reviewer call can legitimately take longer than
+  // that on a loaded endpoint serving a reasoning model, and the abort surfaced as an
+  // opaque MODEL_UPSTREAM_UNAVAILABLE. 10 minutes is a stall bound, not a latency target.
+  token_ceiling: z.number().int().positive(), timeout_ms: z.number().int().min(100).max(600000),
   temperature: z.literal(0), fallback: z.literal(false),
 }).strict();
 export type ReviewModelConfig = z.infer<typeof configSchema>;
@@ -35,8 +38,17 @@ export function createReviewModel(raw: ReviewModelConfig, request: typeof fetch 
             messages: [{ role: "system", content: input.system }, { role: "user", content: input.evidence }] }),
           signal: AbortSignal.timeout(config.timeout_ms),
         });
-      } catch { throw new EvolutionError(503, "MODEL_UPSTREAM_UNAVAILABLE"); }
-      if (!response.ok) throw new EvolutionError(503, "MODEL_UPSTREAM_UNAVAILABLE");
+      } catch (error) {
+        // Keep the stable code, but carry the cause: a bare `catch {}` here made
+        // an intermittent transport failure indistinguishable from a model that
+        // simply was not configured, and that ambiguity cost real debugging time.
+        const cause = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        throw new EvolutionError(503, `MODEL_UPSTREAM_UNAVAILABLE: ${cause}`);
+      }
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new EvolutionError(503, `MODEL_UPSTREAM_UNAVAILABLE: HTTP ${response.status} ${detail.slice(0, 200)}`);
+      }
       let data: unknown;
       try { data = await response.json(); } catch { throw new EvolutionError(503, "MODEL_RESPONSE_INVALID"); }
       const parsed = z.object({ model: z.string(), choices: z.array(z.object({ message: z.object({ content: z.string() }), finish_reason: z.string() })).min(1),

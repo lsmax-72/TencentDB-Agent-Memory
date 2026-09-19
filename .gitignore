@@ -136,3 +136,7 @@ coverage/
 # Local-only: parity snapshots & runtime configs (never commit)
 MemoryProxy/.archive-tmp/
 z_config/
+
+# Local-only: agent research scratch, reports and clippings (never commit)
+.research/
+reports/

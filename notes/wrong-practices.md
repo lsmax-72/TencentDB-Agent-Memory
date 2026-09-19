@@ -8,10 +8,10 @@
 
 | 文档 | 内容 |
 |---|---|
-| `docs/flywheel-gap-analysis.md` | ⭐ **先看这份**。以飞轮方法论为框架，四齿 × 四条数据通路 × 我们的缺口 |
-| `docs/related-work.md` | 相关工作调研。别人怎么做的，以及**文献对我们每条错误实践的直接判定** |
-| `docs/reading-list.md` | 阅读清单。飞轮方法论 + Hermes 解析 + 论文索引，每条标注对应哪个错误实践 |
-| `reports/` | 三个调研 agent 的原始报告（10 份，含主源链接和"我没找到证据的部分"） |
+| `docs/flywheel-gap-analysis.md`（已入库） | ⭐ **先看这份**。以飞轮方法论为框架，四齿 × 四条数据通路 × 我们的缺口 |
+| `docs/related-work.md`（已入库） | 相关工作调研。别人怎么做的，以及**文献对我们每条错误实践的直接判定** |
+| `docs/reading-list.md`（已入库） | 阅读清单。飞轮方法论 + Hermes 解析 + 论文索引，每条标注对应哪个错误实践 |
+| `reports/`（仅本地，未入库） | 三个调研 agent 的原始报告（13 份，含主源链接和"我没找到证据的部分"）。已在 `.gitignore` 中，需要时在本机看 |
 
 **一句话版本**（详见 `docs/flywheel-gap-analysis.md`）：
 
