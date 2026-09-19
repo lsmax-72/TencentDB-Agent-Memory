@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
-"""Thin LiveCodeBench grader for the evolution evaluation binding.
+"""LiveCodeBench grader for the evolution evaluation binding.
 
 This replaces the whole EvoAgentBench driver stack that used to live in
 ``scripts/evoagentbench/``. All of it -- the driver, the proxy bridge, the CLI
 shim, the hand-rolled retrieve/inject/extract layer -- existed only because the
 benchmark could not reuse the product's own evaluation path. What is genuinely
-this project's own is the *grading*: everything else is now line A's
+this project's own is *grading an external suite*: everything else is line A's
 ``MinimalEvaluationRunner`` + ``NanobotAgentAdapter``.
 
-Contract: read one task from a frozen pool, grade the solution file found in the
-agent's workspace, and exit 0 only when every test passes. The Oracle asserts on
-the exit code, so this script must never report success for a suite that did not
-run -- an unrunnable submission is a failure, not a pass. That distinction is
-the exact bug that made two earlier instruments unreadable.
+Grading is delegated to LiveCodeBench's own scorer, ``check_correctness``. The
+previous version imported ``benchmark.src.domains.code_implementation.livecode``
+from a checkout that only existed on the author's laptop, so inside the
+evaluation container every graded arm died with ``ModuleNotFoundError``. That
+was recorded as an ordinary task failure, which made a broken instrument look
+like a null effect.
+
+Exit codes are part of the contract, because the Oracle asserts on them:
+
+  0  every test passed
+  1  a graded failure: no submission, or the submission failed its tests
+  2  the grader itself could not run (missing repo, unloadable task, checker
+     crash). The fixture adapter turns this into an INFRA_ERROR, never a
+     task failure, so an unvalidated instrument can never report a null effect.
 
 Usage:
   benchmark_code_grader.py --pool <pool.jsonl> --task <id> \
@@ -23,17 +32,31 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
-DEFAULT_LCB_REPO = "/Users/lsmax/Coder/LiveCodeBench"
-#: The harness that owns `_verify_code`; still the official scoring path.
-EVO_REPO = "/Users/lsmax/Coder/EvoAgentBench"
-BENCH_SRC = f"{EVO_REPO}/benchmark/src"
+#: Exit code that means "the instrument failed", not "the submission failed".
+GRADER_UNAVAILABLE = 2
+
+#: Search order for the LiveCodeBench checkout that owns `lcb_runner`.
+DEFAULT_LCB_REPOS = ("/opt/lcb", "/Users/lsmax/Coder/LiveCodeBench")
+
+
+def resolve_lcb_repo(explicit: str | None) -> Path:
+    candidates = [explicit, os.environ.get("LCB_REPO"), *DEFAULT_LCB_REPOS]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        root = Path(candidate)
+        if (root / "lcb_runner").is_dir():
+            return root
+    raise RuntimeError(f"no LiveCodeBench checkout with lcb_runner; tried {[c for c in candidates if c]}")
 
 
 def load_problem(pool: Path, task_id: str):
-    for path in (pool, *sorted(pool.parent.glob("*.jsonl"))):
+    paths = [pool, *sorted(pool.parent.glob("*.jsonl"))] if pool.parent.is_dir() else [pool]
+    for path in paths:
         if not path.is_file():
             continue
         with path.open() as handle:
@@ -44,18 +67,10 @@ def load_problem(pool: Path, task_id: str):
                 record = json.loads(line)
                 if record.get("question_id") == task_id:
                     return record
-    raise SystemExit(f"TASK_NOT_IN_POOL:{task_id}")
+    raise RuntimeError(f"TASK_NOT_IN_POOL:{task_id} in {pool}")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--pool", required=True)
-    parser.add_argument("--task", required=True)
-    parser.add_argument("--solution", required=True)
-    parser.add_argument("--lcb-repo", default=DEFAULT_LCB_REPO)
-    parser.add_argument("--timeout", type=int, default=6)
-    args = parser.parse_args()
-
+def grade(args: argparse.Namespace) -> int:
     solution = Path(args.solution)
     if not solution.is_file():
         # No submission is a graded failure, never an infrastructure pass.
@@ -63,23 +78,41 @@ def main() -> int:
         return 1
     code = solution.read_text()
 
-    # Both roots are needed: EVO_REPO resolves `benchmark.src...`, while
-    # BENCH_SRC satisfies the `from domains.base import ...` inside livecode.py.
-    for path in (EVO_REPO, BENCH_SRC, args.lcb_repo):
-        if path not in sys.path:
-            sys.path.insert(0, path)
-    import benchmark.src.domains.code_implementation.livecode as livecode
-    livecode._LCB_REPO = Path(args.lcb_repo)
+    lcb_repo = resolve_lcb_repo(args.lcb_repo)
+    if str(lcb_repo) not in sys.path:
+        sys.path.insert(0, str(lcb_repo))
     from lcb_runner.benchmarks.code_generation import CodeGenerationProblem
+    from lcb_runner.evaluation.compute_code_generation_metrics import check_correctness
 
     problem = CodeGenerationProblem(**load_problem(Path(args.pool), args.task))
-    result = livecode._verify_code(problem, code, timeout=args.timeout)
+    sample = problem.get_evaluation_sample()
+    # A checker crash is not a verdict on the submission; `check_correctness`
+    # already scores syntax and runtime errors as ordinary failures, so anything
+    # that escapes it is the harness misbehaving.
+    result_list, _metadata = check_correctness(sample, code, timeout=args.timeout)
 
-    total = result.get("total") or 0
-    passed = result.get("passed") or 0
-    print(json.dumps({k: result.get(k) for k in ("passed", "total", "reward", "error")}))
+    results = [r is True or r == 1 for r in result_list]
+    total = len(results)
+    passed = sum(1 for r in results if r)
+    print(json.dumps({"passed": passed, "total": total, "reward": 1.0 if total and passed == total else 0.0}))
     # A zero-length suite means the tests never ran; refuse to call that a pass.
     return 0 if total > 0 and passed == total else 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pool", required=True)
+    parser.add_argument("--task", required=True)
+    parser.add_argument("--solution", required=True)
+    parser.add_argument("--lcb-repo", default=None)
+    parser.add_argument("--timeout", type=int, default=6)
+    args = parser.parse_args()
+
+    try:
+        return grade(args)
+    except Exception as error:  # noqa: BLE001 - the exit code is the contract
+        print(f"GRADER_UNAVAILABLE:{type(error).__name__}:{error}")
+        return GRADER_UNAVAILABLE
 
 
 if __name__ == "__main__":

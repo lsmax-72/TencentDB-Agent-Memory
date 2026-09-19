@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { EvaluationCase } from "../contracts/types.js";
@@ -82,7 +83,33 @@ describe.skipIf(!available)("benchmark fixture adapter", () => {
 
     await prepared.dispose?.();
   });
+});
 
+describe.skipIf(!existsSync(PYTHON))("benchmark fixture instrument failures", () => {
+  it("reports an unusable grader as INFRA, never as a task failure", async () => {
+    const { cases } = benchmarkCaseSet(spec);
+    const evaluationCase: EvaluationCase = cases[0];
+    // A grader that cannot run must not be recorded as a candidate that did not
+    // help: exit 2 is the fixture's instrument-failure signal.
+    const stub = join(tmpdir(), `grader-stub-${process.pid}.py`);
+    await writeFile(stub, 'import sys\nprint("GRADER_UNAVAILABLE:no lcb_runner")\nsys.exit(2)\n', "utf8");
+    const broken = new BenchmarkFixtureAdapter(spec, stub);
+    const prepared = await broken.prepare({ evaluation_case: evaluationCase, arm: "BASELINE", session_id: "s2" });
+    await writeFile(join(prepared.workspace_dir, spec.solution_path), GOLD, "utf8");
+    const context = {
+      workspace_dir: prepared.workspace_dir, changed_paths: [], tool_calls: [],
+      commands: prepared.commands, schemas: prepared.schemas,
+    };
+    await expect(prepared.commands.grade(context)).rejects.toMatchObject({
+      kind: "INFRA",
+      code: "ORACLE_EXECUTION_ERROR",
+    });
+    await prepared.dispose?.();
+    await rm(stub, { force: true });
+  });
+});
+
+describe.skipIf(!available)("benchmark suite identity", () => {
   it("freezes an immutable suite and ships the grader beside the adapter", async () => {
     const { cases } = benchmarkCaseSet(spec);
     const suite = makeBenchmarkSuite("benchmark-code-v1", cases, "skl-test-target");

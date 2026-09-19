@@ -127,9 +127,16 @@ const benchmarkTasksSchema = z.object({
 
 //: Budgets generous enough for a competitive-programming task driven by the
 //: nanobot tool loop; per-task overrides may narrow them.
+//:
+//: `max_output_tokens` is deliberately below the model's 8k ceiling. The served
+//: qwen3.8-27b decodes at ~36 tok/s and reasons before answering, so an 8k
+//: completion alone needs ~226s -- longer than the 300s wall several proxies in
+//: front of it enforce. One observed arm spent its whole 300s budget on a single
+//: call and produced no submission at all, which the instrument then reported as
+//: a task failure. A 4k ceiling keeps the worst case near 115s.
 const BENCHMARK_DEFAULT_LIMITS = {
   max_model_calls: 24, max_tool_calls: 40, max_input_tokens: 32_000,
-  max_output_tokens: 8_192, max_total_tokens: 48_000, timeout_ms: 600_000,
+  max_output_tokens: 4_096, max_total_tokens: 48_000, timeout_ms: 1_800_000,
 };
 
 /** Resolve the frozen task pool into a fixture spec, refusing partial config. */

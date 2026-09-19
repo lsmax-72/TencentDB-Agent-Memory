@@ -15,6 +15,10 @@ import type {
   OracleSpec,
 } from "../contracts/types.js";
 import type { FixtureAdapter, PreparedFixture } from "../runner/minimal-runner.js";
+import { EvaluationExecutionError } from "../runner/minimal-runner.js";
+
+/** The grader's "instrument could not run" exit code; see benchmark_code_grader.py. */
+const GRADER_UNAVAILABLE = 2;
 
 /**
  * Benchmark fixture adapter: the *only* part of the retired EvoAgentBench stack
@@ -138,7 +142,15 @@ export class BenchmarkFixtureAdapter implements FixtureAdapter {
             // A missing submission is a graded failure, never an infra pass.
             return { exit_code: 1, output: JSON.stringify({ error: "SOLUTION_MISSING", path: this.spec.solution_path }) };
           }
-          return this.runGrader(task.task_id, context.workspace_dir);
+          const graded = await this.runGrader(task.task_id, context.workspace_dir);
+          // Exit 2 is the grader's "I could not run" code. Letting it fall through
+          // as an ordinary non-zero exit would record a broken instrument as a
+          // task failure, which is indistinguishable from a null effect -- the
+          // exact confusion that made an earlier round unreadable.
+          if (graded.exit_code === GRADER_UNAVAILABLE) {
+            throw new EvaluationExecutionError("INFRA", "ORACLE_EXECUTION_ERROR", graded.output.slice(0, 500));
+          }
+          return graded;
         },
       },
       dispose: async () => {
