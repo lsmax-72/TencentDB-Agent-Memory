@@ -360,6 +360,16 @@ final_output = final_output[:12_000]               # 截断
 
 **教训**：跑任何 benchmark 前，必须先用已知答案（gold patch / 空 patch）验证判分器能分别给出满分和零分。这一步我们每次都跳过了。
 
+**第三次犯（2026-09-19，就在把原生链路接通的当天）**：新建的原生配对评测（`benchmark_code_grader.py`）判分器**一次都没跑起来过**。
+
+- 它从**写死的 macOS 路径**（`/Users/lsmax/Coder/EvoAgentBench`）导入 `livecode` 模块。评测跑在容器里，那个路径不存在 → 每个被判分的 arm 都是 `ModuleNotFoundError: No module named 'benchmark'`。
+- Oracle 只断言"退出码 = 0"，于是**判分器崩溃被记成"任务失败"**。第一次真实配对评测的输出是 `newly_fixed=0, newly_broken=0, gate=FAIL`——**看起来完全像一个"技能没效果"的零结果**，实际上**一个任务都没有被判过分**。
+- 同一轮里还有两个同源问题：一个 arm 把全部 300s 墙钟花在**单次模型调用**上（模型 36 tok/s × 8k 输出上限 ≈ 226s，再叠加上下文预填充就超了 300s），最终没写出 `solution.py`；这两个也都以"任务失败"的形式进了统计。
+
+**修法（已落地）**：判分器改用 LiveCodeBench 自己的 `check_correctness`（EvoAgentBench 的 `_verify_code` 本来也只是它的薄包装），仓库路径按 `--lcb-repo` → `LCB_REPO` → 搜索路径解析；**跑不起来就 exit 2**。`exit 2` 是"仪器故障"契约：fixture 把它转成 `INFRA/ORACLE_EXECUTION_ERROR`，**仪器故障永远不会被读成零效果**。`exit 1` 才是判分失败，`exit 0` 才是全过。同时把输出上限压到 4096 token（最坏 ~115s），并加了一条单测证明 exit 2 变成 INFRA 而不是 TASK_FAIL。
+
+> 这一条是错误实践 9 的**教科书级复现**：不是"我们忘了验证仪器"，而是**仪器坏了会自动伪装成零结果**，而且伪装得比真零结果还像。所以护栏不能是"记得去验证"，必须是**架构上的**——判分器无法运行时必须走一条**物理上不可能**被记成任务失败的出口。
+
 **调研后的补充：这不是"常识"，这是一条有公开参考实现的行业规范。**（2026-09-18）
 
 | 系统 | 硬门 |
