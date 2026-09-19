@@ -199,12 +199,16 @@ export function benchmarkCaseSet(spec: BenchmarkFixtureSpec): BenchmarkCaseSet {
 export function makeBenchmarkSuite(
   id: string,
   cases: EvaluationCase[],
+  targetSkillId: string,
   gatePolicy: GatePolicy = BENCHMARK_GATE_POLICY,
 ): EvaluationSuite {
   const withoutHash = {
     suite_id: id,
     revision: cases[0]?.revision ?? "1",
-    target_skill_id: "skl-workspace",
+    // The skill the suite measures. It used to be the literal "skl-workspace"
+    // placeholder, which made every suite claim to measure a skill that does not
+    // exist; the candidate's own skill is the only correct value.
+    target_skill_id: targetSkillId,
     cases: cases.map((evaluationCase) => ({
       id: evaluationCase.case_id,
       revision: evaluationCase.revision,

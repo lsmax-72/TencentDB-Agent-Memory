@@ -151,7 +151,11 @@ function benchmarkSpec(config: EvaluationConfig): BenchmarkFixtureSpec {
 async function loadEvaluationArtifacts(core: SkillCore, candidate: EvolutionRecord, job: EvolutionRecord) {
   if (candidate.kind !== "candidate" || candidate.origin !== "runtime" || candidate.payload.asset_kind !== "skill"
     || job.payload.job_type !== "evaluation" || job.payload.source_id !== candidate.id || job.payload.source_hash !== candidate.artifact_hash) throw new EvolutionError(409, "LIVE_SKILL_EVALUATION_REQUIRED");
-  if (candidate.payload.target_id !== "skl-workspace") throw new EvolutionError(409, "NO_FROZEN_SUITE_FOR_SKILL");
+  // This used to require `target_id === "skl-workspace"`, a placeholder left over
+  // from the retired in-house skill line. It rejected every real asset, because
+  // no live skill is called that. The binding that actually matters is below:
+  // the artifact must carry the candidate's own skill id, and its bytes must
+  // match both the candidate and the official baseline.
   const artifact = candidate.payload.skill_artifact as CandidateArtifact;
   const sha = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
   const expectedCandidateArtifact = sha(JSON.stringify({ skill_id: artifact?.skill_id, base_version: artifact?.base_version,
@@ -197,7 +201,7 @@ async function executeSkillEvaluation(store: EvolutionStore, core: SkillCore, co
   const caseSet = acceptanceCaseSet("phase5-real-1", PHASE5_REAL_LIMITS);
   return runPairedEvaluation(core, store, config, revision, candidate, job, {
     cases: caseSet.cases,
-    suite: makeAcceptanceSuite("evolution-runtime-ac-regression-v1", caseSet.cases),
+    suite: makeAcceptanceSuite("evolution-runtime-ac-regression-v1", caseSet.cases, String(candidate.payload.target_id)),
     fixture: new AcceptanceFixtureAdapter(caseSet.fixtures),
   });
 }
@@ -207,7 +211,7 @@ async function executeBenchmarkEvaluation(store: EvolutionStore, core: SkillCore
   const caseSet = benchmarkCaseSet(spec);
   return runPairedEvaluation(core, store, config, revision, candidate, job, {
     cases: caseSet.cases,
-    suite: makeBenchmarkSuite(`${config.id}-benchmark-code`, caseSet.cases),
+    suite: makeBenchmarkSuite(`${config.id}-benchmark-code`, caseSet.cases, String(candidate.payload.target_id)),
     fixture: new BenchmarkFixtureAdapter(spec),
   });
 }

@@ -85,13 +85,16 @@ describe.skipIf(!available)("benchmark fixture adapter", () => {
 
   it("freezes an immutable suite and ships the grader beside the adapter", async () => {
     const { cases } = benchmarkCaseSet(spec);
-    const suite = makeBenchmarkSuite("benchmark-code-v1", cases);
+    const suite = makeBenchmarkSuite("benchmark-code-v1", cases, "skl-test-target");
     expect(suite.suite_hash).toMatch(/^sha256:/);
     expect(suite.cases).toEqual([
       { id: "abc387_b", revision: "1", hash: cases[0].case_hash },
     ]);
-    // Same suite content hashes identically; a changed gate policy does not.
-    expect(makeBenchmarkSuite("benchmark-code-v1", cases).suite_hash).toBe(suite.suite_hash);
+    // Same suite content hashes identically. `suite_hash` covers cases and gate
+    // policy only; the measured skill travels in `target_skill_id` and the
+    // attempt's baseline/candidate artifact hashes carry the skill provenance.
+    expect(makeBenchmarkSuite("benchmark-code-v1", cases, "skl-test-target").suite_hash).toBe(suite.suite_hash);
+    expect(suite.target_skill_id).toBe("skl-test-target");
     expect(existsSync(defaultGraderScript())).toBe(true);
   });
 });

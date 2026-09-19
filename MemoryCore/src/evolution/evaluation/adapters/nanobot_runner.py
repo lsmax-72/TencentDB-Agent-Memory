@@ -208,7 +208,7 @@ async def _run(request: dict[str, Any]) -> dict[str, Any]:
         return _failure("INFRA", "ENVIRONMENT_SETUP_FAILED", "workspace does not exist")
 
     config = json.loads(Path(request["config_path"]).expanduser().read_text(encoding="utf-8"))
-    _apply_evaluation_config(config, request)
+    preset = _apply_evaluation_config(config, request)
     # Fail loudly on an invalid config. nanobot's `load_config` catches
     # `ValidationError` (a ValueError) and falls back to DEFAULT configuration
     # with only a printed warning, so an unusable config otherwise presents as a
@@ -228,7 +228,7 @@ async def _run(request: dict[str, Any]) -> dict[str, Any]:
             bot = Nanobot.from_config(
                 config_path=config_path,
                 workspace=workspace,
-                model_preset=request["model"].get("model_preset"),
+                model_preset=preset,
             )
             _restrict_tools(bot, request["tool_policy"], workspace)
 
@@ -370,8 +370,11 @@ def _config_validation_error(config: dict[str, Any]) -> str | None:
     return None
 
 
-def _apply_evaluation_config(config: dict[str, Any], request: dict[str, Any]) -> None:
+def _apply_evaluation_config(config: dict[str, Any], request: dict[str, Any]) -> str | None:
     """Overlay the RunSpec onto a copy of the operator's nanobot config.
+
+    Returns the preset name to hand to `Nanobot.from_config`, or None when the
+    operator's file defines no such preset.
 
     Every key written here must match nanobot's real field names. The previous
     version used camelCase (`fallbackModels`, `maxToolIterations`,
@@ -393,6 +396,7 @@ def _apply_evaluation_config(config: dict[str, Any], request: dict[str, Any]) ->
     if request["budget"].get("max_model_calls"):
         defaults["max_tool_iterations"] = request["budget"]["max_model_calls"]
     defaults.setdefault("dream", {})["enabled"] = False
+    resolved_preset: str | None = None
     preset_name = request["model"].get("model_preset")
     if preset_name:
         # nanobot stores these under `model_presets`; accept the camelCase form
@@ -405,9 +409,15 @@ def _apply_evaluation_config(config: dict[str, Any], request: dict[str, Any]) ->
             if preset.get("provider") != request["model"]["provider"]:
                 raise ValueError("configured preset provider differs from RunSpec")
             preset["temperature"] = request["model"]["temperature"]
-        # A missing preset is not fatal: model/provider are already set above.
+            resolved_preset = preset_name
+        # A RunSpec may name a preset the operator's file does not define. It is
+        # not fatal -- model and provider are already set above -- but it must
+        # not be forwarded either: `Nanobot.from_config` validates the name
+        # against `model_presets` and raises, which failed every evaluation whose
+        # profile named a preset nobody had written into the file.
     tools = config.setdefault("tools", {})
     tools["restrict_to_workspace"] = True
+    return resolved_preset
 
 
 def _restrict_tools(bot: Nanobot, policy: dict[str, Any], workspace: Path) -> None:

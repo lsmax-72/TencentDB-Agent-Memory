@@ -261,12 +261,15 @@ export class AcceptanceFixtureAdapter implements FixtureAdapter {
 export function makeAcceptanceSuite(
   id: string,
   cases: EvaluationCase[],
+  targetSkillId: string,
   gatePolicy: GatePolicy = ACCEPTANCE_GATE_POLICY,
 ): EvaluationSuite {
   const withoutHash = {
     suite_id: id,
     revision: cases[0]?.revision ?? "1",
-    target_skill_id: "skl-workspace",
+    // See makeBenchmarkSuite: the skill under test is the candidate's, never a
+    // hardcoded placeholder.
+    target_skill_id: targetSkillId,
     cases: cases.map(caseRef),
     gate_policy: gatePolicy,
   };
