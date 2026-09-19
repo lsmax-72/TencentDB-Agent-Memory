@@ -36,11 +36,32 @@ export async function loadOfficialEvaluationArtifact(
   });
 }
 
+/**
+ * The baseline for a brand-new skill.
+ *
+ * A CREATE candidate has no earlier version to compare against, so the only
+ * honest baseline is "the same agent with no skill at all". Making it explicit
+ * is what lets a new skill be effect-evaluated at all: `CREATE` is what the
+ * proposal model emits whenever the diagnosis reads as "there is no SOP for
+ * this", and rejecting those candidates meant the loop could generate a new
+ * skill but never produce the adoption proof it needs.
+ */
+export function emptyEvaluationArtifact(skillId: string): EvaluationSkillArtifact {
+  return makeArtifact({
+    artifact_id: `empty:${skillId}`,
+    source: "OFFICIAL",
+    source_ref: `${skillId}@v0`,
+    skill_id: skillId,
+    base_version: 0,
+    content: "",
+  });
+}
+
 export function candidateToEvaluationArtifact(
   candidate: CandidateArtifact,
 ): EvaluationSkillArtifact {
-  if (candidate.operation !== "UPDATE" || candidate.base_version <= 0) {
-    throw new Error("NEW_SKILL_CANDIDATE_NOT_SUPPORTED_BY_PAIRED_EVALUATION_V1");
+  if (!["CREATE", "UPDATE"].includes(candidate.operation) || candidate.base_version < 0) {
+    throw new Error(`UNSUPPORTED_CANDIDATE_OPERATION:${candidate.operation}`);
   }
   if (computeArtifactHashes({
     artifact_id: candidate.candidate_id,

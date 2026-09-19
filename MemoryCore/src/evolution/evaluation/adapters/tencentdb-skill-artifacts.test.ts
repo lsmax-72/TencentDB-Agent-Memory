@@ -2,7 +2,8 @@ import { expect, it, vi } from "vitest";
 import { CandidateSkillWorkspace } from "../../../core/skill/candidate-skill-workspace.js";
 import type { SkillToolsBackend } from "../../../core/skill/skill-tools.js";
 import type { Skill } from "../../../core/skill/types.js";
-import { candidateToEvaluationArtifact, loadOfficialEvaluationArtifact } from "./tencentdb-skill-artifacts.js";
+import { computeArtifactHashes } from "../contracts/hash.js";
+import { EVALUATION_SKILL_INJECTION_REVISION, candidateToEvaluationArtifact, emptyEvaluationArtifact, loadOfficialEvaluationArtifact } from "./tencentdb-skill-artifacts.js";
 
 const CONTENT = `---
 name: workspace-operation
@@ -67,4 +68,37 @@ it("loads an explicit official version and converts an isolated Candidate", asyn
   expect(baseline.base_version).toBe(candidate.base_version);
   expect(baseline.artifact_hash).not.toBe(candidate.artifact_hash);
   expect(update).not.toHaveBeenCalled();
+});
+
+it("gives a brand-new skill an empty baseline instead of refusing to evaluate it", () => {
+  // `CREATE` is what the proposal model emits when the diagnosis reads as
+  // "there is no SOP for this". It used to throw
+  // NEW_SKILL_CANDIDATE_NOT_SUPPORTED_BY_PAIRED_EVALUATION_V1, so a new skill
+  // could be generated but never evaluated, and therefore never adopted.
+  const withoutHashes = {
+    artifact_id: "candidate-new",
+    source: "CANDIDATE" as const,
+    source_ref: "candidate-new",
+    skill_id: "candidate-skill-new",
+    base_version: 0,
+    format: "SKILL_MD_V1" as const,
+    content: CONTENT,
+    injection_contract_revision: EVALUATION_SKILL_INJECTION_REVISION,
+    read_only: true as const,
+  };
+  const created = candidateToEvaluationArtifact({
+    candidate_id: "candidate-new",
+    operation: "CREATE",
+    skill_id: "candidate-skill-new",
+    base_version: 0,
+    content: CONTENT,
+    ...computeArtifactHashes(withoutHashes),
+  } as unknown as Parameters<typeof candidateToEvaluationArtifact>[0]);
+  const baseline = emptyEvaluationArtifact("candidate-skill-new");
+  expect(baseline.content).toBe("");
+  expect(baseline.base_version).toBe(0);
+  expect(baseline.skill_id).toBe(created.skill_id);
+  expect(baseline.artifact_hash).not.toBe(created.artifact_hash);
+  // Deterministic: the same empty baseline always hashes identically.
+  expect(emptyEvaluationArtifact("candidate-skill-new").artifact_hash).toBe(baseline.artifact_hash);
 });

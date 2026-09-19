@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { SkillCore } from "../../core/skill/skill-core.js";
 import type { CandidateArtifact } from "../../core/skill/candidate-types.js";
 import { NanobotAgentAdapter } from "../evaluation/adapters/nanobot-agent-adapter.js";
-import { candidateToEvaluationArtifact, loadOfficialEvaluationArtifact } from "../evaluation/adapters/tencentdb-skill-artifacts.js";
+import { candidateToEvaluationArtifact, emptyEvaluationArtifact, loadOfficialEvaluationArtifact } from "../evaluation/adapters/tencentdb-skill-artifacts.js";
 import { hashCanonical } from "../evaluation/contracts/hash.js";
 import type { EvaluationAttempt } from "../evaluation/contracts/types.js";
 import { AcceptanceFixtureAdapter, PHASE5_REAL_LIMITS, acceptanceCaseSet, makeAcceptanceSuite, makeNanobotRunSpecFactory } from "../evaluation/fixtures/acceptance-cases.js";
@@ -174,12 +174,17 @@ async function loadEvaluationArtifacts(core: SkillCore, candidate: EvolutionReco
   const sha = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
   const expectedCandidateArtifact = sha(JSON.stringify({ skill_id: artifact?.skill_id, base_version: artifact?.base_version,
     content_hash: artifact?.content_hash, format: "SKILL_MD_V1" }));
-  if (!artifact || artifact.operation !== "UPDATE" || artifact.skill_id !== candidate.payload.target_id
+  if (!artifact || !["CREATE", "UPDATE"].includes(artifact.operation) || artifact.skill_id !== candidate.payload.target_id
     || artifact.content !== candidate.payload.after || artifact.content_hash !== sha(candidate.payload.after)
     || artifact.artifact_hash !== expectedCandidateArtifact) throw new EvolutionError(409, "SKILL_ARTIFACT_MISMATCH");
   const candidateArtifact = candidateToEvaluationArtifact(artifact);
-  const baseline = await loadOfficialEvaluationArtifact(core, { team_id: candidate.team_id, agent_id: candidate.agent_id,
-    user_id: candidate.owner_user_id, skill_id: artifact.skill_id, version: artifact.base_version });
+  // A CREATE candidate is measured against no skill at all; an UPDATE candidate
+  // against the official version it was derived from. Both end up as a frozen
+  // artifact with a real hash, so the rest of the runner is unchanged.
+  const baseline = artifact.operation === "CREATE"
+    ? emptyEvaluationArtifact(artifact.skill_id)
+    : await loadOfficialEvaluationArtifact(core, { team_id: candidate.team_id, agent_id: candidate.agent_id,
+        user_id: candidate.owner_user_id, skill_id: artifact.skill_id, version: artifact.base_version });
   if (baseline.content !== candidate.payload.before || candidateArtifact.content !== candidate.payload.after
     || contentHash(baseline.content) !== candidate.payload.base_hash) throw new EvolutionError(409, "EVALUATION_ARTIFACT_BYTES_MISMATCH");
   return { candidateArtifact, baseline };
