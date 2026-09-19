@@ -74,6 +74,33 @@ const benchmarkIngestSchema = scopeSchema.extend({
   evidence_limitations: z.array(z.string().max(500)).max(20), contamination_findings: z.array(z.string().max(300)).max(100),
 }).strict();
 
+// Candidate-scoped benchmark evidence. This is the wiring the research sink
+// above deliberately does not provide: `benchmark/attempt/ingest` records a
+// protocol-level result and is explicitly research-only, so nothing it writes
+// can ever satisfy `adoptionProof`. This action lets a caller name the exact
+// candidate a paired benchmark result belongs to, and writes the attempt in the
+// shape the adoption gate already reads (`skill_effect_evaluation` with a
+// `parent_id`, the candidate's artifact hash, and top-level paired counts).
+// It still cannot promote anything on its own: promotion remains behind
+// `review/decide` plus `adoption/apply`.
+const benchmarkCandidateEvidenceSchema = scopeSchema.extend({
+  agent_id: id, candidate_id: id, attempt_id: id,
+  protocol_id: z.enum([
+    "tdai-evoagentbench-code-v1",
+    "tdai-evoagentbench-code-v2-discriminative",
+    "tdai-evoagentbench-code-v3-trace2skill",
+    "tdai-evoagentbench-code-v3-suite-generation-v2",
+    "tdai-evoagentbench-code-v5-factorial-heldout",
+    "tdai-evoagentbench-code-v5-factorial-generation-v2",
+    "tdai-evoagentbench-code-v5-factorial-generation-v3",
+    "tdai-evoagentbench-code-v5-factorial-frozen-composite-v1",
+  ]),
+  protocol_hash: z.string().regex(/^[a-f0-9]{64}$/), source_hash: z.string().regex(/^[a-f0-9]{64}$/),
+  phase: z.enum(["development", "test_checkpoint", "test"]),
+  comparison: benchmarkComparison,
+  evidence_limitations: z.array(z.string().max(500)).max(20),
+}).strict();
+
 const benchmarkRunIngestSchema = scopeSchema.extend({
   agent_id: id, task_id: id, run_id: id, session_id: id,
   protocol_hash: z.string().regex(/^[a-f0-9]{64}$/),
@@ -88,7 +115,7 @@ const benchmarkRunIngestSchema = scopeSchema.extend({
   injected_assets: z.array(z.object({ id, hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).max(4),
 }).strict();
 
-export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "observation/ingest", "benchmark/run/ingest", "benchmark/attempt/ingest", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
+export const EVOLUTION_ACTIONS = ["overview", "records/list", "records/get", "profiles/list", "profiles/options", "profiles/save", "observation/ingest", "benchmark/run/ingest", "benchmark/attempt/ingest", "benchmark/candidate/evidence", "task/complete", "diagnosis/request", "diagnosis/retry", "generation/retry", "validation/request", "validation/retry", "evaluation/request", "evaluation/retry", "review/decide", "adoption/apply", "adoption/reconcile"] as const;
 
 interface EvolutionConfiguration {
   reviewBindingIds(teamId: string, agentId: string): string[];
@@ -332,6 +359,40 @@ export class EvolutionService {
           research_only: true, promotion_allowed: false, test_traces_candidate_eligible: false,
         },
       }, `${actor.id}/evoagentbench/${input.attempt_id}/${input.source_hash}`, actor.id);
+    }
+    if (action === "benchmark/candidate/evidence") {
+      const input = benchmarkCandidateEvidenceSchema.parse(body);
+      const agent = await this.metadata.getAgentById(input.agent_id);
+      if (!agent || agent.team_id !== team_id || agent.status !== "active" || agent.owner_user_id !== actor.id) {
+        throw new EvolutionError(403, "AGENT_OWNER_REQUIRED");
+      }
+      const candidate = this.store.get(input.candidate_id);
+      if (!candidate || candidate.team_id !== team_id || !await this.mayRead(candidate, actor.id)) {
+        throw new EvolutionError(404, "RECORD_NOT_FOUND");
+      }
+      if (candidate.kind !== "candidate" || candidate.payload.asset_kind !== "skill") {
+        throw new EvolutionError(409, "SKILL_CANDIDATE_REQUIRED");
+      }
+      // The gate is evaluated here, from the paired counts alone, so a caller
+      // cannot assert a pass it did not measure; and a FAIL is still recorded,
+      // because a rejection is evidence too.
+      const { newly_fixed: newlyFixed, newly_broken: newlyBroken } = input.comparison.counts;
+      const gate = newlyFixed >= 1 && newlyBroken === 0 ? "PASS" : "FAIL";
+      return this.store.append({
+        team_id, owner_user_id: actor.id, agent_id: input.agent_id, kind: "attempt", origin: "runtime",
+        parent_id: candidate.id, title: `EvoAgentBench 配对评测：${candidate.title}`,
+        status: gate, asset_ids: candidate.asset_ids,
+        payload: {
+          attempt_type: "skill_effect_evaluation", candidate_hash: candidate.artifact_hash,
+          gate_result: gate, newly_fixed: newlyFixed, newly_broken: newlyBroken,
+          protocol_id: input.protocol_id, protocol_hash: input.protocol_hash, source_hash: input.source_hash,
+          phase: input.phase, pairs: input.comparison.pairs, comparison_summary: input.comparison.counts,
+          transfer_gain: input.comparison.transfer_gain, paired_bootstrap_95_ci: input.comparison.paired_bootstrap_95_ci,
+          pass_at_1: input.comparison.pass_at_1, token_cost_change: input.comparison.token_cost_change,
+          demonstrates_improvement: gate === "PASS", evidence_source: "evoagentbench_paired",
+          evidence_limitations: input.evidence_limitations,
+        },
+      }, `${actor.id}/evoagentbench/${input.attempt_id}/${input.source_hash}/candidate/${candidate.id}`, actor.id);
     }
     if (action === "benchmark/run/ingest") {
       const input = benchmarkRunIngestSchema.parse(body);
