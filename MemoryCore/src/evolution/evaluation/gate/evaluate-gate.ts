@@ -1,4 +1,5 @@
 import { computeGatePolicyHash } from "../contracts/hash.js";
+import { aggregateCosts } from "./cost.js";
 import type {
   CostSummary,
   GatePolicy,
@@ -10,7 +11,7 @@ import type {
 
 export function evaluateGate(
   pairedResults: PairedCaseResult[],
-  costSummary: CostSummary,
+  _suiteCostSummary: CostSummary,
   gatePolicy: GatePolicy,
 ): GateResult {
   const policy_hash = computeGatePolicyHash(gatePolicy);
@@ -49,22 +50,35 @@ export function evaluateGate(
     reasons.push({ code: "CANDIDATE_BUDGET_EXHAUSTED", case_ids: budgetFailures });
   }
 
-  const tokenRegression = costSummary.token_increase_ratio === null
-    ? costSummary.candidate.total_tokens > 0
-    : costSummary.token_increase_ratio > gatePolicy.max_total_token_increase_ratio;
-  if (tokenRegression) {
-    reasons.push({
-      code: "TOKEN_COST_REGRESSION",
-      observed: costSummary.token_increase_ratio ?? "ZERO_BASELINE",
-      limit: gatePolicy.max_total_token_increase_ratio,
-    });
-  }
-  if (costSummary.tool_call_increase > gatePolicy.max_total_tool_call_increase) {
-    reasons.push({
-      code: "TOOL_COST_REGRESSION",
-      observed: costSummary.tool_call_increase,
-      limit: gatePolicy.max_total_tool_call_increase,
-    });
+  // Cost regression is measured only on cases whose outcome did not change.
+  //
+  // Comparing suite-wide totals is not a fair cost test when the baseline gives
+  // up: an arm that aborts after 8 calls is cheap precisely because it failed,
+  // while the candidate that goes on to solve the case spends 3x more. Charging
+  // the fix for its own cost rejected a candidate that had turned a failure into
+  // a pass. "No collateral bloat" is still enforced -- on the cases where both
+  // arms reached the same outcome, which is what collateral bloat means.
+  const stable = pairedResults.filter((pair) =>
+    pair.classification === "unchanged_success" || pair.classification === "unchanged_failure");
+  const stableCosts = stable.length ? aggregateCosts(stable) : null;
+  if (stableCosts) {
+    const tokenRegression = stableCosts.token_increase_ratio === null
+      ? stableCosts.candidate.total_tokens > 0
+      : stableCosts.token_increase_ratio > gatePolicy.max_total_token_increase_ratio;
+    if (tokenRegression) {
+      reasons.push({
+        code: "TOKEN_COST_REGRESSION",
+        observed: stableCosts.token_increase_ratio ?? "ZERO_BASELINE",
+        limit: gatePolicy.max_total_token_increase_ratio,
+      });
+    }
+    if (stableCosts.tool_call_increase > gatePolicy.max_total_tool_call_increase) {
+      reasons.push({
+        code: "TOOL_COST_REGRESSION",
+        observed: stableCosts.tool_call_increase,
+        limit: gatePolicy.max_total_tool_call_increase,
+      });
+    }
   }
 
   return { status: reasons.length === 0 ? "PASS" : "FAIL", policy_hash, reasons };

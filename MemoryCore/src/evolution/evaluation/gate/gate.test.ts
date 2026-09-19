@@ -111,4 +111,27 @@ describe("evaluateGate", () => {
     expect(gate.status).toBe("INFRA_ERROR");
     expect(gate.reasons[0]).toMatchObject({ code: "UNCOMPARABLE_CASE", case_ids: ["infra"] });
   });
+
+  it("does not charge a fix for its own token cost", () => {
+    // The baseline aborts early, so it is cheap *because* it failed. Charging
+    // that difference to the fix rejected a candidate that had just turned a
+    // failure into a pass.
+    const baseline = run("hard", "BASELINE", "TASK_FAIL");
+    const candidate = run("hard", "CANDIDATE", "TASK_PASS");
+    candidate.usage = { ...candidate.usage, input_tokens: 1_000, total_tokens: 1_000, model_call_count: 20 };
+    const pairs = [classifyPair(baseline, candidate, true)];
+    expect(pairs[0].classification).toBe("newly_fixed");
+    expect(evaluateGate(pairs, aggregateCosts(pairs), POLICY)).toMatchObject({ status: "PASS", reasons: [] });
+  });
+
+  it("still rejects collateral bloat on unchanged cases", () => {
+    const baseline = run("stable", "BASELINE", "TASK_PASS");
+    const candidate = run("stable", "CANDIDATE", "TASK_PASS");
+    candidate.usage = { ...candidate.usage, input_tokens: 1_000, total_tokens: 1_000 };
+    const pairs = [classifyPair(baseline, candidate, false)];
+    expect(pairs[0].classification).toBe("unchanged_success");
+    const gate = evaluateGate(pairs, aggregateCosts(pairs), POLICY);
+    expect(gate.status).toBe("FAIL");
+    expect(gate.reasons.map((reason) => reason.code)).toContain("TOKEN_COST_REGRESSION");
+  });
 });

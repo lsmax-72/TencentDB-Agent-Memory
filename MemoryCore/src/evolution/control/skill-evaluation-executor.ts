@@ -129,19 +129,21 @@ const benchmarkTasksSchema = z.object({
 //: nanobot tool loop; per-task overrides may narrow them.
 //:
 //: These are CUMULATIVE for the whole arm, not per model call --
-//: `exceedsBudget` compares the run totals against them. A 48k total with a 32k
-//: input ceiling looked generous and was not: a nine-call run that *solved* its
-//: task spent ~108k input tokens, so both arms were scored BUDGET_EXHAUSTED
-//: after their solutions had already passed 43/43 tests. A correct answer was
-//: being recorded as a failure.
+//: `exceedsBudget` compares the run totals against them. The first sizes tried
+//: (48k total, 32k input, 24 calls) looked generous and were not: a nine-call
+//: run that *solved* its task spent ~108k input tokens, and the hardest case
+//: needed 24 calls and ~375k input before it passed 42/42 oracle tests. Both
+//: were scored BUDGET_EXHAUSTED after their solutions were already correct, so a
+//: right answer was recorded as a failure. Sized now at roughly 1.5x the largest
+//: arm observed.
 //:
 //: `max_output_tokens` is also a run total. The per-call ceiling stays at the
 //: model configuration's 4k: the served qwen3.8-27b decodes at ~36 tok/s and
 //: reasons before answering, so an 8k single completion needs ~226s on its own,
 //: longer than the 300s wall several proxies in front of it enforce.
 const BENCHMARK_DEFAULT_LIMITS = {
-  max_model_calls: 24, max_tool_calls: 40, max_input_tokens: 300_000,
-  max_output_tokens: 48_000, max_total_tokens: 400_000, timeout_ms: 1_800_000,
+  max_model_calls: 40, max_tool_calls: 60, max_input_tokens: 600_000,
+  max_output_tokens: 48_000, max_total_tokens: 700_000, timeout_ms: 1_800_000,
 };
 
 /** Resolve the frozen task pool into a fixture spec, refusing partial config. */
