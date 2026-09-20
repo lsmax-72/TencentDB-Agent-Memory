@@ -216,9 +216,13 @@ async function runPairedEvaluation(
   });
   const attempt = await runner.run({ candidate_id: candidate.id, suite: suiteInput.suite, cases: suiteInput.cases, baseline_artifact: baseline, candidate_artifact: candidateArtifact });
   // Infrastructure failures can have charged calls with missing telemetry; retain the full reservation.
-  if (attempt.outcome !== "INFRA_ERROR" && attempt.result) store.settle(reservation,
-    attempt.result.cost_summary.baseline.total_tokens + attempt.result.cost_summary.candidate.total_tokens,
-    attempt.result.cost_summary.baseline.model_call_count + attempt.result.cost_summary.candidate.model_call_count);
+  if (attempt.outcome !== "INFRA_ERROR" && attempt.result) {
+    const baselineCalls = attempt.result.cost_summary.baseline.model_call_count;
+    const candidateCalls = attempt.result.cost_summary.candidate.model_call_count;
+    store.settle(reservation,
+      attempt.result.cost_summary.baseline.total_tokens + attempt.result.cost_summary.candidate.total_tokens,
+      baselineCalls === null || candidateCalls === null ? null : baselineCalls + candidateCalls);
+  }
   return attempt;
 }
 

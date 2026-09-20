@@ -184,7 +184,8 @@ export interface RunUsage {
   total_tokens: number;
   cache_read_tokens?: number;
   cache_write_tokens?: number;
-  model_call_count: number;
+  /** null means the agent runtime does not report it (Codex does not); it must never be coerced to 0. */
+  model_call_count: number | null;
   tool_call_count: number;
   tool_names: string[];
   elapsed_ms: number;
@@ -237,7 +238,7 @@ export interface PairedCaseResult {
   cost_delta: {
     total_tokens: number;
     tool_calls: number;
-    model_calls: number;
+    model_calls: number | null;
     elapsed_ms: number;
   };
 }
@@ -290,7 +291,7 @@ export interface CostSummary {
   token_increase_ratio: number | null;
   token_ratio_undefined_reason?: "ZERO_BASELINE";
   tool_call_increase: number;
-  model_call_increase: number;
+  model_call_increase: number | null;
 }
 
 export interface GatePolicy {

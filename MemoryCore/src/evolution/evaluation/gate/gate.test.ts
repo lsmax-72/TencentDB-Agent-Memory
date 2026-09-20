@@ -134,6 +134,24 @@ describe("evaluateGate", () => {
     expect(gate.status).toBe("FAIL");
     expect(gate.reasons.map((reason) => reason.code)).toContain("TOKEN_COST_REGRESSION");
   });
+
+  it("does not create a gate reason when model-call increase is unknown", () => {
+    const fixed = classifyPair(
+      run("fixed", "BASELINE", "TASK_FAIL"),
+      run("fixed", "CANDIDATE", "TASK_PASS"),
+      false,
+    );
+    const stableBaseline = run("stable", "BASELINE", "TASK_PASS");
+    const stableCandidate = run("stable", "CANDIDATE", "TASK_PASS");
+    stableCandidate.usage = { ...stableCandidate.usage, model_call_count: null };
+    const stable = classifyPair(stableBaseline, stableCandidate, false);
+    const stableCosts = aggregateCosts([stable]);
+
+    expect(stable.cost_delta.model_calls).toBeNull();
+    expect(stableCosts.model_call_increase).toBeNull();
+    expect(evaluateGate([fixed, stable], aggregateCosts([fixed, stable]), POLICY))
+      .toMatchObject({ status: "PASS", reasons: [] });
+  });
 });
 
 describe("interrupted arms versus over-budget arms", () => {

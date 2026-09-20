@@ -62,6 +62,8 @@ export function evaluateGate(
     pair.classification === "unchanged_success" || pair.classification === "unchanged_failure");
   const stableCosts = stable.length ? aggregateCosts(stable) : null;
   if (stableCosts) {
+    // Model-call increase is descriptive only because some runtimes do not report it.
+    // Gate regressions remain based on the measured token and tool-call costs below.
     const tokenRegression = stableCosts.token_increase_ratio === null
       ? stableCosts.candidate.total_tokens > 0
       : stableCosts.token_increase_ratio > gatePolicy.max_total_token_increase_ratio;

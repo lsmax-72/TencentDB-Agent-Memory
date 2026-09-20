@@ -330,6 +330,38 @@ describe("Phase 4 acceptance suite", () => {
     expect(attempt.result?.gate.reasons.map((reason) => reason.code))
       .toContain("BASELINE_ARTIFACT_MISMATCH");
   });
+
+  it("accepts unknown model-call counts but still enforces token budgets", async () => {
+    const { cases, fixtures } = acceptanceCases();
+    const evaluationCase = cases.find((item) => item.case_id === "AC-04")!;
+    const deterministicAgent = new DeterministicWorkspaceAgent();
+    const agent: AgentAdapter = {
+      async run(input) {
+        const output = await deterministicAgent.run(input);
+        return {
+          ...output,
+          usage: {
+            ...output.usage,
+            input_tokens: evaluationCase.limits.max_input_tokens + 1,
+            total_tokens: evaluationCase.limits.max_input_tokens + 1 + output.usage.output_tokens,
+            model_call_count: null,
+          },
+        };
+      },
+    };
+    const attempt = await runnerFor(fixtures, agent).run({
+      candidate_id: "candidate-good",
+      suite: makeSuite("unknown-calls-token-budget", [evaluationCase], POLICY),
+      cases: [evaluationCase],
+      baseline_artifact: artifact("OFFICIAL", "baseline", BASELINE_SKILL),
+      candidate_artifact: artifact("CANDIDATE", "candidate-good", GOOD_CANDIDATE_SKILL),
+    });
+
+    const candidate = attempt.paired_results[0].candidate;
+    expect(candidate.usage.model_call_count).toBeNull();
+    expect(candidate.status).toBe("TASK_FAIL");
+    expect(candidate.failure).toMatchObject({ kind: "TASK", codes: ["BUDGET_EXHAUSTED"] });
+  });
 });
 
 function acceptanceCases(): {

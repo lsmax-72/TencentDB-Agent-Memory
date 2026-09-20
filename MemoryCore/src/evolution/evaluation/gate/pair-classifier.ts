@@ -65,7 +65,9 @@ export function classifyPair(
     cost_delta: {
       total_tokens: candidate.usage.total_tokens - baseline.usage.total_tokens,
       tool_calls: candidate.usage.tool_call_count - baseline.usage.tool_call_count,
-      model_calls: candidate.usage.model_call_count - baseline.usage.model_call_count,
+      model_calls: candidate.usage.model_call_count === null || baseline.usage.model_call_count === null
+        ? null
+        : candidate.usage.model_call_count - baseline.usage.model_call_count,
       elapsed_ms: candidate.usage.elapsed_ms - baseline.usage.elapsed_ms,
     },
   };

@@ -406,11 +406,12 @@ function validateTelemetry(output: AgentRunOutput, runSpec: RunSpec): void {
     usage.input_tokens,
     usage.output_tokens,
     usage.total_tokens,
-    usage.model_call_count,
     usage.tool_call_count,
     usage.elapsed_ms,
   ];
   if (numeric.some((value) => !Number.isFinite(value) || value < 0)
+    || (usage.model_call_count !== null
+      && (!Number.isFinite(usage.model_call_count) || usage.model_call_count < 0))
     || usage.tool_call_count !== output.tool_calls.length) {
     throw new EvaluationExecutionError("INFRA", "TELEMETRY_INCOMPLETE");
   }
@@ -421,7 +422,7 @@ function validateTelemetry(output: AgentRunOutput, runSpec: RunSpec): void {
 
 function exceedsBudget(usage: RunUsage, runSpec: RunSpec): boolean {
   const budget = runSpec.budget;
-  return usage.model_call_count > budget.max_model_calls
+  return (usage.model_call_count !== null && usage.model_call_count > budget.max_model_calls)
     || usage.tool_call_count > budget.max_tool_calls
     || usage.input_tokens > budget.max_input_tokens
     || usage.output_tokens > budget.max_output_tokens
