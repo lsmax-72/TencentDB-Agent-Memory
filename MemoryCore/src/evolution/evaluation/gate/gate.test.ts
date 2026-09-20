@@ -136,23 +136,29 @@ describe("evaluateGate", () => {
   });
 });
 
-describe("cut-off arms", () => {
-  it("does not record an unfinished arm as a wrong answer", () => {
-    // A grader that scores 43/43 while the harness reports BUDGET_EXHAUSTED is
-    // the shape that produced four false negatives: the arm was interrupted, so
-    // nobody judged it. That is "uncomparable", never "unchanged_failure".
-    const baseline = run("grind", "BASELINE", "TASK_FAIL");
-    const candidate = run("grind", "CANDIDATE", "TASK_FAIL");
+describe("interrupted arms versus over-budget arms", () => {
+  it("keeps the oracle verdict when the arm merely overspent", () => {
+    // `exceedsBudget` is checked AFTER the oracle runs, so a budget-exhausted
+    // arm has completed, submitted and been graded. Its verdict is real, and the
+    // overage is a cost matter the gate reports separately. Merging this with a
+    // timeout once reclassified a judged failure as "no verdict" and nearly
+    // turned one pass out of three into a signal.
+    const baseline = run("hard", "BASELINE", "TASK_FAIL");
+    const candidate = run("hard", "CANDIDATE", "TASK_PASS");
     candidate.failure = { kind: "TASK", codes: ["BUDGET_EXHAUSTED"], evidence_refs: [] };
     const pair = classifyPair(baseline, candidate, false);
-    expect(pair.classification).toBe("uncomparable");
-    expect(evaluateGate([pair], aggregateCosts([pair]), POLICY).status).toBe("INFRA_ERROR");
+    expect(pair.classification).toBe("newly_fixed");
+    const gate = evaluateGate([pair], aggregateCosts([pair]), POLICY);
+    expect(gate.status).toBe("FAIL");
+    expect(gate.reasons.map((reason) => reason.code)).toEqual(["CANDIDATE_BUDGET_EXHAUSTED"]);
   });
 
-  it("treats a wall-clock timeout the same way", () => {
+  it("treats a wall-clock timeout as uncomparable, because nobody judged it", () => {
     const baseline = run("slow", "BASELINE", "TASK_PASS");
     const candidate = run("slow", "CANDIDATE", "TASK_FAIL");
     candidate.failure = { kind: "TASK", codes: ["AGENT_TIMEOUT"], evidence_refs: [] };
-    expect(classifyPair(baseline, candidate, false).classification).toBe("uncomparable");
+    const pair = classifyPair(baseline, candidate, false);
+    expect(pair.classification).toBe("uncomparable");
+    expect(evaluateGate([pair], aggregateCosts([pair]), POLICY).status).toBe("INFRA_ERROR");
   });
 });

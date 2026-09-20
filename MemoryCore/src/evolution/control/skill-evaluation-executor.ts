@@ -141,15 +141,16 @@ const benchmarkTasksSchema = z.object({
 //: model configuration's 4k: the served qwen3.8-27b decodes at ~36 tok/s and
 //: reasons before answering, so an 8k single completion needs ~226s on its own,
 //: longer than the 300s wall several proxies in front of it enforce.
-//: The wall clock is the envelope that binds; the call and token ceilings are
-//: deliberately loose so they never bind first. When they did bind, a run that
-//: was merely unfinished was recorded as a wrong answer -- four times, twice on
-//: a submission the grader had already scored 42/42. An arm that hits any
-//: envelope is now classified "uncomparable" and produces no verdict at all,
-//: which is the honest outcome for a run nobody judged.
+//: A fixed, contest-style envelope: 10 model calls. It is deliberately tight,
+//: because the previous sizes were unusable -- arms on a failing task burned
+//: 18-40 calls and 8-30 minutes, so three repeats took hours and two of three
+//: pairs had an arm hit a limit. Ten calls makes BOTH outcomes terminate judged
+//: in a few minutes: an arm that has not solved the task by then submits what it
+//: has, the oracle grades it, and the pair is comparable. The wall only exists
+//: to stop a pathological stall, so the call cap always binds first.
 const BENCHMARK_DEFAULT_LIMITS = {
-  max_model_calls: 100, max_tool_calls: 150, max_input_tokens: 2_000_000,
-  max_output_tokens: 96_000, max_total_tokens: 2_500_000, timeout_ms: 1_200_000,
+  max_model_calls: 10, max_tool_calls: 20, max_input_tokens: 400_000,
+  max_output_tokens: 24_000, max_total_tokens: 500_000, timeout_ms: 900_000,
 };
 
 /** Resolve the frozen task pool into a fixture spec, refusing partial config. */

@@ -1,23 +1,22 @@
 import type { CaseRunResult, PairedCaseResult } from "../contracts/types.js";
 
 /**
- * True when the arm was stopped by its resource envelope rather than judged.
+ * True only when the arm was genuinely interrupted, so nobody judged it.
  *
- * `BUDGET_EXHAUSTED` and `AGENT_TIMEOUT` both mean the run was interrupted, so
- * the oracle never got to express an opinion on the work. Scoring that as a task
- * failure says "wrong answer" when the truth is "no answer yet", and it does so
- * asymmetrically: a skill that makes the agent keep working costs more and hits
- * the envelope sooner, so thoroughness is punished as incorrectness. That is not
- * hypothetical -- four separate runs produced a submission the grader scored
- * 42/42 or 43/43 and still recorded the arm as a failure for this reason.
+ * `AGENT_TIMEOUT` kills the run mid-flight: there may be no submission at all,
+ * and the oracle never expressed an opinion. That is "unknown", and calling it a
+ * wrong answer would be a fabrication.
  *
- * Cost is not ignored: the gate measures it on the cases whose outcome did not
- * change. Here the honest label is "uncomparable", which the gate turns into
- * INFRA_ERROR -- no verdict -- instead of a fabricated one.
+ * `BUDGET_EXHAUSTED` is NOT this. `exceedsBudget` is checked *after* the oracle
+ * runs, so a budget-exhausted arm has completed, submitted, and been graded --
+ * its verdict is real. Merging the two codes was a mistake: it reclassified
+ * repeat 1 of the abc387_f experiment as "no verdict" when the grader had in
+ * fact judged the candidate wrong, which nearly turned 1 pass out of 3 into a
+ * signal. Over-budget stays a cost matter, reported by the gate as
+ * CANDIDATE_BUDGET_EXHAUSTED, and never rewrites the correctness verdict.
  */
-function cutOff(run: CaseRunResult): boolean {
-  return run.failure?.kind === "TASK"
-    && run.failure.codes.some((code) => code === "BUDGET_EXHAUSTED" || code === "AGENT_TIMEOUT");
+function interrupted(run: CaseRunResult): boolean {
+  return run.failure?.kind === "TASK" && run.failure.codes.includes("AGENT_TIMEOUT");
 }
 
 export function classifyPair(
@@ -39,7 +38,7 @@ export function classifyPair(
   const fairness = mismatchedFields.length === 0 ? "MATCH" : "MISMATCH";
   let classification: PairedCaseResult["classification"] = "uncomparable";
   if (fairness === "MATCH" && baseline.status !== "INFRA_ERROR" && candidate.status !== "INFRA_ERROR"
-    && !cutOff(baseline) && !cutOff(candidate)) {
+    && !interrupted(baseline) && !interrupted(candidate)) {
     if (baseline.status === "TASK_PASS" && candidate.status === "TASK_PASS") {
       classification = "unchanged_success";
     } else if (baseline.status === "TASK_FAIL" && candidate.status === "TASK_PASS") {
