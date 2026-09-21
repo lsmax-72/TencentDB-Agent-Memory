@@ -52,7 +52,14 @@ export function createProposalRunner(raw: ReviewModelConfig, context: ProposalRu
     let usage: { input_tokens: number | null; output_tokens: number | null; model_calls: number } | null = null;
     try {
       const response = await request(url, init);
-      if (!response.ok) throw new EvolutionError(503, "MODEL_UPSTREAM_UNAVAILABLE");
+      if (!response.ok) {
+        // Carry the status and a body slice. A bare code here made an
+        // intermittent transport failure indistinguishable from a model that
+        // simply was not configured, and that ambiguity cost real debugging time
+        // on the diagnosis path once already.
+        const detail = await response.text().catch(() => "");
+        throw new EvolutionError(503, `MODEL_UPSTREAM_UNAVAILABLE: HTTP ${response.status} ${detail.slice(0, 200)}`);
+      }
       const data = await response.clone().json();
       const validToken = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
       usage = { input_tokens: validToken(data.usage?.prompt_tokens) ? data.usage.prompt_tokens : null,
@@ -66,12 +73,20 @@ export function createProposalRunner(raw: ReviewModelConfig, context: ProposalRu
       store.jobTransition(step, "COMPLETED", { usage, response_hash: contentHash(data), finish_reason: data.choices[0].finish_reason });
       return response;
     } catch (error) {
-      const failure = error instanceof EvolutionError ? error : new EvolutionError(503, "MODEL_UPSTREAM_UNAVAILABLE");
+      const cause = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      const failure = error instanceof EvolutionError ? error : new EvolutionError(503, `MODEL_UPSTREAM_UNAVAILABLE: ${cause}`);
       store.jobTransition(step, "INFRA_ERROR", { usage, reason: failure.message });
       throw failure;
     }
   };
-  const provider = createOpenAI({ baseURL: config.base_url, apiKey: config.api_key, fetch: budgetedFetch });
+  // The provider's own timeout and retry policy are set explicitly. A proposal
+  // is a multi-step tool loop, so its wall clock is several model calls, not one:
+  // the provider default (10 minutes per request) was reached on a slow endpoint
+  // and surfaced as MODEL_UPSTREAM_UNAVAILABLE with no indication that time, not
+  // the request, was the problem. Retries are off -- the contract requires no
+  // hidden retry, and the runner's own budget accounting assumes one call each.
+  const provider = createOpenAI({ baseURL: config.base_url, apiKey: config.api_key, fetch: budgetedFetch,
+    maxRetries: 0, timeout: config.timeout_ms });
   return {
     async run(params: LLMRunParams): Promise<string> {
       if (running) throw new EvolutionError(409, "PROPOSAL_RUNNER_CONCURRENT_USE");
