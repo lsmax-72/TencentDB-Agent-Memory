@@ -15,11 +15,15 @@ export interface DiagnosisModel {
   readonly tokenCeiling: number;
   complete(input: { system: string; evidence: string }): Promise<{ text: string; input_tokens: number | null; output_tokens: number | null }>;
 }
+export type DiagnosisEvidencePolicy =
+  | { mode: "isolated"; max_related: 0 }
+  | { mode: "history"; max_related: number };
 
 /** No model receives assets' mutation tools, executable paths or adoption credentials. */
-export async function diagnose(store: EvolutionStore, trace: EvolutionRecord, related: EvolutionRecord[], model: DiagnosisModel, attemptId: string): Promise<EvolutionRecord> {
+export async function diagnose(store: EvolutionStore, trace: EvolutionRecord, related: EvolutionRecord[], policy: DiagnosisEvidencePolicy, model: DiagnosisModel, attemptId: string): Promise<EvolutionRecord> {
   if (trace.kind !== "trace" || trace.origin !== "runtime") throw new EvolutionError(409, "LIVE_TRACE_REQUIRED");
-  const records = [trace, ...related.filter(record => record.id !== trace.id)];
+  const selectedRelated = policy.mode === "history" ? related.filter(record => record.id !== trace.id).slice(0, policy.max_related) : [];
+  const records = [trace, ...selectedRelated];
   if (records.some(record => record.team_id !== trace.team_id || record.agent_id !== trace.agent_id || record.owner_user_id !== trace.owner_user_id || record.kind !== "trace" || record.origin !== "runtime")) throw new EvolutionError(403, "DIAGNOSIS_SCOPE_MISMATCH");
   const before = contentHash(records);
   store.reserve(attemptId, trace.team_id, trace.agent_id, model.tokenCeiling, 1, 0);
@@ -50,6 +54,7 @@ export async function diagnose(store: EvolutionStore, trace: EvolutionRecord, re
     kind: "diagnosis", title: `诊断：${trace.title}`, status: route === "unknown" ? "NEEDS_EVIDENCE" : "DIAGNOSED", origin: "runtime",
     asset_ids: [...new Set(records.flatMap(record => record.asset_ids))], parent_id: trace.id,
     payload: { ...parsed, route, suggested_route: parsed.route, input_hash: before, actual_model: model.modelId,
+      evidence_record_ids: records.map(record => record.id),
       usage: { input_tokens: response.input_tokens, output_tokens: response.output_tokens, model_calls: 1 },
     },
   }, attemptId, trace.owner_user_id);

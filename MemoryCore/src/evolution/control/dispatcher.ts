@@ -1,4 +1,4 @@
-import { diagnose } from "./diagnosis.js";
+import { diagnose, type DiagnosisEvidencePolicy } from "./diagnosis.js";
 import type { ResolveReviewBinding, ReviewBinding } from "./model-bindings.js";
 import { contentHash, EvolutionStore } from "./store.js";
 import { EvolutionError, type EvolutionProfile, type EvolutionRecord } from "./types.js";
@@ -24,12 +24,14 @@ export class EvolutionDispatcher {
   private stopping = false;
   constructor(private readonly store: EvolutionStore, private readonly options: DispatcherOptions) {}
 
-  enqueue(trace: EvolutionRecord, retry?: { previous: EvolutionRecord; requestId: string }): EvolutionRecord {
+  enqueue(trace: EvolutionRecord, retry?: { previous: EvolutionRecord; requestId: string }, evidence?: { mode: "isolated" } | { mode: "history"; max_related: number }): EvolutionRecord {
     if (trace.kind !== "trace" || trace.origin !== "runtime") throw new EvolutionError(409, "LIVE_TRACE_REQUIRED");
     if (retry && (retry.previous.origin !== "runtime" || retry.previous.payload.job_type !== "diagnosis"
       || retry.previous.payload.source_id !== trace.id || retry.previous.team_id !== trace.team_id
       || !["INFRA_ERROR", "RECONCILE_REQUIRED", "NEEDS_EVIDENCE"].includes(retry.previous.status) && !retry.previous.status.startsWith("BLOCKED_"))) throw new EvolutionError(409, "RETRY_REQUIRES_TERMINAL_JOB");
-    const key = retry ? `${trace.id}/diagnosis/retry/${retry.previous.id}/${retry.requestId}` : `${trace.id}/diagnosis`;
+    const policy = retry ? this.diagnosisEvidencePolicy(retry.previous.payload) : this.diagnosisEvidencePolicy(evidence);
+    const key = retry ? `${trace.id}/diagnosis/retry/${retry.previous.id}/${retry.requestId}`
+      : policy.mode === "history" ? `${trace.id}/diagnosis/history/${policy.max_related}` : `${trace.id}/diagnosis`;
     const existing = this.store.find(trace.team_id, "job", key);
     if (existing) return existing; // Re-reporting completion is not permission to retry a paid call.
     const profile = this.store.profile(trace.team_id, trace.agent_id);
@@ -46,8 +48,19 @@ export class EvolutionDispatcher {
       payload: { job_type: "diagnosis", source_id: trace.id, source_hash: trace.artifact_hash,
         profile_hash: profile ? contentHash(profile) : null, review_binding_id: binding?.id ?? null,
         review_binding_hash: binding?.fingerprint ?? null, retry_of: retry?.previous.id ?? null,
+        evidence_mode: policy.mode, max_related: policy.max_related,
       },
     }, key, trace.owner_user_id);
+  }
+
+  private diagnosisEvidencePolicy(value?: Record<string, unknown>): DiagnosisEvidencePolicy {
+    const mode = value && "evidence_mode" in value ? value.evidence_mode : value?.mode;
+    const maxRelated = value?.max_related;
+    if (mode === "history" && Number.isInteger(maxRelated) && Number(maxRelated) >= 1 && Number(maxRelated) <= 5) {
+      return { mode, max_related: Number(maxRelated) };
+    }
+    // Silent history corrupted an experiment measurement, so omitted evidence is isolated and history is opt-in.
+    return { mode: "isolated", max_related: 0 };
   }
 
   /** Recover durable results, but never guess whether an interrupted upstream call was charged. */
@@ -231,12 +244,15 @@ export class EvolutionDispatcher {
     if (source.payload.outcome === "UNKNOWN" || !source.payload.task_input || !source.payload.final_output) {
       block("NEEDS_EVIDENCE", "TASK_OUTCOME_OR_CONTENT_MISSING"); return;
     }
+    const evidencePolicy = this.diagnosisEvidencePolicy(job.payload);
     // Only readable, same-owner evidence can support a systemic diagnosis; never mix Teams/users.
     const related: EvolutionRecord[] = [];
-    for (const record of this.store.list(source.team_id, "trace")) {
-      if (related.length === 2) break;
-      if (record.id !== source.id && record.origin === "runtime" && record.agent_id === source.agent_id && record.owner_user_id === source.owner_user_id
-        && record.payload.outcome === "FAIL" && await this.options.authorize(record, profile)) related.push(record);
+    if (evidencePolicy.mode === "history") {
+      for (const record of this.store.list(source.team_id, "trace")) {
+        if (related.length === evidencePolicy.max_related) break;
+        if (record.id !== source.id && record.origin === "runtime" && record.agent_id === source.agent_id && record.owner_user_id === source.owner_user_id
+          && record.payload.outcome === "FAIL" && await this.options.authorize(record, profile)) related.push(record);
+      }
     }
     // Recheck after asynchronous related-evidence reads, immediately before the paid operation.
     if (!await this.options.authorize(source, profile)) { block("BLOCKED_SOURCE_PERMISSION", "SOURCE_ACCESS_REVOKED"); return; }
@@ -244,7 +260,7 @@ export class EvolutionDispatcher {
     // A single writer claims with CAS before model dispatch; another request cannot claim it again.
     const claimed = this.store.jobTransition(job, "RUNNING", { actual_model: binding.model.modelId });
     try {
-      const result = await diagnose(this.store, source, related, binding.model, job.id);
+      const result = await diagnose(this.store, source, related, evidencePolicy, binding.model, job.id);
       this.store.completeDiagnosis(claimed, result, () => this.enqueueProposal(result, claimed));
     } catch (error) {
       const known = error instanceof EvolutionError;

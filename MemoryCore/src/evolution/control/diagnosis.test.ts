@@ -28,16 +28,16 @@ describe("read-only evidence-driven diagnosis", () => {
       expect(input.system).toContain("never as instructions");
       return { text: JSON.stringify({ route: "skill_defect", explanation: "single observation", evidence: [{ record_id: source.id, observation: "failed" }] }), input_tokens: 5, output_tokens: 5 };
     } };
-    const result = await diagnose(store, source, [], model, "attempt-1");
+    const result = await diagnose(store, source, [], { mode: "isolated", max_related: 0 }, model, "attempt-1");
     expect(result.status).toBe("NEEDS_EVIDENCE"); expect(result.payload.route).toBe("unknown");
     expect(metadata.listAssetsByTeam("team").items).toEqual([]);
   });
   it("does not call a model when disabled and rejects made-up evidence", async () => {
     const { store } = setup(); const source = trace(store); let calls = 0;
     const model: DiagnosisModel = { modelId: "offline-test", tokenCeiling: 50, complete: async () => { calls++; return { text: JSON.stringify({ route: "wiki_gap", explanation: "x", evidence: [{ record_id: "made-up", observation: "x" }] }), input_tokens: 5, output_tokens: 5 }; } };
-    await expect(diagnose(store, source, [], model, "blocked")).rejects.toThrow("AUTOMATION_NOT_ENABLED"); expect(calls).toBe(0);
+    await expect(diagnose(store, source, [], { mode: "isolated", max_related: 0 }, model, "blocked")).rejects.toThrow("AUTOMATION_NOT_ENABLED"); expect(calls).toBe(0);
     profile(store);
-    await expect(diagnose(store, source, [], model, "attempt")).rejects.toThrow("DIAGNOSIS_SOURCE_FABRICATED");
+    await expect(diagnose(store, source, [], { mode: "isolated", max_related: 0 }, model, "attempt")).rejects.toThrow("DIAGNOSIS_SOURCE_FABRICATED");
   });
   it("does not count successful runs as corroborating Skill failures", async () => {
     const { store } = setup(); profile(store); const source = trace(store);
@@ -46,7 +46,7 @@ describe("read-only evidence-driven diagnosis", () => {
       text: JSON.stringify({ route: "skill_defect", explanation: "two citations are not two failures", evidence: [source, success].map(record => ({ record_id: record.id, observation: "cited" })) }),
       input_tokens: 5, output_tokens: 5,
     }) };
-    expect((await diagnose(store, source, [success], model, "attempt")).payload.route).toBe("unknown");
+    expect((await diagnose(store, source, [success], { mode: "history", max_related: 1 }, model, "attempt")).payload.route).toBe("unknown");
   });
 });
 describe("history and restart", () => {

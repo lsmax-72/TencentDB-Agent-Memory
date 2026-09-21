@@ -65,7 +65,45 @@ describe("explicit host completion to durable diagnosis (offline model double)",
     expect(test.store.list("team", "diagnosis")[0].payload.actual_model).toBe("offline-independent-reviewer");
     expect(test.metadata.listAssetsByTeam("team").items).toEqual([]);
     const job = await test.service.invoke("diagnosis/request", { team_id: "team", id: (first as EvolutionRecord).id }, "test-user-key");
-    await test.dispatcher.idle(); expect(job).toMatchObject({ status: "COMPLETED" }); expect(test.complete).toHaveBeenCalledOnce();
+    await test.dispatcher.idle(); expect(job).toMatchObject({ status: "COMPLETED", payload: { evidence_mode: "isolated", max_related: 0 } }); expect(test.complete).toHaveBeenCalledOnce();
+  });
+  it("keeps isolated evidence to the requested trace and records exactly what the model saw", async () => {
+    const test = setup(); test.store.saveProfile(profile, 0);
+    const target = source(test, "target");
+    source(test, "other-1"); source(test, "other-2"); source(test, "other-3");
+    const job = await test.service.invoke("diagnosis/request", {
+      team_id: "team", id: target.id, evidence: { mode: "isolated" },
+    }, "test-user-key") as EvolutionRecord;
+    await test.dispatcher.idle();
+    const modelEvidence = JSON.parse(test.complete.mock.calls[0][0].evidence) as Array<{ id: string }>;
+    expect(modelEvidence.map(record => record.id)).toEqual([target.id]);
+    expect(job.payload).toMatchObject({ evidence_mode: "isolated", max_related: 0 });
+    expect(test.store.find("team", "diagnosis", job.id)?.payload.evidence_record_ids).toEqual([target.id]);
+  });
+  it("limits opt-in history evidence and records all records available to the model", async () => {
+    const test = setup(); test.store.saveProfile(profile, 0);
+    const target = source(test, "target");
+    const related = [source(test, "related-1"), source(test, "related-2"), source(test, "related-3")];
+    const job = await test.service.invoke("diagnosis/request", {
+      team_id: "team", id: target.id, evidence: { mode: "history", max_related: 2 },
+    }, "test-user-key") as EvolutionRecord;
+    await test.dispatcher.idle();
+    const modelEvidence = JSON.parse(test.complete.mock.calls[0][0].evidence) as Array<{ id: string }>;
+    expect(modelEvidence).toHaveLength(3);
+    expect(modelEvidence[0].id).toBe(target.id);
+    expect(modelEvidence.slice(1).every(record => related.some(item => item.id === record.id))).toBe(true);
+    expect(job.payload).toMatchObject({ evidence_mode: "history", max_related: 2 });
+    expect(test.store.find("team", "diagnosis", job.id)?.payload.evidence_record_ids).toEqual(modelEvidence.map(record => record.id));
+  });
+  it("rejects history evidence limits outside 1 through 5", async () => {
+    const test = setup(); test.store.saveProfile(profile, 0); const target = source(test, "target");
+    await expect(test.service.invoke("diagnosis/request", {
+      team_id: "team", id: target.id, evidence: { mode: "history", max_related: 0 },
+    }, "test-user-key")).rejects.toThrow();
+    await expect(test.service.invoke("diagnosis/request", {
+      team_id: "team", id: target.id, evidence: { mode: "history", max_related: 6 },
+    }, "test-user-key")).rejects.toThrow();
+    expect(test.store.jobs(["QUEUED"])).toHaveLength(0);
   });
   it("disabled or unconfigured automation records the reason and makes zero model calls", async () => {
     const test = setup();
@@ -116,21 +154,42 @@ describe("explicit host completion to durable diagnosis (offline model double)",
     expect(test.store.get(failed.id)?.status).toBe("INFRA_ERROR");
     expect(retry.payload.retry_of).toBe(failed.id);
   });
+  it.each([
+    { label: "isolated", evidence: { mode: "isolated" } as const, maxRelated: 0, expectedRecords: 1 },
+    { label: "history", evidence: { mode: "history", max_related: 2 } as const, maxRelated: 2, expectedRecords: 3 },
+  ])("preserves $label evidence policy on retry", async ({ evidence, maxRelated, expectedRecords }) => {
+    const test = setup(); test.store.saveProfile(profile, 0);
+    const target = source(test, "target"); source(test, "related-1"); source(test, "related-2"); source(test, "related-3");
+    test.complete.mockRejectedValueOnce(new EvolutionError(503, "MODEL_UPSTREAM_UNAVAILABLE"));
+    const original = await test.service.invoke("diagnosis/request", { team_id: "team", id: target.id, evidence }, "test-user-key") as EvolutionRecord;
+    await test.dispatcher.idle();
+    const retry = await test.service.invoke("diagnosis/retry", { team_id: "team", id: original.id, request_id: `retry-${evidence.mode}` }, "test-user-key") as EvolutionRecord;
+    await test.dispatcher.idle();
+    const retryEvidence = JSON.parse(test.complete.mock.calls[1][0].evidence) as Array<{ id: string }>;
+    expect(retry.payload).toMatchObject({ evidence_mode: evidence.mode, max_related: maxRelated, retry_of: original.id });
+    expect(retryEvidence).toHaveLength(expectedRecords);
+    expect(test.store.find("team", "diagnosis", retry.id)?.payload.evidence_record_ids).toEqual(retryEvidence.map(record => record.id));
+  });
   it("leaves uncertain usage charged and never retries interrupted work automatically", async () => {
     const dir = mkdtempSync(join(tmpdir(), "evolution-dispatch-")); dirs.push(dir); const file = join(dir, "metadata.db");
     const first = setup(file); first.store.saveProfile(profile, 0);
-    const job = first.dispatcher.enqueue(source(first)); first.store.jobTransition(job, "RUNNING");
+    const target = source(first); source(first, "related");
+    const job = first.dispatcher.enqueue(target, undefined, { mode: "history", max_related: 1 }); first.store.jobTransition(job, "RUNNING");
     first.store.reserve(job.id, "team", "agent", 100, 1, 0); first.metadata.close();
     const second = setup(file, false); second.dispatcher.recover(); await second.dispatcher.idle();
     expect(second.store.get(job.id)?.status).toBe("RECONCILE_REQUIRED"); expect(second.complete).not.toHaveBeenCalled();
+    expect(second.store.get(job.id)?.payload).toMatchObject({ evidence_mode: "history", max_related: 1 });
     expect(() => second.store.reserve("overrun", "team", "agent", 950, 1, 0)).toThrow("BUDGET_EXHAUSTED");
   });
   it("resumes queued jobs after reopen and recovers already persisted results without calling twice", async () => {
     const dir = mkdtempSync(join(tmpdir(), "evolution-queue-")); dirs.push(dir); const file = join(dir, "metadata.db");
     const first = setup(file); first.store.saveProfile(profile, 0);
-    const job = first.dispatcher.enqueue(source(first)); first.metadata.close();
+    const target = source(first); source(first, "related");
+    const job = first.dispatcher.enqueue(target, undefined, { mode: "history", max_related: 1 }); first.metadata.close();
     const second = setup(file, false); second.dispatcher.recover(); await second.dispatcher.idle();
     expect(second.store.get(job.id)?.status).toBe("COMPLETED"); expect(second.complete).toHaveBeenCalledOnce();
+    expect(second.store.get(job.id)?.payload).toMatchObject({ evidence_mode: "history", max_related: 1 });
+    expect(JSON.parse(second.complete.mock.calls[0][0].evidence)).toHaveLength(2);
     // Model-result persistence can precede the final job transition during a crash.
     const completed = second.store.get(job.id)!; second.store.jobTransition(completed, "RUNNING");
     second.dispatcher.recover(); await second.dispatcher.idle();

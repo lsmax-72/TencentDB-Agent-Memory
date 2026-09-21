@@ -12,6 +12,10 @@ import { adoptionProof } from "./adoption-proof.js";
 const id = z.string().min(1).max(180).regex(/^[\w.:-]+$/);
 const scopeSchema = z.object({ team_id: id });
 const recordSchema = scopeSchema.extend({ id });
+const diagnosisEvidenceSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("isolated") }).strict(),
+  z.object({ mode: z.literal("history"), max_related: z.number().int().min(1).max(5) }).strict(),
+]);
 const kind = z.enum(["trace", "diagnosis", "candidate", "attempt", "review", "adoption", "playbook", "job"]);
 const profileSchema = scopeSchema.extend({
   agent_id: id, enabled: z.boolean(), revision: z.number().int().nonnegative(),
@@ -462,12 +466,12 @@ export class EvolutionService {
       return trace;
     }
     if (action === "diagnosis/request") {
-      const input = recordSchema.parse(body);
+      const input = recordSchema.extend({ evidence: diagnosisEvidenceSchema.optional() }).parse(body);
       const source = this.store.get(input.id);
       if (!source || source.team_id !== team_id || !await this.mayRead(source, actor.id)) throw new EvolutionError(404, "RECORD_NOT_FOUND");
       if (source.kind !== "trace" || source.origin !== "runtime") throw new EvolutionError(409, "LIVE_TRACE_REQUIRED");
       if (source.payload.completion !== "host_task_complete") throw new EvolutionError(409, "HOST_TASK_COMPLETION_REQUIRED");
-      const job = this.dispatcher.enqueue(source);
+      const job = this.dispatcher.enqueue(source, undefined, input.evidence);
       this.dispatcher.wake();
       return job;
     }
