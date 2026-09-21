@@ -51,7 +51,19 @@ export function createProposalRunner(raw: ReviewModelConfig, context: ProposalRu
     const step = record(callId, "proposal_model_step", "RUNNING", { actual_model: config.model, request_hash: contentHash(body), sequence: callSequence });
     let usage: { input_tokens: number | null; output_tokens: number | null; model_calls: number } | null = null;
     try {
-      const response = await request(url, init);
+      // Ask the model to answer directly. The proposal model is the same kind of
+      // reasoning model as the reviewer, and the reviewer had to be told not to
+      // think: at ~36 tok/s a long internal monologue costs minutes per step, and
+      // a proposal is a multi-step tool loop that emits a full SKILL.md. Without
+      // this the step hit its timeout and surfaced as MODEL_UPSTREAM_UNAVAILABLE.
+      // Injected here because the provider builds its own request body.
+      const outgoing = config.disable_thinking === true
+        ? { ...body, chat_template_kwargs: { ...(body.chat_template_kwargs ?? {}), enable_thinking: false } }
+        : body;
+      const headers = new Headers(init.headers);
+      // The body length changed, so a stale content-length would be a lie.
+      headers.delete("content-length");
+      const response = await request(url, { ...init, headers, body: JSON.stringify(outgoing) });
       if (!response.ok) {
         // Carry the status and a body slice. A bare code here made an
         // intermittent transport failure indistinguishable from a model that
