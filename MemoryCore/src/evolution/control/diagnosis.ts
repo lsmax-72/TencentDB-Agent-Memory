@@ -15,14 +15,26 @@ export interface DiagnosisModel {
   readonly tokenCeiling: number;
   complete(input: { system: string; evidence: string }): Promise<{ text: string; input_tokens: number | null; output_tokens: number | null }>;
 }
+/** Caller-facing evidence request; the dispatcher resolves it into a policy. */
+export type DiagnosisEvidenceRequest =
+  | { mode: "isolated" }
+  | { mode: "history"; max_related: number }
+  | { mode: "explicit"; record_ids: string[] };
+
 export type DiagnosisEvidencePolicy =
   | { mode: "isolated"; max_related: 0 }
-  | { mode: "history"; max_related: number };
+  | { mode: "history"; max_related: number }
+  /** Caller-named evidence. Still no store scan, but the caller must supply the
+   *  set explicitly so the "two independent failures" rule can be met without
+   *  reaching into whatever history happens to be lying around. */
+  | { mode: "explicit"; record_ids: string[] };
 
 /** No model receives assets' mutation tools, executable paths or adoption credentials. */
 export async function diagnose(store: EvolutionStore, trace: EvolutionRecord, related: EvolutionRecord[], policy: DiagnosisEvidencePolicy, model: DiagnosisModel, attemptId: string): Promise<EvolutionRecord> {
   if (trace.kind !== "trace" || trace.origin !== "runtime") throw new EvolutionError(409, "LIVE_TRACE_REQUIRED");
-  const selectedRelated = policy.mode === "history" ? related.filter(record => record.id !== trace.id).slice(0, policy.max_related) : [];
+  const selectedRelated = policy.mode === "history"
+    ? related.filter(record => record.id !== trace.id).slice(0, policy.max_related)
+    : policy.mode === "explicit" ? related.filter(record => record.id !== trace.id) : [];
   const records = [trace, ...selectedRelated];
   if (records.some(record => record.team_id !== trace.team_id || record.agent_id !== trace.agent_id || record.owner_user_id !== trace.owner_user_id || record.kind !== "trace" || record.origin !== "runtime")) throw new EvolutionError(403, "DIAGNOSIS_SCOPE_MISMATCH");
   const before = contentHash(records);

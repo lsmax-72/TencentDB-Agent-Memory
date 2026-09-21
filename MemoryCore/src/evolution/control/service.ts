@@ -15,6 +15,9 @@ const recordSchema = scopeSchema.extend({ id });
 const diagnosisEvidenceSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("isolated") }).strict(),
   z.object({ mode: z.literal("history"), max_related: z.number().int().min(1).max(5) }).strict(),
+  //: Caller-named evidence, for experiments that must supply the two independent
+  //: failures the skill_defect rule needs without scanning unrelated history.
+  z.object({ mode: z.literal("explicit"), record_ids: z.array(id).min(1).max(5) }).strict(),
 ]);
 const kind = z.enum(["trace", "diagnosis", "candidate", "attempt", "review", "adoption", "playbook", "job"]);
 const profileSchema = scopeSchema.extend({

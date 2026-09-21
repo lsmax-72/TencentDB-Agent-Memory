@@ -102,3 +102,26 @@ describe("history and restart", () => {
     expect(() => importHistoricalEvolutionRecords(store, file, root, { team_id: "team", agent_id: "agent", owner_user_id: "owner" })).toThrow("BUNDLE_HASH_MISMATCH");
   });
 });
+
+describe("explicit evidence mode", () => {
+  it("uses exactly the named records and no store history", async () => {
+    // The skill_defect route needs two independent failures. History mode met
+    // that by scanning the store, which is how an experiment ended up reading
+    // its own earlier note. Explicit mode meets the rule without the scan.
+    const { store } = setup(); profile(store);
+    const source = trace(store, "run-a");
+    const second = trace(store, "run-b");
+    const unrelated = trace(store, "run-c");
+    const seen: string[] = [];
+    const model: DiagnosisModel = { modelId: "offline-test", tokenCeiling: 50, complete: async input => {
+      for (const record of [source, second, unrelated]) if (input.evidence.includes(record.id)) seen.push(record.id);
+      return { text: JSON.stringify({ route: "skill_defect", explanation: "two runs failed the same way",
+        evidence: [source, second].map(record => ({ record_id: record.id, observation: "cited" })) }), input_tokens: 5, output_tokens: 5 };
+    } };
+    const result = await diagnose(store, source, [second], { mode: "explicit", record_ids: [second.id] }, model, "attempt-explicit");
+    expect(seen.sort()).toEqual([source.id, second.id].sort());
+    expect([...(result.payload.evidence_record_ids ?? [])].sort()).toEqual([source.id, second.id].sort());
+    expect(result.status).toBe("DIAGNOSED");
+    expect(unrelated.id).not.toBe(second.id);
+  });
+});

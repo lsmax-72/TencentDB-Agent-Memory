@@ -1,4 +1,4 @@
-import { diagnose, type DiagnosisEvidencePolicy } from "./diagnosis.js";
+import { diagnose, type DiagnosisEvidencePolicy, type DiagnosisEvidenceRequest } from "./diagnosis.js";
 import type { ResolveReviewBinding, ReviewBinding } from "./model-bindings.js";
 import { contentHash, EvolutionStore } from "./store.js";
 import { EvolutionError, type EvolutionProfile, type EvolutionRecord } from "./types.js";
@@ -24,14 +24,15 @@ export class EvolutionDispatcher {
   private stopping = false;
   constructor(private readonly store: EvolutionStore, private readonly options: DispatcherOptions) {}
 
-  enqueue(trace: EvolutionRecord, retry?: { previous: EvolutionRecord; requestId: string }, evidence?: { mode: "isolated" } | { mode: "history"; max_related: number }): EvolutionRecord {
+  enqueue(trace: EvolutionRecord, retry?: { previous: EvolutionRecord; requestId: string }, evidence?: DiagnosisEvidenceRequest): EvolutionRecord {
     if (trace.kind !== "trace" || trace.origin !== "runtime") throw new EvolutionError(409, "LIVE_TRACE_REQUIRED");
     if (retry && (retry.previous.origin !== "runtime" || retry.previous.payload.job_type !== "diagnosis"
       || retry.previous.payload.source_id !== trace.id || retry.previous.team_id !== trace.team_id
       || !["INFRA_ERROR", "RECONCILE_REQUIRED", "NEEDS_EVIDENCE"].includes(retry.previous.status) && !retry.previous.status.startsWith("BLOCKED_"))) throw new EvolutionError(409, "RETRY_REQUIRES_TERMINAL_JOB");
     const policy = retry ? this.diagnosisEvidencePolicy(retry.previous.payload) : this.diagnosisEvidencePolicy(evidence);
     const key = retry ? `${trace.id}/diagnosis/retry/${retry.previous.id}/${retry.requestId}`
-      : policy.mode === "history" ? `${trace.id}/diagnosis/history/${policy.max_related}` : `${trace.id}/diagnosis`;
+      : policy.mode === "history" ? `${trace.id}/diagnosis/history/${policy.max_related}`
+      : policy.mode === "explicit" ? `${trace.id}/diagnosis/explicit/${[...policy.record_ids].sort().join(",")}` : `${trace.id}/diagnosis`;
     const existing = this.store.find(trace.team_id, "job", key);
     if (existing) return existing; // Re-reporting completion is not permission to retry a paid call.
     const profile = this.store.profile(trace.team_id, trace.agent_id);
@@ -48,7 +49,8 @@ export class EvolutionDispatcher {
       payload: { job_type: "diagnosis", source_id: trace.id, source_hash: trace.artifact_hash,
         profile_hash: profile ? contentHash(profile) : null, review_binding_id: binding?.id ?? null,
         review_binding_hash: binding?.fingerprint ?? null, retry_of: retry?.previous.id ?? null,
-        evidence_mode: policy.mode, max_related: policy.max_related,
+        evidence_mode: policy.mode,
+        ...(policy.mode === "explicit" ? { evidence_record_ids: policy.record_ids } : { max_related: policy.max_related }),
       },
     }, key, trace.owner_user_id);
   }
@@ -56,6 +58,11 @@ export class EvolutionDispatcher {
   private diagnosisEvidencePolicy(value?: Record<string, unknown>): DiagnosisEvidencePolicy {
     const mode = value && "evidence_mode" in value ? value.evidence_mode : value?.mode;
     const maxRelated = value?.max_related;
+    const recordIds = value && "record_ids" in value ? value.record_ids : value?.evidence_record_ids;
+    if (mode === "explicit" && Array.isArray(recordIds) && recordIds.length >= 1 && recordIds.length <= 5
+      && recordIds.every(id => typeof id === "string" && id.length > 0)) {
+      return { mode: "explicit", record_ids: recordIds as string[] };
+    }
     if (mode === "history" && Number.isInteger(maxRelated) && Number(maxRelated) >= 1 && Number(maxRelated) <= 5) {
       return { mode, max_related: Number(maxRelated) };
     }
@@ -252,6 +259,20 @@ export class EvolutionDispatcher {
         if (related.length === evidencePolicy.max_related) break;
         if (record.id !== source.id && record.origin === "runtime" && record.agent_id === source.agent_id && record.owner_user_id === source.owner_user_id
           && record.payload.outcome === "FAIL" && await this.options.authorize(record, profile)) related.push(record);
+      }
+    }
+    if (evidencePolicy.mode === "explicit") {
+      // Named evidence only, and it must satisfy exactly the same scope rules a
+      // scanned trace would: same team/agent/owner, runtime trace, FAIL outcome.
+      // A caller cannot use this to pull in another tenant's or user's record.
+      for (const recordId of evidencePolicy.record_ids) {
+        const record = this.store.get(recordId);
+        if (!record || record.id === source.id || record.team_id !== source.team_id || record.agent_id !== source.agent_id
+          || record.owner_user_id !== source.owner_user_id || record.kind !== "trace" || record.origin !== "runtime"
+          || record.payload.outcome !== "FAIL" || !await this.options.authorize(record, profile)) {
+          block("NEEDS_EVIDENCE", "EXPLICIT_EVIDENCE_NOT_USABLE"); return;
+        }
+        related.push(record);
       }
     }
     // Recheck after asynchronous related-evidence reads, immediately before the paid operation.
