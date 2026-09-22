@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -20,6 +21,7 @@ const POOL = "/tmp/lcb14b/fullpool/test6.jsonl";
 const PYTHON = "/Users/lsmax/Coder/EvoAgentBench/.venv-tdai/bin/python";
 const LCB_REPO = "/Users/lsmax/Coder/LiveCodeBench";
 const available = existsSync(POOL) && existsSync(PYTHON) && existsSync(LCB_REPO);
+const INLINE_PYTHON = execFileSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).trim();
 
 const spec: BenchmarkFixtureSpec = {
   revision: "1",
@@ -48,6 +50,72 @@ for i in range(1, 10):
             total += i * j
 print(total)
 `;
+
+const inlineSpec = (testsPath: string): BenchmarkFixtureSpec => ({
+  revision: "inline-1",
+  python_executable: INLINE_PYTHON,
+  solution_path: "solution.py",
+  default_limits: spec.default_limits,
+  tasks: [{
+    task_id: "inline-task",
+    title: "Inline task",
+    goal: "Produce the expected output.",
+    task_input: "Read standard input and write the result.",
+    tests_path: testsPath,
+  }],
+});
+
+describe("benchmark fixture inline tests", () => {
+  it("accepts a correct solution and rejects a wrong one", async () => {
+    const root = await mkdtemp(join(tmpdir(), "benchmark-inline-"));
+    const testsPath = join(root, "tests.json");
+    await writeFile(testsPath, JSON.stringify([
+      { input: "alpha\n", output: "ALPHA\n" },
+      { input: "beta\n", output: "BETA\n" },
+    ]), "utf8");
+    const inline = inlineSpec(testsPath);
+    const evaluationCase = benchmarkCaseSet(inline).cases[0];
+    const adapter = new BenchmarkFixtureAdapter(inline);
+    const prepared = await adapter.prepare({ evaluation_case: evaluationCase, arm: "BASELINE", session_id: "inline" });
+    const solution = join(prepared.workspace_dir, inline.solution_path);
+    const context = { workspace_dir: prepared.workspace_dir, changed_paths: [], tool_calls: [],
+      commands: prepared.commands, schemas: prepared.schemas };
+    try {
+      await writeFile(solution, "print(input().upper())\n", "utf8");
+      const passed = await prepared.commands.grade(context);
+      expect(passed.exit_code).toBe(0);
+      expect(JSON.parse(passed.output)).toEqual({ passed: 2, total: 2, failed_cases: [] });
+
+      await writeFile(solution, "print('wrong')\n", "utf8");
+      const failed = await prepared.commands.grade(context);
+      expect(failed.exit_code).toBe(1);
+      expect(JSON.parse(failed.output)).toEqual({ passed: 0, total: 2, failed_cases: [0, 1] });
+    } finally {
+      await prepared.dispose?.();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("turns a missing tests file into an infrastructure error", async () => {
+    const root = await mkdtemp(join(tmpdir(), "benchmark-inline-missing-"));
+    const inline = inlineSpec(join(root, "missing.json"));
+    const evaluationCase = benchmarkCaseSet(inline).cases[0];
+    const adapter = new BenchmarkFixtureAdapter(inline);
+    const prepared = await adapter.prepare({ evaluation_case: evaluationCase, arm: "BASELINE", session_id: "missing" });
+    const context = { workspace_dir: prepared.workspace_dir, changed_paths: [], tool_calls: [],
+      commands: prepared.commands, schemas: prepared.schemas };
+    try {
+      await writeFile(join(prepared.workspace_dir, inline.solution_path), "print(input())\n", "utf8");
+      await expect(prepared.commands.grade(context)).rejects.toMatchObject({
+        kind: "INFRA",
+        code: "ORACLE_EXECUTION_ERROR",
+      });
+    } finally {
+      await prepared.dispose?.();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe.skipIf(!available)("benchmark fixture adapter", () => {
   it("grades through the real oracle: gold passes, empty and missing fail", async () => {

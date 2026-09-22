@@ -26,6 +26,8 @@ Exit codes are part of the contract, because the Oracle asserts on them:
 Usage:
   benchmark_code_grader.py --pool <pool.jsonl> --task <id> \
       --solution <workspace>/solution.py [--lcb-repo <dir>] [--timeout 6]
+  benchmark_code_grader.py --tests <cases.json> --solution <workspace>/solution.py \
+      [--timeout-seconds 30]
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -99,7 +102,56 @@ def grade(args: argparse.Namespace) -> int:
     return 0 if total > 0 and passed == total else 1
 
 
+def grade_inline(args: argparse.Namespace) -> int:
+    # Deliberately no "solution file is missing" pre-check: an agent that never
+    # wrote a submission has failed the task, and that must stay a graded
+    # failure (see benchmark-code-fixture.test.ts). Instrument faults are
+    # reported only for the tests file and for an unusable grader.
+    with Path(args.tests).open() as handle:
+        cases = json.load(handle)
+    if not isinstance(cases, list):
+        raise ValueError("inline tests must be a JSON array")
+    for index, case in enumerate(cases):
+        if (not isinstance(case, dict) or set(case) != {"input", "output"}
+                or not isinstance(case["input"], str) or not isinstance(case["output"], str)):
+            raise ValueError(f"invalid inline test case at index {index}")
+
+    failed_cases: list[int] = []
+    for index, case in enumerate(cases):
+        try:
+            completed = subprocess.run(
+                [sys.executable, args.solution],
+                input=case["input"],
+                capture_output=True,
+                text=True,
+                timeout=args.timeout_seconds,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            failed_cases.append(index)
+            continue
+        if completed.returncode != 0 or completed.stdout.rstrip() != case["output"].rstrip():
+            failed_cases.append(index)
+
+    total = len(cases)
+    passed = total - len(failed_cases)
+    print(json.dumps({"passed": passed, "total": total, "failed_cases": failed_cases}))
+    return 0 if total > 0 and passed == total else 1
+
+
 def main() -> int:
+    if "--tests" in sys.argv[1:]:
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--tests", required=True)
+        parser.add_argument("--solution", required=True)
+        parser.add_argument("--timeout-seconds", type=float, default=30)
+        args = parser.parse_args()
+        try:
+            return grade_inline(args)
+        except Exception as error:  # noqa: BLE001 - the exit code is the contract
+            print(f"GRADER_UNAVAILABLE:{type(error).__name__}:{error}")
+            return GRADER_UNAVAILABLE
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--pool", required=True)
     parser.add_argument("--task", required=True)

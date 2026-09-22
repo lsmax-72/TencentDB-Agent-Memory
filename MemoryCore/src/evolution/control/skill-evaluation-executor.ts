@@ -18,8 +18,8 @@ import { EvolutionError, type EvolutionProfile, type EvolutionRecord } from "./t
 const configSchema = z.object({
   id: z.string().min(1).max(180), instance_id: z.string().min(1), team_id: z.string().min(1), agent_id: z.string().min(1),
   // Two suites share everything except where the cases come from. `AC_REGRESSION_V1`
-  // is the in-product acceptance set; `BENCHMARK_CODE_V1` reads a frozen external
-  // task pool through `BenchmarkFixtureAdapter`. Widening this enum is the whole
+  // is the in-product acceptance set; `BENCHMARK_CODE_V1` reads a frozen task set
+  // through `BenchmarkFixtureAdapter`. Widening this enum is the whole
   // integration: the runner, the agent adapter and the persistence path are reused.
   suite_kind: z.enum(["AC_REGRESSION_V1", "BENCHMARK_CODE_V1"]),
   python_executable: z.string().min(1), nanobot_repo: z.string().min(1),
@@ -121,7 +121,7 @@ const benchmarkTasksSchema = z.object({
   revision: z.string().min(1),
   tasks: z.array(z.object({
     task_id: z.string().min(1), title: z.string().min(1), goal: z.string().min(1),
-    task_input: z.string().min(1), critical: z.boolean().optional(),
+    task_input: z.string().min(1), tests_path: z.string().min(1).optional(), critical: z.boolean().optional(),
   }).strict()).min(1).max(500),
 }).strict();
 
@@ -153,17 +153,28 @@ const BENCHMARK_DEFAULT_LIMITS = {
   max_output_tokens: 24_000, max_total_tokens: 500_000, timeout_ms: 900_000,
 };
 
-/** Resolve the frozen task pool into a fixture spec, refusing partial config. */
+/** Resolve the frozen task set into a fixture spec, refusing ungradable tasks. */
 function benchmarkSpec(config: EvaluationConfig): BenchmarkFixtureSpec {
   const { benchmark_pool_path: pool, benchmark_tasks_path: tasksPath, benchmark_lcb_repo: lcbRepo } = config;
   const solutionPath = config.benchmark_solution_path ?? "solution.py";
-  if (!pool || !tasksPath || !lcbRepo) throw new Error("BENCHMARK_CONFIG_INCOMPLETE");
-  for (const path of [pool, tasksPath, lcbRepo]) if (!isAbsolute(path)) throw new Error("BENCHMARK_PATH_NOT_ABSOLUTE");
-  // The pool is large, so no mode/size gate here; only its existence is required.
-  if (!statSync(pool).isFile()) throw new Error("BENCHMARK_POOL_NOT_FILE");
+  if (!tasksPath) throw new Error("BENCHMARK_TASKS_PATH_REQUIRED");
+  if (!isAbsolute(tasksPath)) throw new Error("BENCHMARK_PATH_NOT_ABSOLUTE");
   if (!statSync(tasksPath).isFile()) throw new Error("BENCHMARK_TASKS_NOT_FILE");
-  if (!statSync(lcbRepo).isDirectory()) throw new Error("BENCHMARK_LCB_REPO_NOT_DIR");
   const parsed = benchmarkTasksSchema.parse(JSON.parse(readFileSync(tasksPath, "utf8")));
+  for (const task of parsed.tasks) {
+    if (task.tests_path) {
+      if (!isAbsolute(task.tests_path)) throw new Error(`BENCHMARK_TESTS_PATH_NOT_ABSOLUTE:${task.task_id}`);
+      if (!statSync(task.tests_path).isFile()) throw new Error(`BENCHMARK_TESTS_NOT_FILE:${task.task_id}`);
+    } else if (!pool || !lcbRepo) {
+      throw new Error(`BENCHMARK_TASK_GRADING_SOURCE_MISSING:${task.task_id}`);
+    }
+  }
+  if (parsed.tasks.some(task => !task.tests_path)) {
+    if (!isAbsolute(pool!) || !isAbsolute(lcbRepo!)) throw new Error("BENCHMARK_PATH_NOT_ABSOLUTE");
+    // The pool is large, so no mode/size gate here; only its existence is required.
+    if (!statSync(pool!).isFile()) throw new Error("BENCHMARK_POOL_NOT_FILE");
+    if (!statSync(lcbRepo!).isDirectory()) throw new Error("BENCHMARK_LCB_REPO_NOT_DIR");
+  }
   return { revision: parsed.revision, pool_path: pool, python_executable: config.python_executable,
     solution_path: solutionPath, lcb_repo: lcbRepo, default_limits: BENCHMARK_DEFAULT_LIMITS, tasks: parsed.tasks };
 }

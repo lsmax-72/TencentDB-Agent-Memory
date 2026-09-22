@@ -41,6 +41,8 @@ export interface BenchmarkTaskSpec {
   title: string;
   goal: string;
   task_input: string;
+  /** Local JSON cases used instead of the external benchmark pool. */
+  tests_path?: string;
   /** Per-task overrides; the spec default is used otherwise. */
   limits?: Partial<CaseLimits>;
   critical?: boolean;
@@ -48,14 +50,14 @@ export interface BenchmarkTaskSpec {
 
 export interface BenchmarkFixtureSpec {
   revision: string;
-  /** Frozen pool the grader reads (one JSON object per line). */
-  pool_path: string;
+  /** Frozen pool used by tasks without inline tests (one JSON object per line). */
+  pool_path?: string;
   /** Pinned interpreter that owns the benchmark dependencies. */
   python_executable: string;
   /** Where the agent is asked to leave its program, relative to the workspace. */
   solution_path: string;
-  /** Checkout that provides `lcb_runner` to the grader. */
-  lcb_repo: string;
+  /** Checkout used by tasks without inline tests to provide `lcb_runner`. */
+  lcb_repo?: string;
   default_limits: CaseLimits;
   tasks: BenchmarkTaskSpec[];
 }
@@ -105,7 +107,9 @@ export class BenchmarkFixtureAdapter implements FixtureAdapter {
     private readonly graderScript: string = defaultGraderScript(),
   ) {
     if (!spec.tasks.length) throw new Error("benchmark fixture spec has no tasks");
-    if (!spec.pool_path || !spec.python_executable) throw new Error("benchmark fixture spec is incomplete");
+    if (!spec.python_executable || (spec.tasks.some(task => !task.tests_path) && (!spec.pool_path || !spec.lcb_repo))) {
+      throw new Error("benchmark fixture spec is incomplete");
+    }
   }
 
   async prepare(input: {
@@ -142,7 +146,7 @@ export class BenchmarkFixtureAdapter implements FixtureAdapter {
             // A missing submission is a graded failure, never an infra pass.
             return { exit_code: 1, output: JSON.stringify({ error: "SOLUTION_MISSING", path: this.spec.solution_path }) };
           }
-          const graded = await this.runGrader(task.task_id, context.workspace_dir);
+          const graded = await this.runGrader(task, context.workspace_dir);
           // Exit 2 is the grader's "I could not run" code. Letting it fall through
           // as an ordinary non-zero exit would record a broken instrument as a
           // task failure, which is indistinguishable from a null effect -- the
@@ -160,15 +164,13 @@ export class BenchmarkFixtureAdapter implements FixtureAdapter {
     };
   }
 
-  private runGrader(taskId: string, workspace: string): Promise<{ exit_code: number; output: string }> {
+  private runGrader(task: BenchmarkTaskSpec, workspace: string): Promise<{ exit_code: number; output: string }> {
     return new Promise((resolveRun) => {
-      const child = spawn(this.spec.python_executable, [
-        this.graderScript,
-        "--pool", this.spec.pool_path,
-        "--task", taskId,
-        "--solution", join(workspace, this.spec.solution_path),
-        "--lcb-repo", this.spec.lcb_repo,
-      ], { stdio: ["ignore", "pipe", "pipe"] });
+      const args = task.tests_path
+        ? [this.graderScript, "--tests", task.tests_path, "--solution", join(workspace, this.spec.solution_path)]
+        : [this.graderScript, "--pool", this.spec.pool_path!, "--task", task.task_id,
+            "--solution", join(workspace, this.spec.solution_path), "--lcb-repo", this.spec.lcb_repo!];
+      const child = spawn(this.spec.python_executable, args, { stdio: ["ignore", "pipe", "pipe"] });
       let output = "";
       child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
       child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
