@@ -1038,6 +1038,25 @@ evo-abb79a22...  知识注入 k1     ← 我早先那次手写的
 
 ---
 
+### 10.17 两个操作层面的教训（会重复咬人的那种）
+
+**① `/tmp` 不是耐久位置。** 9/22 00:00 左右，128MB 的评测题池 `test6.jsonl` 被 macOS 的 `/tmp` 定期清理删掉了——它是 9/17 创建的，正好过了 3 天。**已完成的实验结果没事**（结果存在 evolution store 里），但**所有新评测当场失效**，而且当时没有任何副本。
+
+- 恢复方式：该文件就是 HuggingFace `livecodebench/code_generation_lite` 里的 `test6.jsonl`。**huggingface.co 在这台机器上不通，`hf-mirror.com` 通**，且镜像不认 `release_v6` 这个 rev，要用默认分支：
+  `https://hf-mirror.com/datasets/livecodebench/code_generation_lite/resolve/main/test6.jsonl`（134,303,240 字节，175 题）。
+- **耐久副本现在放在 `/Users/lsmax/Coder/lcb-data/test6.jsonl`**，评测时再拷进容器挂载点。判分器复核：abc387_b 的 gold 解 → 43/43。
+- **教训**：跑实验用的**数据、脚本、结果**都不能只放在 `/tmp`。结果这次侥幸在 store 里，脚本（我那一堆 `/tmp/*.py`）下次就会被清掉。
+
+**② 这个题库**没有**题族。** 为了回答"结构放大器的效果能不能在**同族其它题**上复用"，我在 175 题里做了两轮筛选：
+
+- 关键词筛：`x_i <= x_{A_i}` 形式只命中 `abc387_f` 与 `abc400_g`，而 `abc400_g` 实际是"最大配对权重"题（正则匹配到的是符号写法，不是同一结构）；
+- **用本地模型对 26 道计数/取模类 medium/hard 题逐题判定"核心结构是否为函数图"**：只判出 `abc387_f`（源题）、`abc392_c`、`arc195_e`。后两个一个其实是父指针树（误判），`abc392_c`（"Bib"，置换求逆再复合）虽然确实是置换结构，但**题目平凡、处于天花板**：实测 baseline 3/3、candidate 3/3，**无 headroom**。
+
+> **结论：contest 题天然"一族一题"，用这个池子无法回答"题族复用"。
+> 要回答它，必须自己造一个同结构的题族（并给每道题配精确 oracle）。**
+
+---
+
 ---
 
 ## 附：证据索引
