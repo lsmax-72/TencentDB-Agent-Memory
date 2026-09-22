@@ -1059,6 +1059,133 @@ evo-abb79a22...  知识注入 k1     ← 我早先那次手写的
 
 ---
 
+## 十一、2026-09-22：题族复用验尸实验（最后一次）——**未通过预注册判据**
+
+这一节回答了 10.17② 留下的唯一未答问题：**为一族题写一节结构，它在该族内的其它题上能复用吗？** 结论：**不能判定为有效**。
+
+### 11.1 冻结的东西（跑之前 SHA256 冻结，跑完没改）
+
+自造三题同族（函数图 + 前缀和计数），全部由我编写并冻结：
+
+| 题 | 变化点 | 与 p1 的关系 |
+|---|---|---|
+| **p1** | 值域 `[1..M]`，计数无限制 | 源题，**候选只能看它** |
+| **p2** | 值域换成给定升序集合 `S` | 留出题（holdout） |
+| **p3** | 计数条件改成 `max = m0`，即 `F(m0)−F(m0−1)` | 留出题（holdout） |
+
+- 三题共用同一套分解（Kahn 剥环 + 每节点前缀积 DP），**分量之间取乘积**是关键洞察；
+- oracle 由独立暴力枚举对拍：**600 个随机小规模用例，0 处不一致**；N=M=800 时 0.13s；
+- 隐测试挡住暴力：最大规模 N=M=2000，枚举 `M^N` 不可能（顺带纠正一个我自己的蠢错误：我一度写了个"暴力解"跑出 7/24，其实是我**算错了题**，不是超时）。
+
+### 11.2 第一步就撞上两个结构性事实（这是本轮最有价值的发现，且写在代码里）
+
+我原本的计划是：跑 p1 → 拿到失败 → 诊断 → 生成候选 → 在 p2/p3 上测。前两步就被产品设计挡住了。
+
+**① 评测证据永远不进诊断——飞轮的"评测"齿和"积累"齿在代码里是断开的。**
+
+```
+service.ts:353  // Benchmark evidence is research-only. It is not an adoption proof and never dispatches diagnosis.
+service.ts:434  // Development/test runs are visible research evidence, never diagnosis inputs.
+diagnosis.ts:34 if (trace.kind !== "trace" || trace.origin !== "runtime") throw ... "LIVE_TRACE_REQUIRED"
+```
+
+也就是说：**你没法用 benchmark 闭环自进化**。`benchmark/*` 那一组 action 只是"记录研究证据"，永远不派发诊断。想产出候选，只能靠**真实生产流量**产生 `task/complete` 轨迹。
+
+**② 更狠的一条：成功永远不会被固化，只有失败才会。**
+
+```
+proposals.ts:12   if (source.payload.route !== "skill_defect") throw ... "SKILL_DIAGNOSIS_REQUIRED"
+diagnosis.ts:60   route = parsed.route === "skill_defect" && 被引用的 FAIL 轨迹 < 2 ? "unknown" : ...
+dispatcher.ts:104 const stage = {skill_defect:"skill", memory_gap:"memory_l1", wiki_gap:"wiki"}[route]
+```
+
+`skill_defect` 需要**至少 2 条被明确引用的 FAIL 轨迹**；`no_change / infrastructure / capability_gap / unknown` 四个路由**不产出任何候选**。后果：
+
+> **它只能"修缺陷"，不能"固化能力"。模型已经做对的题，飞轮一点东西都学不到。**
+> 这直接限制了自进化的适用面——它只在"模型持续做错"的地方有戏。
+
+**③ 附带发现：评测 attempt 不存 agent 转写。** attempt payload 只有 `paired_results / gate_result / cost_summary`，**没有 transcript**。所以评测路径连一条"真实轨迹"都产不出来，必须另开旁路采集。我用同一个 `nanobot_runner.py` 桥接层直跑 agent、把真实 `tool_events` + `final_output` 如实写进 `task/complete`——**没有任何一条轨迹是我编的**。
+
+### 11.3 p1 上拿到的是真失败，而且是同一个根因
+
+6 次 p1（同预算：10 次模型调用 / 20 次工具调用 / 900s，全新工作区）：
+
+| run | 得分 | 说明 |
+|---|---|---|
+| a1 | **24/24** | 自己写暴力对拍 + 测最坏形状 |
+| a2 | **15/24** | 把所有环当成一组（强制共享同一取值） |
+| a3 | **24/24** | |
+| b1 | **18/24** | 根节点之间**求和**而非**求积** |
+| b2 / b3 | **24/24** | |
+
+→ **4 PASS / 2 FAIL**。两条失败是同一类：**分量必须相乘、不能共享取值/相加**。而 agent 自己在 `final_output` 里**已经写出了正确修法**，只是 10 次调用预算用尽没改成代码。污染审计：**0 次网络访问、0 次读取 `/data` 下任何测试/配置**。
+
+### 11.4 候选技能
+
+原生链路一路走通：`task/complete`（真实转写）→ `diagnosis/request`（explicit，引用两条 FAIL）→ 路由 **`skill_defect`** → 自动接力 proposal → 候选 `evo-711e54d7`，`operation: update`，`base_version: 26`，状态 `NEEDS_EVIDENCE`（**按约束未采纳**）。
+
+它新增的 9 行**正好就是答案**：
+
+> `## Domain pattern (functional graph with per-node constraints x_i <= x_{A_i}, counting labelings)`
+> … **CRITICAL: components are independent — the answer is the PRODUCT over components …, NOT a single sum over v of the product over ALL cycle nodes.**
+
+（还顺带混进一条无关的 pitfall #12，来自别的会话——候选里**有噪声**。）
+
+### 11.5 判定：两条预注册判据都没过
+
+留出实验：p2/p3 各 10 个 repeat，**同一 repeat 内两臂背靠背执行**（臂序按奇偶交替），同预算、全新工作区、无网络；**判定用只在宿主存在、容器从未见过的同分布新用例**（gold 复核 24/24、32/32），容器里那份可见的测试只作为参考值记录。
+
+| 口径 | p2 (base→cand) | p3 (base→cand) | 合并 b→c / c→b | 精确 McNemar |
+|---|---|---|---|---|
+| ITT（4 次仪器故障算失败） | 1/10 → 5/10 | 2/10 → 4/10 | **8 / 2** | **p=0.1094** |
+| per-protocol（故障格重跑一次） | 2/10 → 5/10 | 3/10 → 5/10 | **9 / 4** | **p=0.2668** |
+
+- **两种口径都远未达到预注册的 `p ≤ 0.05`**；n=20 对、9:4 这个比例需要大约 15:5 才够显著。
+- **预注册的"不得退化"是净额判据**（每个 holdout 上 `c→b ≤ b→c`），这一条**通过**：p2 2 ≤ 5、p3 2 ≤ 4。
+  （但逐对看确实有 **4 对**从满分掉下来——净额判据宽松，这个事实照实记录。）
+- 方向是一致的：平均通过率 0.494 → 0.675（+18pp），满分次数 5/20 → 10/20。
+
+> **冻结判据下的结论：未观察到跨题复用。**
+> 点估计为正（与 10.15 的"结构放大器"一致——候选注入的正是该族需要的任务结构），
+> 但未达预注册显著性门槛。按协议"只允许的两种解释"，这属于第 2 种：**不通过**。
+
+**必须说明的设计限制**：候选臂注入的是**整份技能**（20897 字符，其中相关新增只有约 1.4k 字符），基线是 18512 字符——即"v26+新增节 vs v26"，**不是"只加那一节"**。这与 10.15 发现的"技能越长、那一节越显眼、效果越靠长度"高度吻合，也解释了高方差：**真正起作用的信号被 20k 字符的无关内容稀释了。**
+
+### 11.6 与协议文本的四处偏差（照实记录，不做事后辩护）
+
+| # | 协议原文 | 实际做法 | 判断 |
+|---|---|---|---|
+| 1 | 规模 `N,M ≤ 800` | 冻结并实际使用 **`N,M ≤ 2000`** | 文档与产物不一致；但两个规模都让枚举 `M^N` 不可能，约束 3 的**意图**成立 |
+| 2 | "题 2、题 3 交替排队（2,3,2,3,…）" | 每个 repeat 内**两臂背靠背**（p2 base+cand → p3 base+cand），臂序按奇偶交替 | 交错**意图**（控制时间漂移）达到，形式与原文不同 |
+| 3 | "**断网**" | 未做网络层封锁，改为**审计**：40 次运行 **0 次网络访问、0 次越界读文件** | 弱于原文；但这两道自造题在互联网上不存在，无题可抄 |
+| 4 | 污染缓解：命中测试路径即标 `CONTAMINATED` 并剔除 | 判定改用**宿主独享、容器从未见过的同分布新用例** | **强于原文**——满分即证明是通用解，抄测试拿不到分 |
+
+### 11.7 这一轮又踩到并修掉的三个坑
+
+| 坑 | 现象 | 处置 |
+|---|---|---|
+| **explicit 证据里列了源轨迹自己** | 整条请求被判 `EXPLICIT_EVIDENCE_NOT_USABLE`，像是"证据全都不可用"，实际只是重复列了源 | **已修**：拆出独立原因码 `EXPLICIT_EVIDENCE_INCLUDES_SOURCE`（`dispatcher.ts`，含测试） |
+| **`AGENT_ABORTED` 不带原因** | `_completed_payload` 不含 `result.error`，4 次中止只显示"2 次模型调用后死掉"，无法区分 agent 放弃和未归类的传输故障 | **已修**：桥接层回传 `abort_reason`，adapter 把它写进 `output_evidence`（含测试） |
+| **测试文件对 agent 可读** | agent 与 grader 同 uid、无沙箱（adapter 注释自陈 "is a barrier, not a sandbox"），`cat /data/config/family/tests/*.json` 就能抄答案 | 判定改用**宿主独享新用例**；满分即证明是通用解，抄不来 |
+
+### 11.8 一个月实验的总答案
+
+**"自进化有效果吗？"——按产品现在的实现：没有可复现、可信的正面效果。**
+
+1. **作为知识通道：已证伪**（10.15：C≈B≈D，C vs B p=1.000）。
+2. **作为结构放大器：方向一致但无法稳定兑现**（10.15 单题 p=0.031；本节同族 n=20 p=0.27，且有 4 次回退）。
+3. **结构对不上时明确有害**（10.16：7/10 → 0/10，p=0.0031）。
+4. **结构上它还被两处设计限死**：评测证据进不了诊断（只能靠生产流量）、成功永远不固化（只修缺陷）。
+5. **门禁没有重复也没有显著性检验**：单次运行约 9% 概率误报 `newly_fixed`（10.15）。
+
+**要继续走，必须改的是"路由与判据"，不是"多喂知识"**：
+任务特定结构必须**按任务路由**送达（产品里有 bm25 routing，评测器却无脑注入单个候选），
+且门禁必须加重复 + 显著性检验（成本约 ×10，需要产品侧决策）。
+
+---
+
+---
+
 ## 附：证据索引
 
 | 结论 | 文件 |
@@ -1084,3 +1211,13 @@ evo-abb79a22...  知识注入 k1     ← 我早先那次手写的
 | 硬编码隔离声明 | `scripts/evoagentbench/proxy_bridge.py` |
 | ContinualSkillBench 缺陷 | `docs/continualskillbench-instrument-audit.md` |
 | SWE-bench 缺陷 | `docs/swebench-instrument-audit.md` |
+| **评测证据永不派发诊断** | `MemoryCore/src/evolution/control/service.ts:353,434` |
+| **诊断只接受 runtime trace** | `MemoryCore/src/evolution/control/diagnosis.ts:34` |
+| **技能候选只由 `skill_defect` 生成（需 ≥2 条被引用的 FAIL）** | `proposals.ts:12`、`diagnosis.ts:60` |
+| 路由→生成阶段的映射（其余路由不产候选） | `MemoryCore/src/evolution/control/dispatcher.ts:104` |
+| 评测 attempt 不持久化 agent 转写 | `skill-evaluation-executor.ts` 的 attempt payload |
+| explicit 证据误列源轨迹的原因码 | `MemoryCore/src/evolution/control/dispatcher.ts`（`EXPLICIT_EVIDENCE_INCLUDES_SOURCE`） |
+| 中止原因可见性 | `nanobot_runner.py`（`abort_reason`）+ `nanobot-agent-adapter.ts` |
+| 通用 inline oracle（`--tests` 模式） | `MemoryCore/src/evolution/evaluation/fixtures/benchmark_code_grader.py` |
+| 冻结题族与协议 | `/Users/lsmax/Coder/family-autopsy/`（`PROTOCOL.md`、`FREEZE.sha256`） |
+| 本轮原始数据（去重后） | `family-autopsy/results/`（`holdout_final.jsonl`、`diagnosis.json`、`candidate_skill.md`） |
