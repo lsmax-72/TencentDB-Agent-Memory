@@ -303,6 +303,10 @@ async def _run(request: dict[str, Any]) -> dict[str, Any]:
             final_output=result.content or evidence.partial_output,
             stop_reason=result.stop_reason,
             task_failure_code=task_failure_code,
+            # Without this the abort reaches the caller as a bare AGENT_ABORTED and
+            # an unclassified transport failure is indistinguishable from an agent
+            # that gave up, so a run nobody can triage is scored as a task failure.
+            abort_reason=result.error,
         )
     if evidence.model_call_count > request["budget"]["max_model_calls"]:
         return _failure("TASK", "BUDGET_EXHAUSTED", "model call budget exceeded")
@@ -333,6 +337,7 @@ def _completed_payload(
     final_output: str,
     stop_reason: str | None,
     task_failure_code: str | None = None,
+    abort_reason: str | None = None,
 ) -> dict[str, Any]:
     observed_conditions_hash = _observed_conditions_hash(
         evidence.initial_messages,
@@ -350,6 +355,7 @@ def _completed_payload(
         "stop_reason": stop_reason,
         "observed_conditions_hash": observed_conditions_hash,
         **({"task_failure_code": task_failure_code} if task_failure_code else {}),
+        **({"abort_reason": str(abort_reason)[:2_000]} if abort_reason else {}),
     }
 
 

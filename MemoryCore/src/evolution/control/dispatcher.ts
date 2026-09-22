@@ -267,7 +267,11 @@ export class EvolutionDispatcher {
       // A caller cannot use this to pull in another tenant's or user's record.
       for (const recordId of evidencePolicy.record_ids) {
         const record = this.store.get(recordId);
-        if (!record || record.id === source.id || record.team_id !== source.team_id || record.agent_id !== source.agent_id
+        // Listing the source itself is a caller mistake, not unusable evidence:
+        // the source is always included, so naming it again reads as a rejection
+        // of perfectly good records. Say which mistake it is.
+        if (record && record.id === source.id) { block("NEEDS_EVIDENCE", "EXPLICIT_EVIDENCE_INCLUDES_SOURCE"); return; }
+        if (!record || record.team_id !== source.team_id || record.agent_id !== source.agent_id
           || record.owner_user_id !== source.owner_user_id || record.kind !== "trace" || record.origin !== "runtime"
           || record.payload.outcome !== "FAIL" || !await this.options.authorize(record, profile)) {
           block("NEEDS_EVIDENCE", "EXPLICIT_EVIDENCE_NOT_USABLE"); return;

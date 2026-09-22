@@ -152,6 +152,31 @@ describe("NanobotAgentAdapter", () => {
     expect(output.usage.total_tokens).toBe(2);
     expect(output.output_evidence[0].excerpt).toBe("partial result");
   });
+
+  it("keeps the abort reason so AGENT_ABORTED can be triaged", async () => {
+    const adapter = new NanobotAgentAdapter({
+      python_executable: "/python",
+      config_path: "/config.json",
+      invoke: async () => ({
+        ...success(),
+        stop_reason: "error",
+        task_failure_code: "AGENT_ABORTED" as const,
+        abort_reason: "model returned an empty completion",
+      }),
+    });
+
+    const output = await adapter.run({
+      evaluation_case: evaluationCase("AC-05"),
+      run_spec: runSpec("AC-05"),
+      workspace_dir: "/fixture/ac05",
+      session_id: "session-ac05",
+      skill_override: "",
+    });
+
+    expect(output.task_failure).toMatchObject({ code: "AGENT_ABORTED" });
+    expect(output.output_evidence.map(item => item.excerpt))
+      .toContain("model returned an empty completion");
+  });
 });
 
 function success() {

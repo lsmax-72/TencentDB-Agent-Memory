@@ -95,8 +95,35 @@ describe("explicit host completion to durable diagnosis (offline model double)",
     expect(job.payload).toMatchObject({ evidence_mode: "history", max_related: 2 });
     expect(test.store.find("team", "diagnosis", job.id)?.payload.evidence_record_ids).toEqual(modelEvidence.map(record => record.id));
   });
-  it("rejects history evidence limits outside 1 through 5", async () => {
-    const test = setup(); test.store.saveProfile(profile, 0); const target = source(test, "target");
+  it("names the caller mistake when explicit evidence lists the source trace", async () => {
+    const test = setup(); test.store.saveProfile(profile, 0);
+    const target = source(test, "target");
+    const other = source(test, "other");
+    // The source is always in the evidence set, so naming it again must be a
+    // distinct, actionable reason and not read as "no usable evidence at all".
+    await test.service.invoke("diagnosis/request", {
+      team_id: "team", id: target.id, evidence: { mode: "explicit", record_ids: [target.id, other.id] },
+    }, "test-user-key");
+    await test.dispatcher.idle();
+    const jobs = test.store.jobs(["NEEDS_EVIDENCE"]);
+    expect(jobs).toHaveLength(1);
+    expect(test.store.events(jobs[0].id).map(event => event.action)).toContain("JOB_EVIDENCE");
+    expect(JSON.stringify(test.store.events(jobs[0].id))).toContain("EXPLICIT_EVIDENCE_INCLUDES_SOURCE");
+    expect(test.complete).not.toHaveBeenCalled();
+  });
+  it("cites named related failures and lets the model see both traces", async () => {
+    const test = setup(); test.store.saveProfile(profile, 0);
+    const target = source(test, "target");
+    const related = source(test, "related");
+    const job = await test.service.invoke("diagnosis/request", {
+      team_id: "team", id: target.id, evidence: { mode: "explicit", record_ids: [related.id] },
+    }, "test-user-key") as EvolutionRecord;
+    await test.dispatcher.idle();
+    const modelEvidence = JSON.parse(test.complete.mock.calls[0][0].evidence) as Array<{ id: string }>;
+    expect(modelEvidence.map(record => record.id)).toEqual([target.id, related.id]);
+    expect(test.store.find("team", "diagnosis", job.id)?.payload.evidence_record_ids).toEqual([target.id, related.id]);
+  });
+  it("rejects history evidence limits outside 1 through 5", async () => {    const test = setup(); test.store.saveProfile(profile, 0); const target = source(test, "target");
     await expect(test.service.invoke("diagnosis/request", {
       team_id: "team", id: target.id, evidence: { mode: "history", max_related: 0 },
     }, "test-user-key")).rejects.toThrow();

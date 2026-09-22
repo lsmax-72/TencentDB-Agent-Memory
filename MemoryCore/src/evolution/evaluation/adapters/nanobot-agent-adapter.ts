@@ -67,6 +67,8 @@ export interface NanobotBridgeSuccess {
   stop_reason: string | null;
   observed_conditions_hash: `sha256:${string}`;
   task_failure_code?: "AGENT_TIMEOUT" | "AGENT_ABORTED" | "BUDGET_EXHAUSTED";
+  /** Why nanobot stopped early; carried so AGENT_ABORTED can be triaged. */
+  abort_reason?: string;
 }
 
 export interface NanobotBridgeFailure {
@@ -170,6 +172,12 @@ export class NanobotAgentAdapter implements AgentAdapter {
         uri: `nanobot://${encodeURIComponent(response.run_ref)}/observed-conditions`,
         excerpt: response.observed_conditions_hash,
       },
+      // A bare AGENT_ABORTED cannot be triaged; keep the reason with the output.
+      ...(response.abort_reason ? [{
+        kind: "agent_output" as const,
+        uri: `nanobot://${encodeURIComponent(response.run_ref)}/abort-reason`,
+        excerpt: response.abort_reason,
+      }] : []),
     ];
     return {
       observed_model_id: response.actual_model,
