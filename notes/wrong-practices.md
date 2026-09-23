@@ -1170,17 +1170,30 @@ dispatcher.ts:104 const stage = {skill_defect:"skill", memory_gap:"memory_l1", w
 
 ### 11.8 一个月实验的总答案
 
-**"自进化有效果吗？"——按产品现在的实现：没有可复现、可信的正面效果。**
+**范围限定（2026-09-22 读完官方博客后修正，对账见 `docs/official-blog-reconciliation.md`）**：
+
+> 我测的是**"从失败自动生成技能并采纳"**这条环（`diagnosis → candidate → gate → adoption`）。
+> 博客 §5 的 60%→80% 测的是**"检索并装配已有资产"**这条环（前序 Case → 后序 Case，四类资产组合，真实仓库任务）。
+> **两个环不同：我的阴性结果否不掉博客的数字，博客的阳性结果也覆盖不到我这条链路。**
+> "检索装配"这条链路**我没有测过，无结论**。
+
+**在我测的那条环上：没有可复现、可信的正面效果。**
 
 1. **作为知识通道：已证伪**（10.15：C≈B≈D，C vs B p=1.000）。
 2. **作为结构放大器：方向一致但无法稳定兑现**（10.15 单题 p=0.031；本节同族 n=20 p=0.27，且有 4 次回退）。
 3. **结构对不上时明确有害**（10.16：7/10 → 0/10，p=0.0031）。
 4. **结构上它还被两处设计限死**：评测证据进不了诊断（只能靠生产流量）、成功永远不固化（只修缺陷）。
 5. **门禁没有重复也没有显著性检验**：单次运行约 9% 概率误报 `newly_fixed`（10.15）。
+6. **新增（对账发现，代码事实）**：**评测路径把整份资产原样注入 prompt**（`minimal-runner.ts:354`），
+   **违反博客 §2.3.3 自己写的"渐进式暴露"原则**。所以我测的是**产品不会采用的一种投递方式**——
+   10.15"效果跟着注入文字长度走"更像是这种 off-design 投递造成的**注意力/长度效应**。
+   → 评测结论对生产行为的可外推性，比我原先以为的更差。
 
-**要继续走，必须改的是"路由与判据"，不是"多喂知识"**：
-任务特定结构必须**按任务路由**送达（产品里有 bm25 routing，评测器却无脑注入单个候选），
-且门禁必须加重复 + 显著性检验（成本约 ×10，需要产品侧决策）。
+**要继续走，必须改的是"投递方式与判据"，不是"多喂知识"**：
+
+1. **评测臂要按产品的投递方式构造**：实现渐进式暴露（只给名称/触发条件/用途 + 工具取细节），或至少**按任务路由 + 长度匹配**；
+2. **门禁加重复 + 显著性检验 + 固定子集 + 负迁移分类**（博客 §5.3 自己列的就是这四条；成本约 ×10，需产品侧决策）；
+3. **素材换成真实仓库任务**（如博客 §2.7 那条 CodeGraph impact"读档"案例），而不是自造题族。
 
 ---
 
@@ -1221,3 +1234,6 @@ dispatcher.ts:104 const stage = {skill_defect:"skill", memory_gap:"memory_l1", w
 | 通用 inline oracle（`--tests` 模式） | `MemoryCore/src/evolution/evaluation/fixtures/benchmark_code_grader.py` |
 | 冻结题族与协议 | `/Users/lsmax/Coder/family-autopsy/`（`PROTOCOL.md`、`FREEZE.sha256`） |
 | 本轮原始数据（去重后） | `family-autopsy/results/`（`holdout_final.jsonl`、`diagnosis.json`、`candidate_skill.md`） |
+| **官方博客与实测对账** | `docs/official-blog-reconciliation.md` |
+| **评测器整份注入（违反渐进式暴露）** | `MemoryCore/src/evolution/evaluation/runner/minimal-runner.ts:354` |
+| 博客 §2.3.3 渐进式暴露原则 | `/Users/lsmax/Develop/Clippings/任何错误只犯一次：TencentDB Agent Memory 的团队记忆实践.md` |
